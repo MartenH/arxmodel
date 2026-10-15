@@ -1,6 +1,7 @@
 module arxmodel
 
 import flatxml
+import flatxml.xsd
 
 // The schema's rules as flatxml's. flatxml names an aggregation by its parent's and its
 // children's element names; the schema by the parent's type and the role. So each rule here
@@ -18,39 +19,47 @@ import flatxml
 //   items times as often as an item holds each.
 // - A split key with a part that did not resolve is not used: one child each (the part is
 //   reported by the rules already).
+// - Keys are flatxml key paths: '' for the item's own text, `@NAME` for an attribute, a final `+`
+//   for a part whose element repeats (every occurrence, in order). An item whose parts are all
+//   absent has the empty key (`keyless: .empty`), which every such item of the aggregation
+//   shares, so their fragments merge and what differs is reported.
 //
 // One element pair can be given different rules by roles of different holder types (a
-// CONTAINERS keyed under one class and not under another), which flatxml's names cannot tell
-// apart. The documents settle a wrapper's items: where only one of the holders occurs above the
-// pair, its rule is the rule. Every other such pair is a conflict: one rule is applied, and the
-// view's problems on the pair are marked as the conflict's, not as violations.
+// CONTAINERS keyed under one class and not under another). Where that happens, a holder whose rule
+// differs from the pair's first gets its role's rules (every item kind of it together) under a
+// parent path: `ECUC-MODULE-DEF/CONTAINERS` for a wrapper's items, `PARENT/HOLDER` for a role
+// written in its holder, PARENT being an element whose content holds the holder's type. Each such
+// rule is listed where its unscoped counterpart is, so the order of a node's aggregations is the
+// schema's. A path that still names holders with different rules, or a holder no path can name
+// (the root), is a conflict: one rule is applied, and the view's problems on it are marked as the
+// conflict's, not as violations.
 
 // Flat is the flatxml rule set made from a schema's rules, and what could not be said in it.
 pub struct Flat {
 pub mut:
 	rules     flatxml.RuleSet
 	described []string // per rule, what it says (`key=SHORT-NAME merge`), its key included
-	// element pairs roles give different rules: settled by the holders the documents use, or
-	// left in conflict
-	settled   []Conflict
-	conflicts []Conflict // pairs in conflict that the documents use
-	unused    []Conflict // pairs in conflict that no document uses: nothing to judge
+	// element pairs roles of different holders give different rules, each holder given its own
+	// rule by a parent path where it differs from the pair's first
+	scoped []string
+	// paths that still name holders with different rules, or holders no path names: used by the
+	// documents, or not
+	conflicts []Conflict
+	unused    []Conflict
 	// rules whose items have no element of their own (flat wrappers)
 	flat_wrappers int
-	// keyed rules, whose keys are computed here: an item missing every key part has the empty
-	// key, and a repeated element's every occurrence is read
-	key_fns int
 	// item kinds whose split key lost a part, so they are one child each
 	lost_keys int
 }
 
-// Conflict is an element pair that roles of different holders give different rules.
+// Conflict is an element pair under a parent path that roles of different holders still give
+// different rules.
 pub struct Conflict {
 pub:
-	parent string
+	parent string // a parent path, `HOLDER/WRAPPER`, or the parent's name where no path names it
 	child  string
-	rules  []string // `role: rule (occurrences under its holders)`, the one applied first
-	occurs int      // occurrences of the pair in the documents
+	rules  []string // `role: rule`, the one applied first
+	occurs int      // occurrences of the pair under that parent in the documents
 }
 
 @[params]
@@ -58,9 +67,8 @@ pub struct FlatOptions {
 pub:
 	case_sensitive bool     // keys compared as written; by default ignoring ASCII case
 	ignore_attrs   []string // attributes whose values may differ between fragments
-	// per element pair `parent child`, the names of the elements above the parent in the
-	// documents and how often: what settles a pair several holders give different rules
-	contexts map[string]map[string]int
+	// the documents, if any: whether, and how often, they use a pair in conflict
+	model &Model = unsafe { nil }
 }
 
 // Spec is one flatxml rule before it is made.
@@ -70,28 +78,18 @@ struct Spec {
 	ordered bool
 	max     int
 	keyed   bool
-	key     []string // flatxml key paths, '' for the item's own text; none: every item one key
-	all     []bool   // per key path: every occurrence of its last step is part of the value
+	key     []string // flatxml key paths: '' for the item's own text, a final `+` for every occurrence
 }
 
 fn (a Spec) same(b Spec) bool {
 	return a.single == b.single && a.merge == b.merge && a.ordered == b.ordered && a.max == b.max
-		&& a.keyed == b.keyed && a.key == b.key && a.all == b.all
+		&& a.keyed == b.keyed && a.key == b.key
 }
 
 fn (s Spec) str() string {
 	mut out := []string{}
 	if s.keyed {
-		if s.key.len == 0 {
-			out << 'key=(one for all)'
-		} else {
-			mut ks := []string{}
-			for k, p in s.key {
-				v := if p == '' { '.' } else { p }
-				ks << if s.all[k] { v + '*' } else { v }
-			}
-			out << 'key=' + ks.join(',')
-		}
+		out << 'key=' + s.key.map(if it == '' { '.' } else { it }).join(',')
 	} else if s.single {
 		out << 'single'
 	} else {
@@ -109,17 +107,22 @@ fn (s Spec) str() string {
 	return out.join(' ')
 }
 
-// Cand is one rule's flatxml rule for an element pair, and the holders it applies under: the
-// names of the elements above the pair's parent (none for a pair whose parent is the holder).
+// Cand is one rule's flatxml rule for an element pair, and the names of the elements above the
+// pair's parent where it is the rule: the holders for a wrapper's items, the parents of the
+// holder's type for a role written in its holder ('' for the root, which has none).
 struct Cand {
-	spec Spec
-	rule int // index of the rule in the rule set
+	parent string
+	child  string
+	spec   Spec
+	rule   int // index of the rule in the rule set
 mut:
 	above []string
+	types []string // `type name` of the holders, for a role written in its holder
 }
 
 fn flat_path(k KeyPath) string {
-	return k.steps.join('/')
+	p := k.steps.join('/')
+	return if k.all { p + '+' } else { p }
 }
 
 const single_merge = Spec{
@@ -135,6 +138,14 @@ fn (rs &RuleSet) item_spec(r &Rule, it Item) Spec {
 	if r.max <= 1 {
 		return single_merge
 	}
+	if r.key_spec.len > 0 && !it.key_lost && it.key.len == 0 {
+		// nothing tells the items apart: one key for all, merged only where the role is
+		// splittable (one child of the name; a second is a collision otherwise)
+		return Spec{
+			single: true
+			merge:  r.splittable
+		}
+	}
 	if r.key_spec.len > 0 && !it.key_lost {
 		return Spec{
 			keyed:   true
@@ -142,7 +153,6 @@ fn (rs &RuleSet) item_spec(r &Rule, it Item) Spec {
 			ordered: r.ordered
 			max:     flat_max(r.max)
 			key:     it.key.map(flat_path(it))
-			all:     it.key.map(it.all)
 		}
 	}
 	return Spec{
@@ -164,32 +174,51 @@ fn (rs &RuleSet) names_of() map[u32][]string {
 	return out
 }
 
-// Cands is, per element pair `parent child`, every rule's flatxml rule for it, in the schema's
-// order, and the pairs in the order first met.
+// Cands is every rule's flatxml rules, in the schema's order, and per element pair the
+// candidates for it.
 struct Cands {
 mut:
-	by_pair   map[string][]Cand
-	order     []string
+	list      []Cand
+	at        map[string]int   // `rule parent child` -> index in list
+	by_pair   map[string][]int // `parent child` -> indices in list
+	pairs     []string         // in the order first met
+	by_parent map[string][]int // a pair's parent -> indices in list
 	flats     int
 	lost_keys int
 }
 
 // add adds a rule's flatxml rule for a pair; one rule reached through several holder names is
 // one candidate.
-fn (mut c Cands) add(pair string, x Cand) {
-	mut list := (c.by_pair[pair] or { []Cand{} }).clone()
-	for mut y in list {
-		if y.rule == x.rule {
-			y.above << x.above
-			c.by_pair[pair] = list
-			return
+fn (mut c Cands) add(parent string, child string, spec Spec, rule int, above []string, types []string) {
+	key := '${rule} ${parent} ${child}'
+	if k := c.at[key] {
+		for a in above {
+			if a !in c.list[k].above {
+				c.list[k].above << a
+			}
 		}
+		for t in types {
+			if t !in c.list[k].types {
+				c.list[k].types << t
+			}
+		}
+		return
 	}
-	if list.len == 0 {
-		c.order << pair
+	k := c.list.len
+	c.at[key] = k
+	c.list << Cand{parent, child, spec, rule, above.clone(), types.clone()}
+	mut bp := (c.by_parent[parent] or { []int{} }).clone()
+	bp << k
+	c.by_parent[parent] = bp
+	pair := '${parent} ${child}'
+	if pair !in c.by_pair {
+		c.pairs << pair
+		c.by_pair[pair] = [k]
+	} else {
+		mut l := c.by_pair[pair].clone()
+		l << k
+		c.by_pair[pair] = l
 	}
-	list << x
-	c.by_pair[pair] = list
 }
 
 fn (rs &RuleSet) candidates() Cands {
@@ -204,37 +233,100 @@ fn (rs &RuleSet) candidates() Cands {
 		}
 	}
 	for k, r in rs.rules {
-		if r.flat {
-			c.flats++
-			per_item := rs.per_item(r.decl)
-			for it in r.items {
-				c.add('${r.element} ${it.element}', Cand{Spec{
-					ordered: r.ordered
-					max:     flat_max(sat_mul(r.max, per_item[it.decl] or { unbounded }))
-				}, k, []string{}})
-			}
-		}
 		mut holders := []string{}
 		for ct in r.held_by {
 			if ct in flat_types {
 				continue
 			}
-			holders << names[ct] or { []string{} }
+			for h in names[ct] or { []string{} } {
+				if h !in holders {
+					holders << h
+				}
+				sp := if r.wrapper { single_merge } else { rs.item_spec(&r, r.items[0]) }
+				// what tells a holder of this type from one of another type with its name: the
+				// elements above it, found where a pair needs them
+				c.add(h, r.element, sp, k, [], ['${ct} ${h}'])
+			}
 		}
-		for h in holders {
-			sp := if r.wrapper { single_merge } else { rs.item_spec(&r, r.items[0]) }
-			c.add('${h} ${r.element}', Cand{sp, k, []string{}})
-		}
-		if r.wrapper && !r.flat {
+		if r.flat {
+			c.flats++
+			per_item := rs.per_item(r.decl)
+			for it in r.items {
+				c.add(r.element, it.element, Spec{
+					ordered: r.ordered
+					max:     flat_max(sat_mul(r.max, per_item[it.decl] or { unbounded }))
+				}, k, holders, [])
+			}
+		} else if r.wrapper {
 			for it in r.items {
 				if it.key_lost {
 					c.lost_keys++
 				}
-				c.add('${r.element} ${it.element}', Cand{rs.item_spec(&r, it), k, holders.clone()})
+				c.add(r.element, it.element, rs.item_spec(&r, it), k, holders, [])
 			}
 		}
 	}
 	return c
+}
+
+// fill_above gives the candidates of the pairs named the elements above their holders: the
+// names of the elements whose content holds an element of the holder's name and type. The
+// content models are walked once, and only the holders those candidates name are looked for.
+fn (rs &RuleSet) fill_above(mut c Cands, pairs []string, names map[u32][]string) {
+	mut want := map[string][]string{}
+	for pair in pairs {
+		for k in c.by_pair[pair] {
+			for t in c.list[k].types {
+				want[t] = []string{}
+			}
+		}
+	}
+	if want.len == 0 {
+		return
+	}
+	s := rs.schema
+	mut seen := map[string]bool{}
+	for t, ct in s.complex_types {
+		if ct.particle == xsd.no_particle {
+			continue
+		}
+		mut occ := []Occ{}
+		rs.walk(ct.particle, 1, mut occ)
+		for o in occ {
+			e := s.elements[o.decl]
+			if e.typ.kind != .complex {
+				continue
+			}
+			key := '${e.typ.idx} ${s.names[e.name.local]}'
+			if key !in want {
+				continue
+			}
+			for p in names[u32(t)] or { []string{} } {
+				if '${key}\t${p}' !in seen {
+					seen['${key}\t${p}'] = true
+					want[key] << p
+				}
+			}
+		}
+	}
+	for d in s.global_elements() {
+		e := s.elements[d]
+		key := '${e.typ.idx} ${s.names[e.name.local]}'
+		if e.typ.kind == .complex && key in want {
+			want[key] << ''
+		}
+	}
+	for pair in pairs {
+		for k in c.by_pair[pair] {
+			for t in c.list[k].types {
+				for a in want[t] or { []string{} } {
+					if a !in c.list[k].above {
+						c.list[k].above << a
+					}
+				}
+			}
+		}
+	}
 }
 
 // per_item is, for a wrapper holding its items' content, how often one item holds each element.
@@ -255,19 +347,6 @@ fn (rs &RuleSet) per_item(d u32) map[u32]u32 {
 	mut out := map[u32]u32{}
 	for o in occ {
 		out[o.decl] = o.max
-	}
-	return out
-}
-
-// conflicting_pairs is the element pairs that rules give different flatxml rules.
-pub fn (rs &RuleSet) conflicting_pairs() []string {
-	c := rs.candidates()
-	mut out := []string{}
-	for pair in c.order {
-		list := c.by_pair[pair] or { continue }
-		if list.any(!it.spec.same(list[0].spec)) {
-			out << pair
-		}
 	}
 	return out
 }
@@ -309,102 +388,112 @@ pub fn contexts_of(m &Model, pairs []string) map[string]map[string]int {
 	return out
 }
 
-fn (rs &RuleSet) describe_cands(list []Cand, seen map[string]int) []string {
-	return list.map(fn [rs, seen] (c Cand) string {
-		mut n := 0
-		for h in c.above {
-			n += seen[h] or { 0 }
-		}
-		at := if c.above.len == 0 { '' } else { ' (${n} under its holders)' }
-		return '${rs.rules[c.rule].name}: ${c.spec}${at}'
-	})
+fn (rs &RuleSet) describe(c Cands, ks []int) []string {
+	return ks.map('${rs.rules[c.list[it].rule].name}: ${c.list[it].spec}')
 }
 
 // to_flat turns the rules into flatxml's.
 pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
-	c := rs.candidates()
+	mut c := rs.candidates()
 	mut f := Flat{
 		flat_wrappers: c.flats
 		lost_keys:     c.lost_keys
 	}
-	// per pair, the spec applied and the rule it is applied for
-	mut chosen := map[string]Cand{}
-	for pair in c.order {
-		list := c.by_pair[pair] or { continue }
-		mut pick := list[0]
-		if list.any(!it.spec.same(list[0].spec)) {
-			seen := (opts.contexts[pair] or { map[string]int{} }).clone()
-			// the rules whose holders the documents use above the pair
-			used := list.filter(it.above.any(it in seen))
-			mut total := 0
-			for _, n in seen {
-				total += n
-			}
-			x := Conflict{
-				parent: pair.all_before(' ')
-				child:  pair.all_after(' ')
-				rules:  rs.describe_cands(if used.len > 0 { used } else { list }, seen)
-				occurs: total
-			}
-			if used.len > 0 && used.all(it.spec.same(used[0].spec)) {
-				pick = used[0]
-				f.settled << x
-			} else {
-				if used.len > 0 {
-					pick = used[0]
-				}
-				if total > 0 {
-					f.conflicts << x
-				} else {
-					f.unused << x
+	// the pairs roles give different rules
+	for pair in c.pairs {
+		ks := c.by_pair[pair]
+		first := c.list[ks[0]].spec
+		if ks.any(!c.list[it].spec.same(first)) {
+			f.scoped << pair
+		}
+	}
+	rs.fill_above(mut c, f.scoped, rs.names_of())
+	contexts := if opts.model == unsafe { nil } {
+		map[string]map[string]int{}
+	} else {
+		contexts_of(opts.model, f.scoped)
+	}
+	// per parent path, the rules (by their first candidate) to give it: `above parent rule`
+	mut scoped := map[string]bool{}
+	mut scoped_order := []string{}
+	for pair in f.scoped {
+		ks := c.by_pair[pair]
+		first := c.list[ks[0]]
+		seen := (contexts[pair] or { map[string]int{} }).clone()
+		// the names above, in the order the candidates give them
+		mut aboves := []string{}
+		for k in ks {
+			for a in c.list[k].above {
+				if a !in aboves {
+					aboves << a
 				}
 			}
 		}
-		chosen[pair] = pick
-	}
-	// pairs of one parent applied for one rule with one spec are one flatxml rule
-	mut by_parent := map[string][]string{}
-	for pair in c.order {
-		parent := pair.all_before(' ')
-		mut list := (by_parent[parent] or { []string{} }).clone()
-		list << pair
-		by_parent[parent] = list
-	}
-	mut rules := []flatxml.Rule{}
-	mut done := map[string]bool{}
-	for pair in c.order {
-		if pair in done {
-			continue
+		for k in ks {
+			if c.list[k].above.len == 0 && !c.list[k].spec.same(first.spec) {
+				// a holder nothing above names: no path can give it its rule
+				f.add_conflict(first.parent, first.child, rs.describe(c, [ks[0], k]), seen)
+			}
 		}
-		pick := chosen[pair] or { continue }
-		parent := pair.all_before(' ')
-		mut children := []string{}
-		for other in by_parent[parent] or { []string{} } {
-			if other in done {
+		for a in aboves {
+			under := ks.filter(a in c.list[it].above)
+			pick := c.list[under[0]]
+			if under.any(!c.list[it].spec.same(pick.spec)) {
+				f.add_conflict(if a == '' { first.parent } else { '${a}/${first.parent}' },
+					first.child, rs.describe(c, under), seen)
+			}
+			if pick.spec.same(first.spec) {
 				continue
 			}
-			o := chosen[other] or { continue }
-			if o.rule == pick.rule && o.spec.same(pick.spec) {
-				children << other.all_after(' ')
-				done[other] = true
+			if a == '' {
+				f.add_conflict(first.parent, first.child, rs.describe(c, [ks[0], under[0]]),
+					seen)
+				continue
+			}
+			key := '${a} ${first.parent} ${pick.rule}'
+			if key !in scoped {
+				scoped[key] = true
+				scoped_order << key
 			}
 		}
-		sp := pick.spec
-		mut key_fn := ?flatxml.KeyFn(none)
-		if sp.keyed {
-			// computed, so that an item missing every part has the empty key
-			key_fn = key_reader(sp.key, sp.all)
-			f.key_fns++
+	}
+	// the rules, in the candidates' order: each pair's first candidate, the pairs of one parent,
+	// rule and spec together; each scoped rule beside its unscoped counterpart
+	mut rules := []flatxml.Rule{}
+	mut done := map[int]bool{}
+	mut done_scoped := map[string]bool{}
+	for k0, x in c.list {
+		if k0 in done || c.by_pair['${x.parent} ${x.child}'][0] != k0 {
+			continue
 		}
-		f.described << sp.str()
-		rules << flatxml.Rule{
-			parent:   parent
-			children: children
-			key_fn:   key_fn
-			single:   sp.single
-			merge:    sp.merge
-			ordered:  sp.ordered
-			max:      sp.max
+		mut group := []int{}
+		for k in c.by_pair_parent(x.parent) {
+			y := c.list[k]
+			if k !in done && y.rule == x.rule && y.spec.same(x.spec)
+				&& c.by_pair['${y.parent} ${y.child}'][0] == k {
+				group << k
+				done[k] = true
+			}
+		}
+		f.emit(c, x.parent, group, mut rules)
+		// the scoped rules of this parent whose rule's first pair this is
+		for key in scoped_order {
+			if key in done_scoped {
+				continue
+			}
+			a, parent, rule := key.split(' ')[0], key.split(' ')[1], key.split(' ')[2].int()
+			if parent != x.parent || !group.any(c.list[it].child in c.children_of(rule, parent)) {
+				continue
+			}
+			done_scoped[key] = true
+			// the whole role under the path: every item kind, grouped by spec
+			mut left := c.of_rule(rule, parent)
+			for left.len > 0 {
+				sp := c.list[left[0]].spec
+				same := left.filter(c.list[it].spec.same(sp))
+				f.emit(c, '${a}/${parent}', same, mut rules)
+				left = left.filter(!c.list[it].spec.same(sp))
+			}
 		}
 	}
 	f.rules = flatxml.RuleSet{
@@ -415,90 +504,56 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 	return f
 }
 
-// value_sep joins the values of a repeated key element; XML text cannot hold it, and it is not
-// flatxml's key_sep, so a list of values never reads like another list or like several parts.
-const value_sep = '\x1e'
+// by_pair_parent is the candidates whose pair's parent is parent, in order.
+fn (c &Cands) by_pair_parent(parent string) []int {
+	return c.by_parent[parent] or { []int{} }
+}
 
-// key_reader computes an item's key from its paths: the text at each path (the item's own text
-// for ''), an attribute (`@NAME`, `A/@NAME`), or for a path whose last step repeats, every
-// occurrence in order. A part that is absent reads as '', and so does a key with no part at all:
-// items whose every part is absent share one empty key, so their fragments merge and what differs
-// between them is reported. (This moves to flatxml's per-rule choice for an absent key once it
-// is there; flatxml's own key paths leave such an item as one of its own.)
-fn key_reader(paths []string, all []bool) flatxml.KeyFn {
-	mut cache := &KeyCache{}
-	for k, p in paths {
-		cache.steps << KeyStep.of(p, all[k])
+// of_rule is a rule's candidates with one parent.
+fn (c &Cands) of_rule(rule int, parent string) []int {
+	return c.by_pair_parent(parent).filter(c.list[it].rule == rule)
+}
+
+fn (c &Cands) children_of(rule int, parent string) []string {
+	return c.of_rule(rule, parent).map(c.list[it].child)
+}
+
+// emit appends one flatxml rule for the candidates ks (one rule, one spec) under parent.
+fn (mut f Flat) emit(c Cands, parent string, ks []int, mut rules []flatxml.Rule) {
+	sp := c.list[ks[0]].spec
+	f.described << sp.str()
+	rules << flatxml.Rule{
+		parent:   parent
+		children: ks.map(c.list[it].child)
+		key:      sp.key
+		keyless:  if sp.keyed { flatxml.Keyless.empty } else { flatxml.Keyless.own }
+		single:   sp.single
+		merge:    sp.merge
+		ordered:  sp.ordered
+		max:      sp.max
 	}
-	return fn [mut cache] (n flatxml.Node) ?string {
-		if cache.steps.len == 0 {
-			return ''
+}
+
+// add_conflict records a pair in conflict under parent (a path, or a name), once.
+fn (mut f Flat) add_conflict(parent string, child string, rules []string, seen map[string]int) {
+	if f.conflicts.any(it.parent == parent && it.child == child)
+		|| f.unused.any(it.parent == parent && it.child == child) {
+		return
+	}
+	mut count := 0
+	if parent.contains('/') {
+		count = seen[parent.all_before('/')] or { 0 }
+	} else {
+		for _, n in seen {
+			count += n
 		}
-		if voidptr(n.doc.tab) != voidptr(cache.tab) {
-			cache.compile(n.doc.tab)
-		}
-		mut parts := []string{len: cache.steps.len}
-		for k, st in cache.steps {
-			holder := if st.holder.len == 0 { n } else { n.find(cache.paths[k]) }
-			if !holder.ok() {
-				continue
-			}
-			parts[k] = match st.kind {
-				.text {
-					holder.text()
-				}
-				.attr {
-					holder.attr(st.leaf)
-				}
-				.all {
-					mut vals := []string{}
-					for c in holder.children_named(st.leaf) {
-						vals << c.text()
-					}
-					vals.join(value_sep)
-				}
-			}
-		}
-		return parts.join(flatxml.key_sep)
 	}
-}
-
-enum StepKind {
-	text // the text at the path
-	attr // an attribute of the element at the path
-	all  // every child of one name of the element at the path
-}
-
-// KeyStep is one key path, split into the element it reads from (holder, '' for the item) and
-// what it reads there.
-struct KeyStep {
-	holder string
-	kind   StepKind
-	leaf   string // the attribute's or the repeated child's name
-}
-
-fn KeyStep.of(p string, all bool) KeyStep {
-	if p.contains('@') {
-		return KeyStep{p.all_before('@').trim_right('/'), .attr, p.all_after('@')}
+	x := Conflict{parent, child, rules, count}
+	if count > 0 {
+		f.conflicts << x
+	} else {
+		f.unused << x
 	}
-	if all {
-		return KeyStep{if p.contains('/') { p.all_before_last('/') } else { '' }, .all, p.all_after_last('/')}
-	}
-	return KeyStep{p, .text, ''}
-}
-
-// KeyCache keeps a key's holder paths compiled for the name table they were compiled against.
-@[heap]
-struct KeyCache {
-mut:
-	steps []KeyStep
-	tab   &flatxml.Names = unsafe { nil }
-	paths []flatxml.Path
-}
-
-fn (mut c KeyCache) compile(tab &flatxml.Names) {
-	c.tab = tab
-	c.paths = c.steps.map(tab.path(it.holder))
 }
 
 // declaration_attrs lists the attribute names, as written, that declare namespaces or belong to
@@ -530,8 +585,7 @@ pub:
 // Checked is a model merged by its governing schema's rules.
 pub struct Checked {
 pub mut:
-	governing string   // the governing schema's name
-	pairs     []string // element pairs roles of different holders give different rules
+	governing string // the governing schema's name
 	flat      Flat
 	view      &flatxml.Merged = unsafe { nil }
 	// per problem of the view: it lies on an element pair in conflict, so the rule that judged
@@ -556,11 +610,10 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	gov := sc.uses[g.use]
 	mut ignore := opts.ignore_attrs.clone()
 	ignore << declaration_attrs(m)
-	pairs := gov.rules.conflicting_pairs()
 	flat := gov.rules.to_flat(
 		case_sensitive: opts.case_sensitive
 		ignore_attrs:   ignore
-		contexts:       contexts_of(m, pairs)
+		model:          m
 	)
 	mut view := m.set.merge(flat.rules)!
 	mut merged, mut within := 0, 0
@@ -585,20 +638,21 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	mut in_conflict := []bool{len: view.problems.len}
 	mut violations := 0
 	for k, p in view.problems {
-		node := view.node(p.node)
-		pair := if p.kind == .value_differs {
-			'${node.parent().name()} ${node.name()}'
-		} else {
-			'${node.name()} ${p.what}'
+		// the merged parent of the children concerned, and its parent: the path a conflict names
+		mut parent := view.node(p.node)
+		mut child := p.what
+		if p.kind == .value_differs {
+			child = parent.name()
+			parent = parent.parent()
 		}
-		in_conflict[k] = pair in conflicted
+		in_conflict[k] = '${parent.parent().name()}/${parent.name()} ${child}' in conflicted
+			|| '${parent.name()} ${child}' in conflicted
 		if !in_conflict[k] {
 			violations++
 		}
 	}
 	return Checked{
 		governing:   gov.name
-		pairs:       pairs
 		flat:        flat
 		view:        view
 		in_conflict: in_conflict

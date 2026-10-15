@@ -59,6 +59,38 @@ pub fn (n Node) text() string {
 	return if n.doc.has_text_children(n.i) { n.doc.text_content(n.i) } else { n.doc.text(n.i) }
 }
 
+// TextRun is a run of an element's own text: its text, decoded, and its slot, the number of
+// child elements before it.
+pub struct TextRun {
+pub:
+	slot int
+	text string
+}
+
+// text_runs is the element's own text, not its children's, run by run: one run at slot 0 for an
+// element whose only content is text, a run per text node beside child elements, none for no
+// text.
+pub fn (n Node) text_runs() []TextRun {
+	if n.i == no_node {
+		return []
+	}
+	if !n.doc.has_text_children(n.i) {
+		return if n.doc.text_len[n.i] == 0 { []TextRun{} } else { [TextRun{0, n.doc.text(n.i)}] }
+	}
+	mut out := []TextRun{}
+	mut slot := 0
+	mut c := n.doc.first_child(n.i)
+	for c != no_node {
+		if n.doc.tag[c] == text_tag {
+			out << TextRun{slot, n.doc.text(c)}
+		} else {
+			slot++
+		}
+		c = n.doc.next_sibling(c)
+	}
+	return out
+}
+
 // attr is the value of the attribute name, decoded; '' when there is none.
 pub fn (n Node) attr(name string) string {
 	if n.i == no_node {

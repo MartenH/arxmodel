@@ -407,17 +407,14 @@ fn cmd_check(o Opts) {
 	}
 	took := sw.elapsed()
 	f := c.flat
-	out.line('${f.rules.rules.len} flatxml rules; ${c.pairs.len} element pairs that roles of different holders give different rules: ${f.settled.len} settled by the holders the documents use, ${f.conflicts.len} in conflict where the documents use them, ${f.unused.len} in conflict and unused')
-	out.line('  ${f.key_fns} keyed rules (absent parts read as empty), ${f.lost_keys} item kinds one child each for a key part that did not resolve, ${f.flat_wrappers} wrappers of item content whose items are not told apart')
+	out.line('${f.rules.rules.len} flatxml rules; ${f.scoped.len} element pairs that roles of different holders give different rules, each holder whose rule differs given its own by a parent path: ${f.conflicts.len} paths still in conflict where the documents use them, ${f.unused.len} in conflict and unused')
+	out.line('  ${f.lost_keys} item kinds one child each for a key part that did not resolve, ${f.flat_wrappers} wrappers of item content whose items are not told apart')
 	for x in f.conflicts {
 		out.line('  conflict: ${x.parent} ${x.child} (${x.occurs} in the documents): ${x.rules.join('; ')}')
 	}
 	if o.problems {
 		for x in f.unused {
 			out.line('  unused conflict: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
-		}
-		for x in f.settled {
-			out.line('  settled: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
 		}
 	}
 	mut v := c.view

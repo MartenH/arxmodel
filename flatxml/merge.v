@@ -87,6 +87,7 @@ mut:
 	group      map[u32]int // a single aggregation's names, numbered as first written
 	starts     []int
 	fill       []int
+	listed     []int
 	runs       []Run
 	keys       []string
 	lines      map[u64]LineIndex
@@ -110,10 +111,11 @@ struct Out {
 	hi   int
 }
 
-// Run is order[lo .. hi]: kids of one key.
+// Run is order[lo .. hi]: kids of one key, or, empty, of one name and no key.
 struct Run {
-	lo int
-	hi int
+	lo    int
+	hi    int
+	empty bool
 }
 
 // merge reads the set's documents as one, by the rules: a view over them, and what the rules
@@ -214,6 +216,24 @@ fn (mut m Merged) build() {
 	put(m.kid_lo, int(m.count), m.count)
 }
 
+// parent_view is merged node p as a classifier may read it while the view is built.
+fn (m &Merged) parent_view(p u32) Parent {
+	mut frags := []Node{cap: int(m.frag_lo[p + 1] - m.frag_lo[p])}
+	for f := m.frag_lo[p]; f < m.frag_lo[p + 1]; f++ {
+		frags << m.frag_node(m.frags[f])
+	}
+	mut ancestors := []Ancestor{}
+	for a := m.parent[p]; a != no_mnode; a = m.parent[a] {
+		ancestors << Ancestor{m.set.tab.name(m.name[a]), m.key_of(a).clone()}
+	}
+	return Parent{
+		name:      m.set.tab.name(m.name[p])
+		key:       m.key_of(p).clone()
+		fragments: frags
+		ancestors: ancestors
+	}
+}
+
 // add_node appends a merged node, whose contributions are frags[frag_lo[n] .. nfrags].
 @[direct_array_access]
 fn (mut m Merged) add_node(name u32, parent u32, scope u32, rule u32, kind MKind, key string) {
@@ -235,7 +255,7 @@ fn (mut m Merged) add_node(name u32, parent u32, scope u32, rule u32, kind MKind
 @[direct_array_access]
 fn (mut m Merged) expand(p u32) {
 	m.nkids, m.nouts, m.nout_frags = 0, 0, 0
-	pname := m.name[p]
+	mut ctx := no_rule // the parent's context, found at its first child element
 	mut sorted := true
 	mut last_rule := u32(0)
 	for f := m.frag_lo[p]; f < m.frag_lo[p + 1]; f++ {
@@ -246,7 +266,10 @@ fn (mut m Merged) expand(p u32) {
 		for c < stop {
 			t := d.tag[c]
 			if t != text_tag {
-				r := m.rules.resolve(pname, t)
+				if ctx == no_rule {
+					ctx = m.rules.context(m, p)
+				}
+				r := m.rules.resolve(ctx, t)
 				sorted = sorted && r >= last_rule
 				last_rule = r
 				room(mut m.kids, m.nkids)
@@ -380,31 +403,11 @@ fn (mut m Merged) aggregation(p u32, k int, e_ int) {
 				return
 			}
 			// one child per name, in the order first written: the kids of each name together
-			m.group.clear()
-			m.starts.clear()
-			for j in k .. e {
-				t := m.kids[j].tag
-				if t !in m.group {
-					m.group[t] = m.starts.len
-					m.starts << 0
-				}
-				m.starts[m.group[t]]++
-			}
-			mut at := 0
-			for g in 0 .. m.starts.len {
-				n := m.starts[g]
-				m.starts[g] = at
-				at += n
-			}
 			m.order.clear()
-			m.order << []int{len: e - k}
-			m.fill.clear()
-			m.fill << m.starts
 			for j in k .. e {
-				g := m.group[m.kids[j].tag]
-				m.order[m.fill[g]] = j
-				m.fill[g]++
+				m.order << j
 			}
+			m.group_names(0)
 			for g in 0 .. m.starts.len {
 				m.identity_of(p, rule, r, .single, '', m.starts[g], m.fill[g])
 			}
@@ -415,20 +418,54 @@ fn (mut m Merged) aggregation(p u32, k int, e_ int) {
 	}
 }
 
+// group_names puts the kids listed in order[base ..] together by name, the names in the order
+// first written and each name's kids as written: name g's are then order[starts[g] .. fill[g]].
+fn (mut m Merged) group_names(base int) {
+	m.group.clear()
+	m.starts.clear()
+	for x in base .. m.order.len {
+		t := m.kids[m.order[x]].tag
+		if t !in m.group {
+			m.group[t] = m.starts.len
+			m.starts << 0
+		}
+		m.starts[m.group[t]]++
+	}
+	mut at := base
+	for g in 0 .. m.starts.len {
+		n := m.starts[g]
+		m.starts[g] = at
+		at += n
+	}
+	m.fill.clear()
+	m.fill << m.starts
+	m.listed.clear()
+	m.listed << m.order[base..]
+	for j in m.listed {
+		g := m.group[m.kids[j].tag]
+		m.order[m.fill[g]] = j
+		m.fill[g]++
+	}
+}
+
 // keyed puts together kids[k .. e], the children of p under a keyed rule.
 fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 	m.keys.clear()
 	m.order.clear()
 	m.runs.clear()
 	mut missing := []int{}
+	// with keyless=empty, a key with no text is the empty key, as an absent one is
+	empty_is_absent := rule.keyless == .empty
 	for j in k .. e {
 		if key := rule.key(m.kid_node(j)) {
-			m.keys << key
-			m.order << j
-		} else {
-			m.keys << ''
-			missing << j
+			if !(empty_is_absent && empty_key(key)) {
+				m.keys << key
+				m.order << j
+				continue
+			}
 		}
+		m.keys << ''
+		missing << j
 	}
 	fold := m.rules.fold
 	keys := m.keys
@@ -445,8 +482,21 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 		for h < m.order.len && compare_keys(keys[m.order[g] - k], keys[m.order[h] - k], fold) == 0 {
 			h++
 		}
-		m.runs << Run{g, h}
+		m.runs << Run{
+			lo: g
+			hi: h
+		}
 		g = h
+	}
+	// with keyless=empty, the children of one name without a key are one, of the empty key
+	if rule.keyless == .empty && missing.len > 0 {
+		base := m.order.len
+		m.order << missing
+		m.group_names(base)
+		for x in 0 .. m.starts.len {
+			m.runs << Run{m.starts[x], m.fill[x], true}
+		}
+		missing.clear()
 	}
 	order := m.order
 	if rule.ordered {
@@ -498,7 +548,11 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			m.out_one(kept[x], r, .each, '')
 			x++
 		}
-		m.identity_of(p, rule, r, .keyed, keys[order[run.lo] - k], run.lo, run.hi)
+		if run.empty {
+			m.identity_of(p, rule, r, .single, '', run.lo, run.hi)
+		} else {
+			m.identity_of(p, rule, r, .keyed, keys[order[run.lo] - k], run.lo, run.hi)
+		}
 	}
 	for x < kept.len {
 		m.out_one(kept[x], r, .each, '')
@@ -590,9 +644,10 @@ fn (mut m Merged) limit(p u32, rule &CRule, k int, e int) int {
 	return k + rule.max
 }
 
-// differs reports where the contributions to node n disagree with its first: their text (all of
-// it, where text is mixed with elements), or the value of an attribute both have (unless the
-// rules ignore it).
+// differs reports where the contributions to node n disagree with its first: their own text,
+// run by run in its place among the children (`Node.text_runs`), and where text is mixed with
+// elements, all the text inside them, which the view does not merge child by child; or the
+// value of an attribute both have (unless the rules ignore it).
 fn (mut m Merged) differs(n u32) {
 	lo, hi := m.frag_lo[n], m.frag_lo[n + 1]
 	if hi - lo < 2 {
@@ -600,11 +655,15 @@ fn (mut m Merged) differs(n u32) {
 	}
 	f0 := m.frags[lo]
 	d0 := m.set.docs[f0.doc]
-	t0 := Node{d0, f0.i}.text()
+	n0 := Node{d0, f0.i}
+	t0 := n0.text_runs()
+	mixed0 := d0.has_text_children(f0.i)
 	a_lo, a_hi := d0.attr_range(f0.i)
 	for f in m.frags[lo + 1..hi] {
 		d := m.set.docs[f.doc]
-		if Node{d, f.i}.text() != t0 {
+		nf := Node{d, f.i}
+		mixed := mixed0 || d.has_text_children(f.i)
+		if nf.text_runs() != t0 || (mixed && nf.text() != n0.text()) {
 			m.problems << Problem{
 				kind: .value_differs
 				node: n
@@ -794,7 +853,7 @@ fn (ix &KeyIndex) find(m &Merged, a u32, b u32, key string) ?u32 {
 pub struct MNode {
 pub:
 	m &Merged = unsafe { nil }
-	i u32 // no_mnode for an empty handle
+	i u32     = no_mnode // no_mnode for an empty handle
 }
 
 // len is the number of merged nodes.
@@ -851,16 +910,18 @@ pub fn (mut m Merged) pos(n Node) string {
 // describe is a problem in one line, with every position.
 pub fn (mut m Merged) describe(p Problem) string {
 	what := match p.kind {
-		.collision { '${p.what} `${p.key}` more than once, and the rule does not merge' }
-		.key_reused { '${p.what} `${p.key}`: the key is used in its scope already' }
+		.collision { '${p.what} `${show_key(p.key)}` more than once, and the rule does not merge' }
+		.key_reused { '${p.what} `${show_key(p.key)}`: the key is used in its scope already' }
 		.ordered_split { 'ordered ${p.what} in more than one document' }
 		.too_many { '${p.what}: more than the rule allows' }
-		.value_differs { '${p.what} differs' + if p.key != '' { ' in `${p.key}`' } else { '' } }
+		.value_differs {
+			'${p.what} differs' + if p.key != '' { ' in `${show_key(p.key)}`' } else { '' }
+		}
 		.name_differs {
 			if p.at[0].i == 1 {
 				'roots named differently (${p.what} first)'
 			} else {
-				'`${p.key}` under two names (${p.what} first)'
+				'`${show_key(p.key)}` under two names (${p.what} first)'
 			}
 		}
 		.missing_key { '${p.what} without its key' }
@@ -1007,6 +1068,11 @@ pub fn (n MNode) fragments() []Node {
 // text is the text of the first contribution, all of it where text is mixed with elements.
 pub fn (n MNode) text() string {
 	return n.fragment(0).text()
+}
+
+// text_runs are the own text of the first contribution, run by run (`Node.text_runs`).
+pub fn (n MNode) text_runs() []TextRun {
+	return n.fragment(0).text_runs()
 }
 
 // attr is the attribute name of the first contribution that has it; '' for none.

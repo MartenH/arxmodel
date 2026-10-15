@@ -50,6 +50,25 @@ mut:
 	agroup_ord map[u64]u32   // attribute group references made so far, per owner
 	st_where   []Pending     // per simple type: where it is declared (doc and node), for messages
 	st_done    []u8          // finish_simple_types: 0 not yet, 1 in progress, 2 done
+	// per document with appinfo: its line starts
+	lines map[u32]flatxml.LineIndex
+	// what the schema gets once it is compiled
+	appinfo []Appinfo
+	mgroups []ModelGroup
+	agroups []AttrGroup
+}
+
+// AttrGroup is an attribute group while the schema is compiled.
+struct AttrGroup {
+mut:
+	name  QName
+	attrs []AttrUse
+	own   u32   // how many of attrs are written in the group itself
+	refs  []u32 // the attribute groups it references
+	done  bool
+	busy  bool
+	doc   u32 // where it is declared
+	node  u32
 }
 
 // load reads and compiles the schema documents at paths, and the documents they import.
@@ -70,7 +89,19 @@ pub fn load(paths ...string) !&Schema {
 		r.read_file(p)!
 	}
 	r.resolve()!
-	return s
+	first, next := chain_appinfo(r.appinfo)
+	return &Schema{
+		...*s
+		appinfo:          r.appinfo
+		groups:           r.mgroups
+		attribute_groups: r.agroups.map(AttributeGroup{
+			name: it.name
+			uses: it.attrs
+			own:  it.own
+		})
+		appinfo_head:     first
+		appinfo_next:     next
+	}
 }
 
 // read_file reads one schema document, and the documents it imports, and returns its target
@@ -298,7 +329,7 @@ fn (mut r Reader) group_def(c DocCtx, i u32) ! {
 	r.check_attrs(c, i, ['name', 'id'])!
 	name := r.required_attr(c, i, 'name')!
 	q := QName{c.target, r.s.intern_name(name)}
-	if q.key() in r.s.groups {
+	if q.key() in r.s.group_ids {
 		return error('${c.d.pos(i)}: group ${r.s.qname(q)} is declared twice')
 	}
 	mut root := no_particle
@@ -325,9 +356,14 @@ fn (mut r Reader) group_def(c DocCtx, i u32) ! {
 	if root == no_particle {
 		return error('${c.d.pos(i)}: group ${r.s.qname(q)} has no sequence or choice')
 	}
-	r.s.groups[q.key()] = root
+	g := u32(r.mgroups.len)
+	r.s.group_ids[q.key()] = g
+	r.mgroups << ModelGroup{
+		name: q
+		root: root
+	}
 	for n in notes {
-		r.annotation(c, n, .group, root, 0)!
+		r.annotation(c, n, .group, g, 0)!
 	}
 }
 
@@ -468,7 +504,7 @@ fn (mut r Reader) attribute_use(c DocCtx, i u32, owner u32, in_group bool) ! {
 				return error('${c.d.pos(i)}: an attribute with ref has no ${a}')
 			}
 		}
-		sub := u32(if in_group { r.s.agroups[owner].attrs.len } else { r.s.complex_types[owner].attrs.len })
+		sub := u32(if in_group { r.agroups[owner].attrs.len } else { r.s.complex_types[owner].attrs.len })
 		r.pending << Pending{
 			kind:     .attr_ref
 			slot:     owner
@@ -500,7 +536,7 @@ fn (mut r Reader) attribute_use(c DocCtx, i u32, owner u32, in_group bool) ! {
 		required: required
 	}
 	if in_group {
-		r.s.agroups[owner].attrs << use
+		r.agroups[owner].attrs << use
 	} else {
 		r.s.complex_types[owner].attrs << use
 	}
@@ -539,8 +575,12 @@ fn (mut r Reader) attr_group_def(c DocCtx, i u32) ! {
 	if q.key() in r.s.attr_groups {
 		return error('${c.d.pos(i)}: attribute group ${r.s.qname(q)} is declared twice')
 	}
-	g := u32(r.s.agroups.len)
-	r.s.agroups << AttrGroup{}
+	g := u32(r.agroups.len)
+	r.agroups << AttrGroup{
+		name: q
+		doc:  c.di
+		node: i
+	}
 	r.s.attr_groups[q.key()] = g
 	for ch in r.xs_children(c, i)! {
 		match c.d.local_name(ch) {
@@ -550,6 +590,7 @@ fn (mut r Reader) attr_group_def(c DocCtx, i u32) ! {
 			else { return r.refuse(c, ch) }
 		}
 	}
+	r.agroups[g].own = u32(r.agroups[g].attrs.len)
 }
 
 // agroup_use reads a reference to an attribute group from a complex type or another group.
@@ -692,12 +733,20 @@ fn (mut r Reader) annotation(c DocCtx, i u32, owner OwnerKind, idx u32, sub int)
 	for ch in r.xs_children(c, i)! {
 		match c.d.local_name(ch) {
 			'appinfo' {
-				r.s.appinfo << Appinfo{
+				if c.di !in r.lines {
+					r.lines[c.di] = c.d.line_index()
+				}
+				line, col := r.lines[c.di].line_col(c.d.src_off[ch])
+				r.appinfo << Appinfo{
 					owner:  owner
 					idx:    idx
 					sub:    u32(sub)
 					source: (c.d.attr(ch, 'source') or { '' }).clone()
 					text:   c.d.inner_xml(ch)
+					attr:   if owner == .attribute { idx } else { no_attr }
+					file:   c.di
+					line:   u32(line)
+					col:    u32(col)
 				}
 			}
 			'documentation' {}

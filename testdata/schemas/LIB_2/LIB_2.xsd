@@ -112,6 +112,9 @@
                </xsd:choice>
             </xsd:complexType>
          </xsd:element>
+         <xsd:element name="TAG-SET" type="L:TAGS-A" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Shelf.tagSet";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
          <xsd:element name="MARKS" minOccurs="0">
             <xsd:annotation>
                <xsd:appinfo source="tags">atp.Splitkey="mark.row, mark.nothing";mmt.qualifiedName="Shelf.mark";pureMM.isOrdered="true";pureMM.maxOccurs="-1";pureMM.minOccurs="0";xml.roleElement="false";xml.roleWrapperElement="true";xml.typeElement="false"</xsd:appinfo>
@@ -199,6 +202,25 @@
       </xsd:choice>
    </xsd:group>
 
+   <!-- one element name, two types: the roles written directly in them differ -->
+   <xsd:complexType name="TAGS-A">
+      <xsd:sequence>
+         <xsd:element name="TAG" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="TagsA.tag";pureMM.isOrdered="true";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+   <xsd:complexType name="TAGS-B">
+      <xsd:sequence>
+         <xsd:element name="TAG" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="tag";mmt.qualifiedName="TagsB.tag";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
    <xsd:complexType name="COPY">
       <xsd:sequence>
          <xsd:element name="EDITION" type="xsd:string" minOccurs="0">
@@ -281,6 +303,33 @@
    <xsd:complexType name="BOOK">
       <xsd:sequence>
          <xsd:group ref="L:NAMED"/>
+         <!-- ITEMS again: MAGAZINE by another rule than on a shelf, and LEAFLET only here -->
+         <xsd:element name="ITEMS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Book.insert";pureMM.isOrdered="true";pureMM.maxOccurs="4";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="4">
+                  <xsd:element name="MAGAZINE" type="L:MAGAZINE"/>
+                  <xsd:element name="LEAFLET" type="L:MAGAZINE"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <!-- items keyed by themselves, none a single value, and not splittable -->
+         <xsd:element name="PALLETS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="pallet";mmt.qualifiedName="Book.pallet";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="PALLET" type="L:BOX"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <!-- TAG-SET again, of another type whose TAG role has another rule -->
+         <xsd:element name="TAG-SET" type="L:TAGS-B" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Book.tagSet";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
          <!-- NOTES and NOTE again, under another holder and by another rule -->
          <xsd:element name="NOTES" minOccurs="0">
             <xsd:annotation>

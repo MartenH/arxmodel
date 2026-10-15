@@ -136,18 +136,14 @@ the documents use that it does not declare, with counts, files and the first pos
 merged view (`flatxml/merge.v`), and lists what the rules forbid with every file and line: one key
 twice where the role is not splittable, a key used in its scope already, an ordered role in two
 files, too many children, two fragments whose text or an attribute differ, one key under two
-names, an item without its key. It prints the first 20 of each kind (`--all` for every one) and
-exits 1 when there is any. Keys are compared ignoring ASCII case unless `--case-sensitive`;
-namespace declarations, `xsi:` attributes and `UUID` may differ between fragments (a UUID is
-often generated per file for one element; `--check-attr UUID` compares it), and so may any
-attribute named with `--ignore-attr`. An item whose key parts are all absent has the empty key,
-which every such item of the aggregation shares, so their fragments merge and what differs between
-them is reported (a computed key today; flatxml's per-rule choice for an absent key once it is
-there).
+names. It prints the first 20 of each kind (`--all` for every one) and exits 1 when there is any.
+Keys are compared ignoring ASCII case unless `--case-sensitive`; namespace declarations, `xsi:`
+attributes and `UUID` may differ between fragments (a UUID is often generated per file for one
+element; `--check-attr UUID` compares it), and so may any attribute named with `--ignore-attr`.
 
-flatxml names an aggregation by its parent's and its children's element names; the schema by the
-parent's type and the role. So each rule becomes one flatxml rule per element name its holding
-type is declared with (`arxmodel/merge.v`):
+flatxml names an aggregation by its parent (an element name, or a path of ancestor names) and its
+children's element names; the schema by the parent's type and the role. So each rule becomes
+flatxml rules per element name its holding type is declared with (`arxmodel/merge.v`):
 
 - a role element that wraps its items is a single child of its holder, merged across fragments;
   its items are keyed by the split key and merged when the role is splittable, else one child
@@ -161,16 +157,50 @@ type is declared with (`arxmodel/merge.v`):
   often as one item holds each element;
 - a split key with a part that did not resolve is not used: one child each (the rules report the
   part);
-- keys are computed here: an absent part reads as '', and a repeated element's every occurrence,
-  joined by a separator no text holds, is one part.
+- keys are flatxml key paths: '' for the item's own text, `@NAME` for an attribute, a final `+`
+  for a part whose element repeats (every occurrence, in order); an item whose parts are all
+  absent is the one with the empty key (`keyless: empty`), which every such item of the
+  aggregation shares, so their fragments merge and what differs is reported. No key is computed
+  by arxmodel.
 
-Where roles of different holders give one element pair different rules (a `CONTAINERS` keyed under
-one class and not under another), flatxml cannot tell them apart by the names, so the documents
-decide a wrapper's items: where only one of the holders occurs above the pair, its rule is the
-rule. Every other such pair the documents use is a conflict: it is reported with its occurrences,
-one rule is applied, and the problems on the pair are marked as the conflict's rather than
-counted as violations; `check` exits 1. Pairs in conflict that no document uses are counted
-(`--problems` lists them).
+Where roles of different holder types give one element pair different rules (a `CONTAINERS` keyed
+under one class and not under another), the pair's first rule stays the rule by name, and each
+holder whose rule differs gets its role's rules, every item kind of it together, under a parent
+path: `ECUC-MODULE-DEF/CONTAINERS` for a wrapper's items (the holder above the wrapper), and for a
+role written directly in its holder, `PARENT/HOLDER`, PARENT being an element that holds an
+element of the holder's type. Each scoped rule is listed beside its unscoped counterpart, so a
+node's aggregations keep the schema's order. A path that still names holders with different
+rules, or a holder no path names (the root), is a conflict: it is reported with its occurrences,
+one rule is applied, and the problems on it are marked as the conflict's rather than counted as
+violations; `check` exits 1 when the documents use one.
+
+### Differences from the AUTOSAR specification
+
+arxmodel's merge model follows automat where the user chose it, so it differs from the AUTOSAR FO
+TPS Generic Structure Template, R24-11, in these known ways. The behaviour is as
+described above; this list says where it departs from the specification.
+
+1. **Items with every key part absent.** Here they share one empty key and merge, as automat
+   does. The specification does not merge items whose split key has no value ([TPS_GST_00417]):
+   each stays an item of its own.
+2. **A split key naming only the role itself, on a multi-valued role.** The specification treats
+   such items as copied, not merged. Here they are keyed by their single-valued element children
+   and merged by that key.
+3. **Case of keys.** Keys are compared ignoring ASCII case here, as automat does. In the
+   specification short names are compared case-sensitively, while their uniqueness within a
+   namespace is case-insensitive ([TPS_GST_00021], [constr_2508]).
+4. **Multi-valued primitive values.** The specification copies all values of such a role from
+   every fragment ([TPS_GST_00449]). Here identical values of a value-keyed role merge into one.
+5. **Non-splittable collections repeated across fragments.** The specification allows such a
+   collection in several fragments only as an identical repetition ([constr_2524],
+   [TPS_GST_00447]). Here an unkeyed one keeps each occurrence as a child of its own, and a keyed
+   one reports a key met twice as a collision; nothing checks that repetitions are identical.
+6. **FILE-INFO-COMMENT.** The specification allows a structured comment (atpStructuredComment)
+   to be ignored when fragments are merged ([TPS_GST_00382]). Here it is compared like any other
+   content, so differing comments are reported.
+7. **Abstract item types.** For an aggregation whose items may be of several subclasses, the
+   specification takes the identity contributors of all of them together ([TPS_GST_00416]).
+   Here each item kind is keyed by its own type's key.
 
 ## Build and test
 

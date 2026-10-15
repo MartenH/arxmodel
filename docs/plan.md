@@ -42,6 +42,11 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      different types give different rules, and every problem with its positions. What
      flatxml's rule model cannot say yet is listed as requests in the PR (rules scoped by the
      parent's type, a key of every occurrence, a key whose parts are all absent).
+   - **Done: flatxml's rule extensions.** Each holder its own rule by a parent path (no conflict
+     left in the local files: ECUC container definitions are keyed and merged under their
+     module definition), keys of every occurrence (`+`) and the empty key for keyless items
+     from flatxml; no key computed here. The known differences from the AUTOSAR specification
+     are in the README.
 
 2. Paths and references.
 3. `diff`, `merge`, `check` as commands.

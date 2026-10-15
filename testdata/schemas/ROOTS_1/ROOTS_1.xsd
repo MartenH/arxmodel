@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A synthetic schema for arxmodel's tests: ROOT is the global element, and also an element of
+     another type inside PARENT. Their ITEM roles differ, and the global one has nothing above it
+     that a parent path could name. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:R="urn:arxmodel:test:roots"
+            targetNamespace="urn:arxmodel:test:roots" elementFormDefault="qualified">
+   <xsd:complexType name="MINI-ROOT">
+      <xsd:sequence>
+         <xsd:element name="ITEM" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="item";mmt.qualifiedName="MiniRoot.item";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+   <xsd:complexType name="PARENT">
+      <xsd:sequence>
+         <xsd:element name="ROOT" type="R:MINI-ROOT" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Parent.root";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+   <xsd:complexType name="ROOT">
+      <xsd:sequence>
+         <xsd:element name="ITEM" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Root.item";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="PARENT" type="R:PARENT" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Root.parent";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+   <xsd:element name="ROOT" type="R:ROOT"/>
+</xsd:schema>
