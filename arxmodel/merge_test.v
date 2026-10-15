@@ -202,7 +202,7 @@ fn test_a_parents_rules_follow_its_content_order() {
 	}
 	// the content models of LIB_1.xsd as written there, groups expanded
 	assert kids['SHELF'] == ['SHORT-NAME', 'ITEMS', 'NOTES', 'LABELS', 'FAVOURITES', 'LOANS', 'TAG-SET',
-		'MARKS', 'PAIR', 'MOTTO', 'OPENING-HOURS', 'COPIES', 'BOX', 'CRATES', 'PICK-REF', 'BROKEN-KEYS',
+		'MARKS', 'PAIR', 'MOTTO', 'OPENING-HOURS', 'COPIES', 'BOX', 'CRATES', 'SETTINGS', 'PICK-REF', 'BROKEN-KEYS',
 		'VARIATION-POINT']
 	assert kids['BOOK'] == ['SHORT-NAME', 'PICK-REF', 'ITEMS', 'PALLETS', 'TAG-SET', 'NOTES', 'BLURB']
 	assert kids['COPY'] == ['EDITION', 'STAMPS', 'YEAR', 'PRICE', 'BINDING', 'LOCATION-IREF', 'CODES']

@@ -36,6 +36,14 @@ repeated_choice_as_mixed = true
 # are reported. Differs from [TPS_GST_00382], which allows it to be ignored when merging.
 file_info_comment = "compare"
 
+# Items of these roles are identified by one role of theirs, in place of their single-valued
+# children: an ECUC value by the definition it gives a value to (and its variation point's
+# label), so two files giving one parameter different values are one value that differs, not two
+# values. A definition given more than once under one container (a parameter or reference of
+# several values) is a set: its values are told apart by their content. Differs from automat,
+# which keys an ECUC value by every single-valued child, the value included.
+item_identity = { "EcucContainerValue.parameterValue" = "definition", "EcucContainerValue.referenceValue" = "definition" }
+
 # Multi-valued primitive values keyed by themselves merge when identical, and non-splittable
 # collections repeated across fragments are each kept (keyed ones report a collision): both
 # follow from the rules above, not settings. They differ from [TPS_GST_00449] and from

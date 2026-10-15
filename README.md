@@ -51,6 +51,9 @@ arxmodel check --rules autosar.rules.txt <file|dir>...                         #
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
+arxmodel diff A B                                   # what changed, by AUTOSAR path (no schema needed)
+arxmodel merge3 BASE OURS THEIRS -o OUT             # a three-way merge (no schema needed)
+arxmodel git-setup [REPO]                           # git's merge and diff drivers for *.arxml
 ```
 
 A rules file starts with a header giving its format's version (`# format:`; a file of another
@@ -219,6 +222,15 @@ keeps every one, in document order.
   vendor definitions) only to resolve references against: merged on their own, never reported.
   A path held by several elements is itself a finding, `duplicate_path`. `check` prints the
   external and unresolved references by the top-level package they point into.
+**ECUC values by their definition.** The schema's split key for an ECUC parameter or reference
+value is the item itself, which the policy's `item_itself` reads as its single-valued children, the
+value included: two files giving one parameter different values would be two values, and two
+sides of a merge changing it would keep both. The policy's `item_identity` names the roles whose
+items are identified by one role of theirs instead (ECUC values by `definition`, and their
+variation point's label); a definition given more than once under one container in the documents
+read takes several values, which are a set told apart by content, as with the built-in rules. A
+rules file records these roles (`# identity:`), since rule text cannot say a set.
+
 Each finding's severity comes from the policy's `[severity]` table (`"error"`, `"warning"`,
 `"ignore"`; keyed by layer, `"layer.kind"` or `"layer.kind:element"` / `"layer.kind:@attribute"`,
 the most specific winning; a key naming an unknown layer or kind is refused). The defaults for
@@ -321,6 +333,60 @@ described above; this list says where it departs from the specification, and whi
 7. **Abstract item types.** For an aggregation whose items may be of several subclasses, the
    specification takes the identity contributors of all of them together ([TPS_GST_00416]).
    Here each item kind is keyed by its own type's key.
+
+## Which rules (schema, rules file, or built-in)
+
+Every command that merges says on one line which rules it read by (`rules: built-in identity
+rules (...)`, `rules: schema AUTOSAR_xxxxx from DIR (...)`, `rules: rules file ...`), so a CI log
+and a local run can be compared. The rules are, in order: `--no-schema` forces the built-in ones;
+`--rules FILE`; `--schema-dir DIR`; the schema directory of the environment
+(`ARXMODEL_SCHEMA_DIR`) or of the user's configuration (`schema_dir = "DIR"` in
+`~/.config/arxmodel/config.toml`, `$XDG_CONFIG_HOME` respected); else the **built-in identity
+rules** ([identity.toml](identity.toml), committed and built in), which need no schema, so CI and
+git merges never need the AUTOSAR XSD:
+
+- an element with a SHORT-NAME child is named by it (and by its VARIATION-POINT's SHORT-LABEL);
+- ECUC values (`*-PARAM-VALUE`, `*-REFERENCE-VALUE`, `ECUC-CONTAINER-VALUE`) by their
+  DEFINITION-REF and variation point label (a container by its SHORT-NAME too); a definition given
+  more than once under one parent, in any version read, takes several values: those are a set,
+  each value told apart by its content, so two sides adding values merge, while two sides
+  changing a single value conflict;
+- an element name some version holds with only named children (AR-PACKAGES, ELEMENTS, ...) is a
+  list, one with its namesakes under a parent (an emptied one too), so the lists of several files
+  merge;
+- anything else is matched by its name and its place, and its order counts (a reorder is
+  reported); the order of named elements does not.
+
+They are hand-written conventions of the format, not read from a schema; a schema or a rules file
+replaces them with the exact rules. Without a schema, `check` runs the merge layer and the
+references (an element with a DEST attribute, resolved by path, any kind fitting); the XML schema
+and multiplicity layers need the schema.
+
+## Comparing and merging versions (`diff`, `merge3`, git)
+
+`diff A B` compares two versions (files, or directories of files) as models: both are merged by
+the same rules (the built-in ones, or the schema of the newest release either declares), and
+flatxml's diff is read by AUTOSAR path. Where an element is written, the order of items whose
+order means nothing, and the attributes the merge lets differ (UUID, namespace declarations, xsi:
+attributes) are not changes. One line a change: `- removed`, `+ added`, `> moved`, `~ text`,
+`@ attribute`, each with its positions. Exit 0 when the versions are the same model, 1 when they
+differ.
+
+`merge3 BASE OURS THEIRS [-o OUT]` merges two changed versions on their base with flatxml's
+three-way merge: every byte no change touched stays as the base has it. Where the sides change one
+node differently, ours is taken and the conflict is printed by AUTOSAR path on standard error. The
+result is checked (by the same rules: the merge and references, or every layer with a schema) and
+what that finds is printed; the exit code says whether the merge was clean (0) or had conflicts
+(1). On directories it writes every file of the base to OUT, as merged; a file new on one side is
+merged into the base's files rather than written as a new one. Exit 2, for any command, when
+something kept it from answering.
+
+`git-setup [REPO]` adds `*.arxml merge=arxml diff=arxml` to the repository's `.gitattributes` and
+configures the drivers there: `merge3 %O %A %B -o %A` as the merge driver (a conflict leaves the
+file unmerged, holding ours, with the conflicts named) and `git-diff` as the diff driver. The rules
+options given are recorded in the drivers; with none, they read by what is configured where they
+run, so CI uses the built-in rules. `scripts/git_driver_test.sh` runs real merges with no schema
+anywhere.
 
 ## Build and test
 

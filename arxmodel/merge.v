@@ -50,6 +50,11 @@ pub mut:
 	flat_wrappers int
 	// item kinds whose split key lost a part, so they are one child each
 	lost_keys int
+	// an element without a key is matched by its place, by design (the built-in identity rules):
+	// not a missing key
+	unkeyed_by_design bool
+	// roles whose items are identified by a definition (the policy's item_identity)
+	identity_roles []IdentityRole
 }
 
 // Conflict is an element pair under a parent path that roles of different holders still give
@@ -440,8 +445,9 @@ fn (rs &RuleSet) describe(c Cands, ks []int) []string {
 pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 	mut c := rs.candidates()
 	mut f := Flat{
-		flat_wrappers: c.flats
-		lost_keys:     c.lost_keys
+		flat_wrappers:  c.flats
+		lost_keys:      c.lost_keys
+		identity_roles: rs.identity_roles()
 	}
 	// the pairs roles give different rules
 	for pair in c.pairs {
@@ -872,7 +878,8 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
-	flat.rules = with_settings(flat0.rules, fold, ignore)
+	flat.rules = with_settings(with_value_keys(flat0.rules, flat0.value_keys([m])), fold,
+		ignore)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
 	msw := time.new_stopwatch()
@@ -913,6 +920,9 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 		}
 	}
 	for k, pr in view.problems {
+		if flat.unkeyed_by_design && pr.kind == .missing_key {
+			continue
+		}
 		// the merged parent of the children concerned, and its parent: the path a conflict names
 		mut parent := view.node(pr.node)
 		mut child := pr.what
@@ -940,7 +950,34 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	mut times := map[string]time.Duration{}
 	times['merge'] = sw.elapsed() - paths_took
 	times['paths'] = paths_took
+	// with no schema, references are found by their DEST attribute and resolved by path alone
+	mut refs := RefStats{}
+	mut refs_from_files := 0
+	if !typed && !opts.skip_references {
+		rsw := time.new_stopwatch()
+		// files loaded only to resolve references against, merged on their own
+		mut extra := []RefView{}
+		if opts.refs_from.len > 0 {
+			mx := load(opts.refs_from)!
+			refs_from_files = mx.set.docs.len
+			cx := check_typed(mx, flat0, source, st, p, CheckOptions{
+				...opts
+				refs_from:       []
+				skip_references: true
+			}, ty)!
+			extra << RefView{
+				view: cx.view
+				ix:   cx.index
+			}
+		}
+		found, stats := reference_findings(mut view, index, mut typing, extra, p)
+		findings << found
+		refs = stats
+		times['reference'] = rsw.elapsed()
+	}
 	return Checked{
+		refs:            refs
+		refs_from_files: refs_from_files
 		governing:   source
 		flat:        flat
 		view:        view

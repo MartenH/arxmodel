@@ -232,7 +232,7 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 		mut path := base.pop()
 		ct := ix.typ[n.i]
 		named := !typed || ct == no_type || ty.referrable_type(ct)
-		name := if named { n.child_id(sn, '').text().trim_space() } else { '' }
+		name := if named { short_name_of(n, sn) } else { '' }
 		if name != '' {
 			path = '${path}/${name}'
 			k := ix.key(path)
@@ -272,6 +272,21 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 	return ix
 }
 
+// short_name_of is a node's SHORT-NAME text: its single child of that name, or, where the rules
+// keep every occurrence apart (the built-in identity rules), its first child of that name.
+fn short_name_of(n flatxml.MNode, sn u32) string {
+	c := n.child_id(sn, '')
+	if c.ok() {
+		return c.text().trim_space()
+	}
+	for k in n.children() {
+		if k.tag() == sn {
+			return k.text().trim_space()
+		}
+	}
+	return ''
+}
+
 // merged_path is a merged node's AUTOSAR path: its nearest referrable ancestor's (or its own)
 // path, then, after `#`, the elements below it down to the node, each with its key where the
 // merge gives it one (`NAME[key]`); `#` and the elements from the root where no ancestor is
@@ -284,7 +299,7 @@ pub fn merged_path(n flatxml.MNode, ix &PathIndex) string {
 			return join_path(p, inner)
 		}
 		k := cur.key()
-		inner << if flatxml.empty_key(k) {
+		inner << if flatxml.empty_key(k) || k == list_key(cur.name()) {
 			cur.name()
 		} else {
 			'${cur.name()}[${flatxml.show_key(k)}]'
@@ -352,7 +367,8 @@ pub mut:
 }
 
 // reference_findings resolves every reference of the merged model (an element whose
-// declaration's type carries a DEST attribute) against the paths of the model and of the extra
+// declaration's type carries a DEST attribute; with no schema, an element with a DEST, whose
+// target may then be of any kind) against the paths of the model and of the extra
 // views (models loaded only to resolve references):
 // - `empty`: no path;
 // - `relative`: BASE, or a path not starting at the root; not resolved here;
@@ -389,12 +405,19 @@ pub fn reference_findings(mut v flatxml.Merged, ix &PathIndex, mut ty Typing, ex
 		ix:   ix
 	}]
 	views << extra
+	typed := ty.s != unsafe { nil }
 	for i in 0 .. v.len() {
-		d := ix.decl[i]
-		if d == no_type {
+		mut allowed := []string{}
+		if typed {
+			d := ix.decl[i]
+			if d == no_type {
+				continue
+			}
+			allowed = ty.reference_dests(d) or { continue }
+		} else if v.node(u32(i)).attr(dest_attribute) == '' {
+			// with no schema, a reference is what carries a DEST
 			continue
 		}
-		allowed := ty.reference_dests(d) or { continue }
 		n := v.node(u32(i))
 		st.checked++
 		target := n.text().trim_space()
@@ -444,7 +467,9 @@ fn resolve(target string, dest string, views []RefView, package string, mut ty T
 		for h in rv.ix.holders(target) {
 			name := rv.view.node(h).name()
 			ct := rv.ix.typ[h]
-			if name == dest || (ct != no_type && dest in ty.kinds_of(ct)) {
+			// with no schema, any kind fits: DEST may name a class
+			untyped := ty.s == unsafe { nil }
+			if untyped || name == dest || (ct != no_type && dest in ty.kinds_of(ct)) {
 				exact := rv.ix.path_of[h]
 				if exact == target {
 					return '', ''

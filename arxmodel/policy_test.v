@@ -178,3 +178,15 @@ fn test_policy_settings_and_their_overrides() {
 	))!
 	assert folded.view.len() < apart.view.len()
 }
+
+fn test_item_identity_is_a_table_of_roles() {
+	p := default_policy()
+	assert p.item_identity == {
+		'EcucContainerValue.parameterValue': 'definition'
+		'EcucContainerValue.referenceValue': 'definition'
+	}
+	assert toml_setting('item_identity A.b=c D.e=f') == '[merge] item_identity = { "A.b" = "c", "D.e" = "f" }'
+	refused(policy_text_with('item_identity', '"definition"'), '`merge.item_identity` takes a table of "Class.role" = "role", not "definition"')
+	refused(policy_text_with('item_identity', '{ "parameterValue" = "definition" }'), '`merge.item_identity`: "parameterValue" is not a role, Class.role')
+	refused(policy_text_with('item_identity', '{ "A.b" = 1 }'), '`merge.item_identity`: "A.b" takes a role name, not 1')
+}

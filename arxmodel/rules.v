@@ -620,6 +620,15 @@ fn (rs &RuleSet) resolve_key(mut r Rule, start xsd.TypeRef, for_items string) []
 	mut empty_itself := []string{}
 	for spec in r.key_spec {
 		if spec == r.role {
+			// the policy identifies the item by one role of its, in place of its single values
+			if by := rs.policy.item_identity[r.name] {
+				w := rs.walk_roles(start, [by]) or {
+					r.problems << Problem{'key role not found', 'item identity "${by}" for ${for_items}: ${err.msg()}'}
+					continue
+				}
+				keys << KeyPath{w.steps, w.all}
+				continue
+			}
 			own := rs.itself_keys(start)
 			if own.len == 0 {
 				empty_itself << spec
@@ -820,4 +829,26 @@ fn (mut rs RuleSet) check_naming(mut r Rule) {
 			}} the items'}
 		}
 	}
+}
+
+// identity_roles are the wrapper roles the policy identifies by one role of their items: the
+// wrapper, its items, and the resolved paths of their identity and of the rest of the key.
+pub fn (rs &RuleSet) identity_roles() []IdentityRole {
+	mut out := []IdentityRole{}
+	for r in rs.rules {
+		if r.name !in rs.policy.item_identity || !r.wrapper || r.flat || r.items.len == 0 {
+			continue
+		}
+		key := r.items[0].key
+		if key.len == 0 {
+			continue
+		}
+		out << IdentityRole{
+			parent:     r.element
+			items:      r.items.map(it.element)
+			definition: key[0].steps.join('/')
+			label:      if key.len > 1 { key[1].steps.join('/') } else { '' }
+		}
+	}
+	return out
 }

@@ -84,6 +84,11 @@ pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	for c in f.conflicts {
 		out << '# conflict: ${c.parent} ${c.child} = ${c.rules.join(' ; ')}'
 	}
+	// roles whose items are identified by a definition: their rules key by it, and a definition
+	// given several times is a set, which rule text cannot say
+	for r in f.identity_roles {
+		out << '# identity: ${r.parent} ${r.items.join(',')} ${r.definition} ${r.label}'.trim_space()
+	}
 	body := flatxml.format_rules(flatxml.RuleSet{
 		...f.rules
 		fold:         st.fold
@@ -116,6 +121,17 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 			'flatxml' { pv.flatxml = value }
 			'policy' { pv.policy << value }
 			'ignore-declarations' { st.ignore_declarations = value == 'yes' }
+			'identity' {
+				w := value.fields()
+				if w.len >= 3 {
+					f.identity_roles << IdentityRole{
+						parent:     w[0]
+						items:      w[1].split(',')
+						definition: w[2]
+						label:      if w.len > 3 { w[3] } else { '' }
+					}
+				}
+			}
 			'conflict' {
 				pair := value.all_before(' = ')
 				f.conflicts << Conflict{

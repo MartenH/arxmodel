@@ -43,3 +43,6 @@ jobs:
           bin/arxmodel list --schema-dir testdata/schemas BOOK testdata/refs
           bin/arxmodel merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
           bin/arxmodel check --schema-dir testdata/schemas "$RUNNER_TEMP/model.arxml"
+
+      - name: Git merge and diff drivers, with no schema
+        run: scripts/git_driver_test.sh bin/arxmodel

@@ -32,6 +32,9 @@ pub mut:
 	item_itself              ItemItself
 	repeated_choice_as_mixed bool   = true
 	package_element          string = 'AR-PACKAGE'
+	// roles whose items are identified by one role of theirs (`Class.role` -> role), in place of
+	// their single-valued children
+	item_identity map[string]string
 	// a finding's severity by `layer`, `layer.kind` or `layer.kind:what`; error where unset
 	severities map[string]Severity
 }
@@ -55,7 +58,18 @@ pub fn (p Policy) rule_settings() []string {
 		'governing newest_declared',
 		'splittable schema',
 		'repeated_choice_as_mixed ${if p.repeated_choice_as_mixed { 'yes' } else { 'no' }}',
+		'item_identity ${p.identity_list()}'.trim_space(),
 	]
+}
+
+// identity_list is item_identity as `Class.role=role` words, sorted.
+fn (p Policy) identity_list() string {
+	mut out := []string{}
+	for role, by in p.item_identity {
+		out << '${role}=${by}'
+	}
+	out.sort()
+	return out.join(' ')
 }
 
 // merge_settings are the settings a merge applies, `name value` each.
@@ -83,6 +97,7 @@ fn policy_settings() []PolicySetting {
 		PolicySetting{'merge', 'ignore_attrs', read_ignore_attrs},
 		PolicySetting{'merge', 'ignore_declarations', read_ignore_declarations},
 		PolicySetting{'merge', 'item_itself', read_item_itself},
+		PolicySetting{'merge', 'item_identity', read_item_identity},
 		PolicySetting{'merge', 'repeated_choice_as_mixed', read_repeated_choice},
 		PolicySetting{'merge', 'file_info_comment', read_file_info_comment},
 		PolicySetting{'schema', 'governing', read_governing},
@@ -124,6 +139,21 @@ fn read_ignore_declarations(mut p Policy, name string, v toml.Any) ! {
 fn read_item_itself(mut p Policy, name string, v toml.Any) ! {
 	one_of(name, v, ['single_values'])!
 	p.item_itself = .single_values
+}
+
+fn read_item_identity(mut p Policy, name string, v toml.Any) ! {
+	if v !is map[string]toml.Any {
+		return error('policy: `${name}` takes a table of "Class.role" = "role", not ${show_value(v)}')
+	}
+	for role, by in v.as_map() {
+		if role.count('.') != 1 || role.starts_with('.') || role.ends_with('.') {
+			return error('policy: `${name}`: "${role}" is not a role, Class.role')
+		}
+		if by !is string || by.string() == '' || by.string().contains_any(' .') {
+			return error('policy: `${name}`: "${role}" takes a role name, not ${show_value(by)}')
+		}
+		p.item_identity[role] = by.string()
+	}
 }
 
 fn read_repeated_choice(mut p Policy, name string, v toml.Any) ! {
@@ -306,6 +336,10 @@ pub fn toml_setting(line string) string {
 		}
 		'ignore_attrs' {
 			'[' + value.fields().map('"' + it + '"').join(', ') + ']'
+		}
+		'item_identity' {
+			'{ ' + value.fields().map('"${it.all_before('=')}" = "${it.all_after('=')}"').join(', ') +
+				' }'
 		}
 		else {
 			'"${value}"'

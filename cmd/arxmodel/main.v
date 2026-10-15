@@ -26,6 +26,12 @@
 //                                              as one document: not where check finds errors,
 //                                              unless --force
 //
+//   arxmodel diff (--schema-dir DIR | --rules FILE) A B
+//   arxmodel merge3 (--schema-dir DIR | --rules FILE) BASE OURS THEIRS [-o OUT]
+//                                              a semantic diff, and a three-way merge, by
+//                                              AUTOSAR path
+//   arxmodel git-setup, git-diff                git's merge and diff drivers
+//
 // rules, check and merge take --policy FILE, the merge policy (policy.toml, built in, by default).
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
@@ -79,7 +85,25 @@ const usage = 'usage:
       file, and the root carries the schema location of the first file that declares the
       governing release. Nothing is written where check would exit 1 (errors, files not read or
       declaring no schema), unless --force
-  --policy FILE (rules, check, merge, get, list): the merge policy, in place of the built-in policy.toml
+  arxmodel diff (--schema-dir DIR | --rules FILE) A B
+      what changed from version A to version B (each a file or a directory), by AUTOSAR path:
+      both merged by the same rules (the newest release either declares), so where an element
+      is written, the order of items whose order means nothing, and the attributes the merge lets
+      differ are not changes. One line a change: - removed, + added, > moved, ~ text, @ attribute.
+      Exit 0 when they are the same model, 1 when they differ
+  arxmodel merge3 (--schema-dir DIR | --rules FILE) BASE OURS THEIRS [-o OUT]
+      merge OURS and THEIRS, two changed versions of BASE (files, or directories), on BASE: every
+      byte no change touched kept as BASE has it; written to OUT (a file, or a directory for
+      directories; standard output by default for files). Where the sides change one node
+      differently, ours is taken and the conflict printed by AUTOSAR path on standard error.
+      Exit 0 when clean, 1 on conflicts
+  arxmodel git-setup (--schema-dir DIR | --rules FILE) [REPO]
+      set up the git merge and diff drivers for *.arxml in a repository (.gitattributes, and the
+      configuration of the repository, calling this binary as merge3 and git-diff)
+  arxmodel git-diff (--schema-dir DIR | --rules FILE) path old-file old-hex old-mode new-file new-hex new-mode
+      the external diff driver of git
+  Exit 2, for any command, when something kept it from answering (an option, a file not read)
+  --policy FILE (rules, check, merge, get, list, diff, merge3): the merge policy, in place of the built-in policy.toml
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU'
 
 struct Opts {
@@ -101,8 +125,57 @@ mut:
 	refs_from  []string // check: files loaded only to resolve references against
 	out        string   // merge: where the merged model is written ('-' for standard output)
 	force      bool     // merge: write it whatever the findings
+	no_schema  bool     // the built-in identity rules, whatever schema is configured
+	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
+	origin     string   // resolved: where the rules come from, for the `rules:` line
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
+}
+
+// resolve_rules decides what the files are read by: --no-schema forces the built-in identity
+// rules; else --rules or --schema-dir; else the schema directory of the environment
+// (ARXMODEL_SCHEMA_DIR) or the configuration file; else the built-in rules, which need no schema.
+fn resolve_rules(mut o Opts) ! {
+	check_rule_options(o)!
+	if o.no_schema {
+		o.builtin, o.origin = true, '--no-schema'
+		return
+	}
+	if o.rules_file != '' {
+		o.origin = '--rules'
+		return
+	}
+	if o.schema_dir != '' {
+		o.origin = '--schema-dir'
+		return
+	}
+	dir, origin := arxmodel.configured_schema_dir()!
+	if dir != '' {
+		o.schema_dir, o.origin = dir, origin
+		return
+	}
+	o.builtin, o.origin = true, 'no schema configured'
+}
+
+// check_rule_options refuses rules options that contradict each other.
+fn check_rule_options(o Opts) ! {
+	if o.schema_dir != '' && o.rules_file != '' {
+		return error('--schema-dir and --rules: one or the other')
+	}
+	if o.no_schema && (o.schema_dir != '' || o.rules_file != '') {
+		return error('--no-schema takes neither --schema-dir nor --rules')
+	}
+}
+
+// rules_line says which rules a command reads by, so a CI log and a local run can be compared.
+fn rules_line(o Opts, name string) string {
+	if o.builtin {
+		return 'rules: built-in identity rules (${o.origin})'
+	}
+	if o.rules_file != '' {
+		return 'rules: rules file ${o.rules_file}, made from ${name}'
+	}
+	return 'rules: schema ${name} from ${o.schema_dir} (${o.origin})'
 }
 
 fn main() {
@@ -111,7 +184,7 @@ fn main() {
 		eprintln(usage)
 		exit(2)
 	}
-	opts := parse_opts(args[1..]) or {
+	mut opts := parse_opts(args[1..]) or {
 		eprintln(err.msg())
 		eprintln(usage)
 		exit(2)
@@ -120,17 +193,31 @@ fn main() {
 		'load' { ['--jobs'] }
 		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
-			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
-				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity',
-				'--skip-references', '--refs-from']
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
+				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
+				'--skip-multiplicity', '--skip-references', '--refs-from']
 		}
-		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--policy'] }
+		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
 		'merge' {
-			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
-				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity',
-				'--skip-references', '--refs-from', '--out', '--force']
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
+				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
+				'--skip-multiplicity', '--skip-references', '--refs-from', '--out', '--force']
 		}
+		'diff', 'merge3', 'git-diff' {
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--case-sensitive',
+				'--ignore-attr', '--check-attr', '--out']
+		}
+		'git-setup' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
 		else { []string{} }
+	}
+	if opts.paths.len == 0 && args[0] != 'git-setup' {
+		eprintln('no files or directories given')
+		eprintln(usage)
+		exit(2)
+	}
+	if opts.out != '' && args[0] in ['diff', 'git-diff'] {
+		eprintln('${args[0]} does not take -o')
+		exit(2)
 	}
 	for a in opts.given {
 		if a !in allowed {
@@ -138,40 +225,32 @@ fn main() {
 			exit(2)
 		}
 	}
-	if args[0] in ['check', 'merge', 'get', 'list'] && opts.schema_dir != '' && opts.rules_file != '' {
+	if args[0] in ['check', 'merge', 'get', 'list', 'diff', 'merge3', 'git-diff', 'git-setup']
+		&& opts.schema_dir != '' && opts.rules_file != '' {
 		eprintln('${args[0]} takes --schema-dir or --rules, not both')
 		exit(2)
+	}
+	// git-setup records only what it is given: the drivers resolve the rest when they run
+	if args[0] in ['check', 'merge', 'get', 'list', 'diff', 'merge3', 'git-diff', 'rules'] {
+		resolve_rules(mut opts) or {
+			eprintln(err.msg())
+			exit(2)
+		}
 	}
 	match args[0] {
 		'load' {
 			cmd_load(opts)
 		}
 		'get' {
-			if opts.schema_dir == '' && opts.rules_file == '' {
-				eprintln('get needs --schema-dir or --rules')
-				exit(2)
-			}
 			cmd_get(opts)
 		}
 		'list' {
-			if opts.schema_dir == '' && opts.rules_file == '' {
-				eprintln('list needs --schema-dir or --rules')
-				exit(2)
-			}
 			cmd_list(opts)
 		}
 		'check' {
-			if opts.schema_dir == '' && opts.rules_file == '' {
-				eprintln('check needs --schema-dir or --rules')
-				exit(2)
-			}
 			cmd_check(opts)
 		}
 		'merge' {
-			if opts.schema_dir == '' && opts.rules_file == '' {
-				eprintln('merge needs --schema-dir or --rules')
-				exit(2)
-			}
 			if opts.out == '' {
 				eprintln('merge needs -o OUT (or -o - for standard output)')
 				exit(2)
@@ -184,9 +263,21 @@ fn main() {
 			}
 			cmd_merge(opts)
 		}
+		'diff' {
+			cmd_diff(opts)
+		}
+		'merge3' {
+			cmd_merge3(opts)
+		}
+		'git-diff' {
+			cmd_git_diff(opts)
+		}
+		'git-setup' {
+			cmd_git_setup(opts)
+		}
 		'rules' {
 			if opts.schema_dir == '' {
-				eprintln('rules needs --schema-dir')
+				eprintln('rules needs a schema directory (--schema-dir, ${arxmodel.schema_dir_env} or schema_dir in ${arxmodel.config_path()})')
 				exit(2)
 			}
 			cmd_rules(opts)
@@ -237,6 +328,9 @@ fn parse_opts(args []string) !Opts {
 			'--force' {
 				o.force = true
 			}
+			'--no-schema' {
+				o.no_schema = true
+			}
 			'-o', '--out' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
@@ -276,9 +370,6 @@ fn parse_opts(args []string) !Opts {
 			}
 		}
 		k++
-	}
-	if o.paths.len == 0 {
-		return error('no files or directories given')
 	}
 	return o
 }
@@ -565,40 +656,27 @@ fn emit_rules(out Out, sc &arxmodel.Schemas, path string) {
 fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmodel.Schemas, arxmodel.Checked, time.Duration) {
 	m := load_or_exit(o, out)
 	policy := load_policy(o)
-	mut sw := time.new_stopwatch()
-	mut c := arxmodel.Checked{}
-	mut sc := arxmodel.Schemas{}
-	if o.rules_file != '' {
-		// the rules made earlier from the schema: nothing to find or compile
-		sc = arxmodel.declare_schemas(m)
-		print_undeclared(out, m, sc)
-		text := os.read_file(o.rules_file) or {
-			eprintln('${o.rules_file}: ${err.msg()}')
-			exit(1)
-		}
-		flat, pv, st := arxmodel.parse_rules_file(text) or {
-			eprintln('${o.rules_file}: ${err.msg()}')
-			exit(1)
-		}
-		warnings := arxmodel.rules_file_check(sc, pv, st, policy) or {
-			eprintln('${o.rules_file}: ${err.msg()}')
-			exit(1)
-		}
-		out.line('rules from ${o.rules_file}, made from ${pv.schema} (arxmodel ${pv.arxmodel}, flatxml ${pv.flatxml})')
-		for w in warnings {
+	ch := choose(o, [m], policy) or {
+		eprintln(err.msg())
+		exit(1)
+	}
+	sc := ch.sc
+	print_undeclared(out, m, sc)
+	if ch.typing == unsafe { nil } {
+		line := rules_line(o, ch.name)
+		out.line(if o.rules_file != '' {
+			line + ' (arxmodel ${ch.pv.arxmodel}, flatxml ${ch.pv.flatxml})'
+		} else {
+			line
+		})
+		for w in ch.warnings {
 			out.line('warning: ${w}')
 		}
 		if !(opts.skip_xml && opts.skip_multiplicity && opts.skip_references) {
-			out.line('the XML schema, multiplicity and reference layers need the schema (--schema-dir); not checked')
-		}
-		sw = time.new_stopwatch()
-		c = arxmodel.check_with(m, flat, pv.schema, st, policy, opts) or {
-			out.line(err.msg())
-			exit(1)
+			out.line('the XML schema and multiplicity layers need the schema: not checked; references are found by their DEST attribute and resolved by path, any kind fitting')
 		}
 	} else {
-		sc = arxmodel.compile_schemas(m, o.schema_dir, policy: policy)
-		print_undeclared(out, m, sc)
+		out.line(rules_line(o, ch.name))
 		for g in sc.governing {
 			if g.use >= 0 {
 				out.line('governed by ${sc.uses[g.use].name}${if g.note != '' {
@@ -608,11 +686,11 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 				}}')
 			}
 		}
-		sw = time.new_stopwatch()
-		c = arxmodel.check(m, sc, opts) or {
-			out.line(err.msg())
-			exit(1)
-		}
+	}
+	sw := time.new_stopwatch()
+	c := check_by(&ch, m, policy, opts) or {
+		out.line(err.msg())
+		exit(1)
 	}
 	return m, sc, c, sw.elapsed()
 }

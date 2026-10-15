@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A synthetic model for arxmodel's diff and merge3 tests, written here: no schema needed. -->
+<MODEL>
+  <PACKAGES>
+    <PACKAGE>
+      <SHORT-NAME>Body</SHORT-NAME>
+      <ELEMENTS>
+        <LAMP UUID="u1">
+          <SHORT-NAME>Head</SHORT-NAME>
+          <WATTS>55</WATTS>
+          <NOTES><NOTE>first</NOTE><NOTE>second</NOTE></NOTES>
+        </LAMP>
+        <LAMP UUID="u2">
+          <SHORT-NAME>Tail</SHORT-NAME>
+          <WATTS>5</WATTS>
+          <TARGET-REF DEST="LAMP">/Body/Head</TARGET-REF>
+        </LAMP>
+        <MODULE-VALUES>
+          <SHORT-NAME>LampCfg</SHORT-NAME>
+          <PARAMETERS>
+            <NUMBER-PARAM-VALUE>
+              <DEFINITION-REF DEST="NUMBER-DEF">/Defs/Lamp/Count</DEFINITION-REF>
+              <VALUE>2</VALUE>
+            </NUMBER-PARAM-VALUE>
+            <NUMBER-PARAM-VALUE>
+              <DEFINITION-REF DEST="NUMBER-DEF">/Defs/Lamp/Dim</DEFINITION-REF>
+              <VALUE>10</VALUE>
+            </NUMBER-PARAM-VALUE>
+          </PARAMETERS>
+          <REFERENCES>
+            <SIGNAL-REFERENCE-VALUE>
+              <DEFINITION-REF DEST="REF-DEF">/Defs/Lamp/Signal</DEFINITION-REF>
+              <VALUE-REF DEST="SIGNAL">/Sig/A</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>
+          </REFERENCES>
+        </MODULE-VALUES>
+      </ELEMENTS>
+    </PACKAGE>
+  </PACKAGES>
+</MODEL>
