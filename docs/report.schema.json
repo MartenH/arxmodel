@@ -31,7 +31,20 @@
         "warnings": { "type": "integer", "minimum": 0 },
         "ignored": { "type": "integer", "minimum": 0 },
         "inputs": { "type": "integer", "minimum": 0 },
-        "took_ms": { "type": "number", "minimum": 0 }
+        "took_ms": { "type": "number", "minimum": 0 },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["number", "severity", "reason", "matched"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "severity": { "enum": ["error", "warning", "ignore"] },
+              "reason": { "type": "string" },
+              "matched": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
       }
     },
     "inputs": {
@@ -55,7 +68,7 @@
         "required": ["layer", "kind", "rule", "severity", "what", "in_conflict", "path", "message",
           "locations"],
         "properties": {
-          "layer": { "enum": ["merge", "xml_schema", "multiplicity", "reference"] },
+          "layer": { "enum": ["merge", "xml_schema", "multiplicity", "reference", "policy"] },
           "kind": { "type": "string" },
           "rule": { "type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$" },
           "severity": { "enum": ["error", "warning", "ignore"] },
@@ -63,6 +76,9 @@
           "in_conflict": { "type": "boolean" },
           "path": { "type": "string" },
           "message": { "type": "string" },
+          "filter": { "type": "integer", "minimum": 1 },
+          "reason": { "type": "string" },
+          "policy_severity": { "enum": ["error", "warning", "ignore"] },
           "locations": {
             "type": "array",
             "items": {

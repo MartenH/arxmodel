@@ -95,8 +95,9 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
           sets of files.
         - (c) git integration: a merge driver and a diff driver (`.gitattributes`:
           `*.arxml merge=arxml diff=arxml`), set up by `arxmodel git-setup`.
-        - (d) machine-readable output: JSON for check, diff and merge3; SARIF (code-scanning
-          annotations); JUnit; stable exit codes.
+        - (d) machine-readable output: JSON for check, diff and merge3; JUnit; stable exit codes.
+          (SARIF was built and removed: nothing consumes it here; Bitbucket's Code Insights are
+          fed from the JSON report.)
         - (e) release binaries (Linux, Windows) on GitHub releases.
         - (f) the schema in CI: none needed. Built-in identity rules, hand-written conventions
           committed here (a SHORT-NAME names an element, ECUC values are named by their

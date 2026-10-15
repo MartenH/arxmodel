@@ -55,7 +55,7 @@ arxmodel rules --schema-dir DIR --problems --dump rules.tsv <file|dir>...
 arxmodel rules --schema-dir DIR --emit autosar.rules.txt <file|dir>...           # the merge rules, as a file
 arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   # merge, and what the rules forbid
 arxmodel check --rules autosar.rules.txt <file|dir>...                         # the same, by the rules file
-arxmodel check --schema-dir DIR --format sarif <file|dir>... > check.sarif      # or json, junit: for machines
+arxmodel check --schema-dir DIR --format json <file|dir>... > check.json        # or junit: for machines
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
@@ -251,10 +251,9 @@ kind, marked `(in conflict)`: a key for its kind applies to it, else `merge.in_c
 finding is dropped past a count; `--jobs` sets that layer's threads. `check` prints the
 counts by severity, layer and kind, then the errors and warnings (the first 20 of each kind,
 `--all` for every one), and exits 1 on errors only (0 clean, 1 errors, files not read or
-declaring no schema, 2 when it cannot run, for every command). `--format json|sarif|junit`
-writes the report for machines instead (arxmodel's own JSON with a versioned schema, SARIF
-2.1.0, JUnit XML; [docs/report.md](docs/report.md)) to standard output, what was read going to
-standard error. `--skip-xml`, `--skip-multiplicity` and
+declaring no schema, 2 when it cannot run, for every command). `--format json|junit`
+writes the report for machines instead (arxmodel's own JSON with a versioned schema, JUnit XML;
+[docs/report.md](docs/report.md)) to standard output, what was read going to standard error. `--skip-xml`, `--skip-multiplicity` and
 `--skip-references` leave a layer out; merging from a rules file has no schema, so it checks the
 merge layer only (the path index is still built). `get` and `list` merge the same way and read
 the index: `get` prints the element's name, how many elements it is merged from and where each
@@ -359,6 +358,33 @@ it in each of those, as automat does (`arxmodel policy --diff automat` lists the
 Both identify ECUC parameter and reference values by their definition (`item_identity`, below):
 the schema's split key for them is the item itself, which neither copying (two values for one
 parameter given by two files) nor single values (the value part of the identity) keys usefully.
+
+### Filters
+
+The policy's `[[filter]]` entries give a severity to the findings each matches, after
+`[severity]`: a finding takes the first filter it matches, and must match every field the filter
+gives. `match` (a layer, `"layer.kind"`, `"layer.kind:element"`, as `[severity]` keys;
+`"merge.in_conflict"` matches a merge finding on a pair in conflict, whatever its kind, as in
+`[severity]`), `path` (an AUTOSAR path glob: `*` one segment or part of one, `**` any segments;
+the `#` before the elements inside an identifiable one is a segment of its own, matched only by
+`#` or `**`; an element with a key matched by its name unless the glob gives the key, and a key's
+`[`, `]` and `\` are written escaped with `\`, as paths show them), `file` (a glob of the
+finding's files, relative to the paths checked, or absolute), `message` (a substring),
+`message_re` (an XML Schema pattern, flatxml's linear-time engine, which the whole message
+matches; V's own regex module is not used), `base` and `dest` (a reference's BASE and DEST
+attributes); then `severity` (required) and `reason` (recommended).
+
+A filter that matches nothing is a finding, `policy.unused_filter`: a warning unless the policy's
+`[severity]` says otherwise (the policy's own findings are warnings where it says nothing, every
+other finding an error). Such a report is filtered like any finding, but not by the filter it
+reports, so a filter ignoring `policy.unused_filter` quiets the others' reports and reports itself
+if it matches none. A filter whose `match` names a layer that did not run (`--skip-xml`, a rules
+file, no schema) is not reported. `merge3` checks its result with the same policy but without file
+filters, written against its inputs, and without unused reports.
+
+`check` prints what each filter matched; the JSON report carries the filter and its reason on
+each finding it changed, and the counts in its summary; JUnit lists the counts as properties. The
+shipped policies have none; policy.toml's comments end with two examples.
 
 ## Which rules (schema, rules file, or built-in)
 

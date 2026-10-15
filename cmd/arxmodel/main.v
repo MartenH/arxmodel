@@ -44,8 +44,8 @@
 // still printed. Every command exits 2 when it cannot run at all (usage, a rules or policy file
 // that cannot be read).
 //
-// check --format json|sarif|junit writes its report (arxmodel's JSON, docs/report.md; SARIF
-// 2.1.0; JUnit XML) to standard output and what it read to standard error.
+// check --format json|junit writes its report (arxmodel's JSON, docs/report.md; JUnit XML) to
+// standard output and what it read to standard error.
 module main
 
 import arxmodel
@@ -82,8 +82,8 @@ const usage = 'usage:
   arxmodel check --rules FILE ... <file|dir>...
       merge by a rules file instead of compiling the schema (the merge layer only); warns when
       the files declare a newer release than the file was made from
-  arxmodel check ... --format text|json|sarif|junit <file|dir>...
-      the report as text (the default), JSON (docs/report.md), SARIF 2.1.0 or JUnit XML on
+  arxmodel check ... --format text|json|junit <file|dir>...
+      the report as text (the default), JSON (docs/report.md) or JUnit XML on
       standard output, what was read on standard error; exit 0 clean, 1 errors (or files not
       read, declaring no schema, or no schema governing them), 2 when it cannot run
   arxmodel get (--schema-dir DIR | --rules FILE) [--jobs N] <path> <file|dir>...
@@ -278,7 +278,7 @@ fn main() {
 		}
 		'check' {
 			if opts.format != 'text' && opts.format !in arxmodel.report_formats {
-				eprintln('--format is text, json, sarif or junit, not ${opts.format}')
+				eprintln('--format is text, json or junit, not ${opts.format}')
 				exit(2)
 			}
 			cmd_check(opts)
@@ -805,6 +805,7 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 		skip_multiplicity: o.skip_mult
 		skip_references:   o.skip_refs
 		refs_from:         o.refs_from
+		roots:             o.paths
 		case_sensitive:    o.exact
 		ignore_attrs:      o.ignore
 		compare_attrs:     o.compare
@@ -907,6 +908,11 @@ fn report(out Out, o Opts, c &arxmodel.Checked, took time.Duration) int {
 			return c.refs.by_top[*b] - c.refs.by_top[*a]
 		})
 		out.line('${kind} references by top-level package: ${tops.map('${it.all_after(' ')} ${c.refs.by_top[it]}').join(', ')}')
+	}
+	// what each filter of the policy matched
+	for fl in arxmodel.filter_tallies(c) {
+		why := if fl.reason != '' { ': ${fl.reason}' } else { '' }
+		out.line('filter ${fl.number} (${fl.severity}${why}): ${plural(fl.matched, 'finding')}')
 	}
 	if c.unchecked_roles > 0 {
 		out.line("${c.unchecked_roles} occurrences of roles whose wrapper holds its items' content with no element per item: their counts not checked")

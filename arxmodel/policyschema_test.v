@@ -19,6 +19,24 @@ fn conforms(text string, schema map[string]json2.Any) ! {
 	}
 	for table, v in doc.to_any().as_map() {
 		ts := (tables[table] or { return error('a table the schema has not: [${table}]') }).as_map()
+		if table == 'filter' {
+			items := ts['items']!.as_map()
+			props := items['properties']!.as_map()
+			for k, f in v.array() {
+				for req in items['required']!.as_array() {
+					f.as_map()[req.str()] or { return error('filter ${k + 1}: no ${req.str()}') }
+				}
+				for key, value in f.as_map() {
+					ps := (props[key] or { return error('filter ${k + 1}: a field the schema has not: ${key}') }).as_map()
+					if e := ps['enum'] {
+						if value.string() !in e.as_array().map(it.str()) {
+							return error('filter ${k + 1}: ${key}: ${value.string()} is not one of the enum')
+						}
+					}
+				}
+			}
+			continue
+		}
 		if table == 'severity' {
 			allowed := ts['additionalProperties']!.as_map()['enum']!.as_array().map(it.str())
 			for k, sv in v.as_map() {
@@ -60,6 +78,15 @@ fn test_both_policy_files_conform_to_the_schema() {
 		text := os.read_file(os.join_path(@VMODROOT, name))!
 		assert text.starts_with('#:schema ./policy.schema.json\n'), name
 		conforms(text, schema) or { assert false, '${name}: ${err.msg()}' }
+	}
+	// with filters, as policy.toml's commented example has them
+	with_filters := default_policy_text + '\n[[filter]]\nmatch = "reference.relative"\nbase = "Trace"\nseverity = "ignore"\nreason = "traced"\n'
+	parse_policy(with_filters)!
+	conforms(with_filters, schema)!
+	if _ := conforms(with_filters.replace('severity = "ignore"\nreason', 'severity = "never"\nreason'),
+		schema)
+	{
+		assert false
 	}
 	// and the check refuses what does not conform
 	bad := default_policy_text.replace('key_case = "exact"', 'key_case = "loose"')

@@ -6,6 +6,7 @@ pub enum Layer {
 	xml_schema   // one file against its XML schema
 	multiplicity // a role's count in the merged model against the meta-model's
 	reference    // a reference against the element at its path
+	policy       // the policy itself: a filter that matched nothing
 }
 
 // Severity is what a finding means for a check: an error fails it, a warning is said, an
@@ -30,6 +31,14 @@ pub:
 	path        string
 	message     string
 	at          []string
+	// a reference finding: the reference's BASE and DEST attributes, which a filter may match
+	base string
+	dest string
+	// the filter that set the severity (its number in the policy, from 1; 0 for none), its
+	// reason, and the severity the policy's [severity] gave before it
+	filter int
+	reason string
+	was    Severity
 }
 
 pub fn (f Finding) str() string {
@@ -52,7 +61,10 @@ pub fn (p Policy) severity(layer Layer, kind string, what string) Severity {
 	if s := p.severities['${layer}.${kind}'] {
 		return s
 	}
-	return p.severities['${layer}'] or { Severity.error }
+	// what the policy says nothing of is an error, but for the policy's own findings: a warning
+	return p.severities['${layer}'] or {
+		if layer == .policy { Severity.warning } else { Severity.error }
+	}
 }
 
 // merge_severity is a merge problem's severity: a line for its kind (and what) applies whether
@@ -85,6 +97,7 @@ pub const known_kinds = {
 		'duplicate_id', 'unknown_idref', 'unbound_prefix', 'unexpected_element', 'missing_element',
 		'unsupported', 'not_checked']
 	'multiplicity': ['below_min', 'above_max']
+	'policy':       ['unused_filter']
 	'reference':    ['unresolved', 'external', 'wrong_kind', 'case_mismatch', 'empty', 'relative',
 		'duplicate_path']
 }

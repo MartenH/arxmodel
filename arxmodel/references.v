@@ -305,11 +305,20 @@ pub fn merged_path(n flatxml.MNode, ix &PathIndex) string {
 			// an item keyed by its content: by its place among its namesakes
 			'${cur.name()}[#${place_of(cur)}]'
 		} else {
-			'${cur.name()}[${flatxml.show_key(k)}]'
+			'${cur.name()}[${escape_key(flatxml.show_key(k))}]'
 		}
 		cur = cur.parent()
 	}
 	return join_path('', inner)
+}
+
+// escape_key is a key as a path shows it: its `\\`, `[` and `]` escaped with `\\`, so a path is
+// read back segment by segment whatever its keys hold (see `segments`).
+pub fn escape_key(k string) string {
+	if !k.contains_any('[]\\') {
+		return k
+	}
+	return k.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
 }
 
 // place_of is a node's place among its parent's children of its name, from 1.
@@ -470,6 +479,8 @@ pub fn reference_findings(mut v flatxml.Merged, ix &PathIndex, mut ty Typing, ex
 			path:     merged_path(n, ix)
 			message:  msg
 			at:       n.fragments().map(v.pos(it))
+			base:     base
+			dest:     dest
 		}
 	}
 	return out, st

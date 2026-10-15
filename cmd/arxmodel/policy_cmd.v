@@ -48,4 +48,7 @@ fn cmd_policy(o Opts) {
 	for k in keys {
 		println('[severity] "${k}" = "${p.severities[k]}"')
 	}
+	for f in p.filters {
+		println('[[filter]] ${f.number} = ${f.toml()}')
+	}
 }

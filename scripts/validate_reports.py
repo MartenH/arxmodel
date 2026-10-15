@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Validate arxmodel's reports against their schemas.
 
-usage: validate_reports.py --json REPORT.json --sarif REPORT.sarif SARIF_SCHEMA.json
-                           --junit REPORT.xml JUNIT.xsd
+usage: validate_reports.py --json REPORT.json --junit REPORT.xml JUNIT.xsd
 
-The JSON report is checked against docs/report.schema.json (arxmodel's own). The SARIF schema
-(OASIS sarif-schema-2.1.0.json) and the JUnit XSD are fetched by the caller, never committed.
+The JSON report is checked against docs/report.schema.json (arxmodel's own). The JUnit XSD is
+fetched by the caller, never committed.
 Needs the jsonschema and lxml packages.
 """
 import argparse
@@ -22,15 +21,12 @@ HERE = pathlib.Path(__file__).resolve().parent.parent
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--json', action='append', default=[])
-    ap.add_argument('--sarif', nargs=2, action='append', default=[], metavar=('REPORT', 'SCHEMA'))
     ap.add_argument('--junit', nargs=2, action='append', default=[], metavar=('REPORT', 'XSD'))
     a = ap.parse_args()
     ours = json.loads((HERE / 'docs' / 'report.schema.json').read_text())
     bad = 0
     for path in a.json:
         bad += check_json(path, ours)
-    for path, schema in a.sarif:
-        bad += check_json(path, json.loads(pathlib.Path(schema).read_text()))
     for path, xsd in a.junit:
         s = etree.XMLSchema(etree.parse(xsd))
         if s.validate(etree.parse(path)):

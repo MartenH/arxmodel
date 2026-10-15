@@ -67,7 +67,9 @@ pub mut:
 	item_identity map[string]string
 	// a finding's severity by `layer`, `layer.kind` or `layer.kind:what`; error where unset
 	severities map[string]Severity
-	source     string // where it was read: `built-in`, `automat`, or a path
+	// [[filter]]: severities for the findings each matches, after severities, first match wins
+	filters []Filter
+	source  string // where it was read: `built-in`, `automat`, or a path
 }
 
 // default_policy is the built-in policy.toml.
@@ -193,7 +195,19 @@ pub fn policy_diff(p Policy, q Policy) []string {
 			out << '[severity] "${k}": ${a} -> ${b}'
 		}
 	}
+	// filters, by place
+	for k in 0 .. max_int(p.filters.len, q.filters.len) {
+		a := if k < p.filters.len { p.filters[k].toml() } else { '(none)' }
+		b := if k < q.filters.len { q.filters[k].toml() } else { '(none)' }
+		if a != b {
+			out << '[[filter]] ${k + 1}: ${a} -> ${b}'
+		}
+	}
 	return out
+}
+
+fn max_int(a int, b int) int {
+	return if a > b { a } else { b }
 }
 
 fn yes(b bool) string {
@@ -463,6 +477,9 @@ pub fn parse_policy(text string) !Policy {
 		}
 	}
 	for key, v in top {
+		if key == 'filter' {
+			continue
+		}
 		if v is map[string]toml.Any {
 			if key !in tables {
 				return error('policy: unknown table [${key}]')
@@ -499,6 +516,9 @@ pub fn parse_policy(text string) !Policy {
 			.boolean { st.choose(mut p, yes(boolean(name, v)!)) }
 			else { st.read(mut p, name, v)! }
 		}
+	}
+	if fs := top['filter'] {
+		p.filters = read_filters(fs)!
 	}
 	if sev := top['severity'] {
 		for key, v in sev.as_map() {

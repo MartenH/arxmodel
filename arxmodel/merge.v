@@ -744,6 +744,8 @@ pub:
 	skip_multiplicity bool     // no multiplicity layer
 	skip_references   bool     // no reference layer
 	refs_from         []string // files loaded only to resolve references against
+	roots             []string // the paths the model was loaded from: a filter's relative file glob is read from them
+	result_check      bool     // the model is a merge's result: file filters and unused filters do not apply
 	case_sensitive    bool     // keys compared as written, whatever the settings say
 	ignore_attrs      []string // attributes that may differ, besides the settings'
 	compare_attrs     []string // attributes the settings let differ that are compared after all
@@ -803,6 +805,9 @@ pub mut:
 	refs   RefStats
 	// files loaded only to resolve references against
 	refs_from_files int
+	// the policy's filters, and per filter the findings it matched
+	filters       []Filter
+	filter_counts []int
 	// how long each layer took
 	times map[string]time.Duration
 }
@@ -900,13 +905,29 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 		c.refs = stats
 		c.times['reference'] = sw.elapsed()
 	}
+	c.filter(sc.policy, opts)
 	return c
 }
 
 // check_with merges m's documents by the rules given (from the schema, or a rules file), with
 // the settings given and the overrides; the policy gives the findings their severities.
 pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, opts CheckOptions) !Checked {
-	return check_typed(m, flat0, source, st, p, opts, unsafe { nil })
+	mut c := check_typed(m, flat0, source, st, p, opts, unsafe { nil })!
+	c.filter(p, opts)
+	return c
+}
+
+// filter applies the policy's filters, after its severities, to what the check found: every layer
+// that ran, the inputs as the paths checked.
+fn (mut c Checked) filter(p Policy, opts CheckOptions) {
+	mut ran := c.times.keys()
+	ran << 'policy'
+	c.findings, c.filter_counts = apply_filters(c.findings, p, FilterOptions{
+		roots:  opts.roots
+		ran:    ran
+		result: opts.result_check
+	})
+	c.filters = p.filters
 }
 
 // check_typed is check_with, the referrable elements and references known from the schema's

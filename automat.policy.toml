@@ -80,6 +80,8 @@ merge = "error"
 # for ([TPS_GST_00417]), not a fault: a missing identity such as a short name is a role below its
 # fewest (multiplicity).
 "merge.missing_key" = "ignore"
+# A [[filter]] that matched nothing: the policy may be out of date.
+"policy.unused_filter" = "warning"
 xml_schema = "error"
 # What the XML schema validator does not support (xsi:type) is not a fault of the file.
 "xml_schema.unsupported" = "warning"
@@ -102,3 +104,24 @@ xml_schema = "error"
 "reference.case_mismatch" = "warning"
 "reference.relative" = "warning"
 "reference.duplicate_path" = "error"
+
+# Filters: severities for the findings each matches, after [severity], the first that matches
+# winning. A finding must match every field given: `match` (a layer, "layer.kind" or
+# "layer.kind:element", as [severity] keys), `path` (an AUTOSAR path glob: `*` one segment or
+# part of one, `**` any segments, `#` and what follows are segments too), `file` (a file glob,
+# relative to the paths checked, or absolute), `message` (a substring), `message_re` (an XML
+# Schema pattern the whole message matches), `base` and `dest` (a reference's BASE and DEST);
+# then `severity`, and a `reason`, recommended. A filter that matches nothing is reported
+# (policy.unused_filter). None by default; for example:
+#
+# [[filter]]
+# match = "reference.relative"
+# base = "Trace"
+# severity = "ignore"
+# reason = "Trace references are resolved by another tool, not by the model"
+#
+# [[filter]]
+# match = "merge.repeated_differs"
+# path = "/AUTOSAR/EcucDefs/**#DESC"
+# severity = "warning"
+# reason = "descriptions of the standard definitions differ between vendor copies"

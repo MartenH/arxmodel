@@ -59,7 +59,7 @@ fn setting_schema(st PolicySetting, def Policy) string {
 // `layer.kind:NAME` (`:@NAME` for an attribute).
 fn severity_key_pattern() string {
 	mut layers := []string{}
-	for layer in ['merge', 'xml_schema', 'multiplicity', 'reference'] {
+	for layer in ['merge', 'xml_schema', 'multiplicity', 'reference', 'policy'] {
 		kinds := known_kinds[layer] or { continue }
 		layers << '${layer}(\\\\.(${kinds.join('|')})(:@?[A-Za-z_][-A-Za-z0-9_.:]*)?)?'
 	}
@@ -100,6 +100,32 @@ pub fn policy_schema_json() string {
 		out << '      }'
 		out << '    },'
 	}
+	out << '    "filter": {'
+	out << '      "type": "array",'
+	out << '      "description": ${json_str('[[filter]]: severities for the findings each matches, after [severity]; a finding takes the first filter it matches, and a filter that matches nothing is reported (policy.unused_filter).')},'
+	out << '      "items": {'
+	out << '        "type": "object",'
+	out << '        "additionalProperties": false,'
+	fields := filter_fields()
+	out << '        "required": [${fields.filter(it.required).map(json_str(it.name)).join(', ')}],'
+	out << '        "properties": {'
+	for k, f in fields {
+		comma := if k + 1 < fields.len { ',' } else { '' }
+		mut parts := ['"type": "string"']
+		if f.enum_values.len > 0 {
+			parts << '"enum": [${f.enum_values.map(json_str(it)).join(', ')}]'
+		} else {
+			parts << '"minLength": 1'
+		}
+		if f.name == 'match' {
+			parts << '"pattern": ${json_str(severity_key_pattern()).replace('\\\\', '\\')}'
+		}
+		parts << '"description": ${json_str(f.description)}'
+		out << '          ${json_str(f.name)}: {${parts.join(', ')}}${comma}'
+	}
+	out << '        }'
+	out << '      }'
+	out << '    },'
 	out << '    "severity": {'
 	out << '      "type": "object",'
 	out << '      "description": ${json_str('Each finding\'s severity, by layer, "layer.kind" or "layer.kind:element" ("layer.kind:@attribute"); the most specific applies, and a finding no key names is an error.')},'

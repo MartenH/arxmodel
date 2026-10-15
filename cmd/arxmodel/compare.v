@@ -240,7 +240,12 @@ fn validate_result(o Opts, paths []string) {
 		eprintln('the result was not checked: ${err.msg()}')
 		return
 	}
-	c := check_by(&ch, m, policy, check_options(o)) or {
+	// the result is not the input: file filters, written against the input, and unused filters
+	// are left out of its check
+	c := check_by(&ch, m, policy, arxmodel.CheckOptions{
+		...check_options(o)
+		result_check: true
+	}) or {
 		eprintln('the result was not checked: ${err.msg()}')
 		return
 	}

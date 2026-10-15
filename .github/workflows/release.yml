@@ -88,7 +88,7 @@ jobs:
           dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
           dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
           dist/arxmodel.exe check --schema-dir testdata/schemas "$RUNNER_TEMP/model.arxml"
-          dist/arxmodel.exe check --format sarif --schema-dir testdata/schemas testdata/merge > "$RUNNER_TEMP/merge.sarif" || [ $? -eq 1 ]
+          dist/arxmodel.exe check --format json --schema-dir testdata/schemas testdata/merge > "$RUNNER_TEMP/merge.json" || [ $? -eq 1 ]
 
   publish:
     needs: [build, windows]

@@ -21,12 +21,8 @@ fn test_a_location_is_read_from_the_right() {
 	}
 }
 
-fn test_strings_and_file_names_are_escaped() {
+fn test_strings_are_escaped() {
 	assert jstr('a"b\\c\nd\x01') == '"a\\"b\\\\c\\nd\\u0001"'
-	assert file_uri('m/a b#1.arxml') == 'm/a%20b%231.arxml'
-	assert file_uri('/m/a.arxml') == 'file:///m/a.arxml'
-	assert file_uri('C:\\m\\a.arxml') == 'file:///C:/m/a.arxml'
-	assert file_uri('\\\\srv\\share\\a.arxml') == 'file://srv/share/a.arxml'
 	assert xattr('<a & "b">\n\t') == '&lt;a &amp; &quot;b&quot;&gt;&#10;&#9;'
 	assert xtext('a\r\n<b>\x01') == 'a&#13;\n&lt;b&gt;'
 }
@@ -41,7 +37,6 @@ fn test_bytes_that_are_not_utf8_are_replaced() {
 	}
 	r := Report{
 		command:    'check'
-		first_file: latin1
 		inputs:     [not_read(latin1, '${latin1}:3:9: end tag')]
 		findings:   [
 			Finding{
@@ -56,7 +51,6 @@ fn test_bytes_that_are_not_utf8_are_replaced() {
 	}
 	doc := json2.decode[json2.Any](r.json())!.as_map()
 	assert doc['inputs']!.as_array()[0].as_map()['file']!.str() == 'm/caf\uFFFD.arxml'
-	json2.decode[json2.Any](r.sarif())!
 	mut d := flatxml.parse_string(r.junit())!
 	d.free()
 }
@@ -116,39 +110,10 @@ fn test_files_not_checked_are_in_every_report() {
 	assert r.inputs[0].line == 2 && r.inputs[0].column == 49
 	doc := json2.decode[json2.Any](r.json())!.as_map()
 	assert doc['inputs']!.as_array().len == 2
-	sarif := json2.decode[json2.Any](r.sarif())!.as_map()
-	results := sarif['runs']!.as_array()[0].as_map()['results']!.as_array()
-	assert results.len == 2
-	assert results.map(it.as_map()['ruleId']!.str()) == ['input.not_read', 'input.undeclared']
 	assert r.junit().count('<failure ') == 2
 }
 
-fn test_the_sarif_report_has_a_result_per_finding_and_a_rule_per_kind() {
-	r := checked_report('merge')!
-	doc := json2.decode[json2.Any](r.sarif())!.as_map()
-	assert doc['version']!.str() == '2.1.0'
-	assert doc['\$schema']!.str().contains('sarif-schema-2.1.0')
-	run := doc['runs']!.as_array()[0].as_map()
-	rules := run['tool']!.as_map()['driver']!.as_map()['rules']!.as_array()
-	assert rules.map(it.as_map()['id']!.str()) == ['merge.value_differs', 'merge.ordered_split']
-	results := run['results']!.as_array()
-	assert results.len == r.findings.len
-	for res in results {
-		m := res.as_map()
-		assert m['level']!.str() == 'error'
-		assert rules[m['ruleIndex']!.int()].as_map()['id']!.str() == m['ruleId']!.str()
-		locs := m['locations']!.as_array()
-		assert locs.len == 2
-		// every result has a physical location
-		assert locs.all(it.as_map()['physicalLocation']!.as_map()['artifactLocation']!.as_map()['uri']!.str() != '')
-		for l in locs {
-			region := l.as_map()['physicalLocation']!.as_map()['region']!.as_map()
-			assert region['startLine']!.int() >= 1 && region['startColumn']!.int() >= 1
-		}
-	}
-}
-
-fn test_ignored_findings_are_left_out_of_sarif_and_junit() {
+fn test_ignored_findings_are_left_out_of_junit() {
 	r := Report{
 		command:  'check'
 		layers:   ['merge']
@@ -173,9 +138,6 @@ fn test_ignored_findings_are_left_out_of_sarif_and_junit() {
 	}
 	assert !r.failed()
 	assert json2.decode[json2.Any](r.json())!.as_map()['findings']!.as_array().len == 2
-	sarif := json2.decode[json2.Any](r.sarif())!.as_map()
-	results := sarif['runs']!.as_array()[0].as_map()['results']!.as_array()
-	assert results.len == 1 && results[0].as_map()['level']!.str() == 'warning'
 	j := r.junit()
 	assert !j.contains('value_differs') && !j.contains('<failure')
 	assert j.contains('<system-out>')
@@ -212,28 +174,6 @@ fn test_a_model_no_schema_governs_is_reported_as_an_input() {
 	assert r.failed()
 	assert r.inputs.map(it.kind) == ['ungoverned']
 	assert r.inputs[0].file.ends_with('a.arxml')
-	sarif := json2.decode[json2.Any](r.sarif())!.as_map()
-	res := sarif['runs']!.as_array()[0].as_map()['results']!.as_array()
-	assert res.len == 1 && res[0].as_map()['ruleId']!.str() == 'input.ungoverned'
 	assert r.junit().contains('name="input.ungoverned"')
 }
 
-fn test_a_finding_on_no_place_is_placed_in_the_model_s_first_file() {
-	r := Report{
-		command:    'check'
-		first_file: 'm/a.arxml'
-		findings:   [
-			Finding{
-				layer:    .merge
-				kind:     'conflict'
-				severity: .warning
-				path:     'P/C'
-				message:  'holders with different rules'
-			},
-		]
-	}
-	sarif := json2.decode[json2.Any](r.sarif())!.as_map()
-	loc := sarif['runs']!.as_array()[0].as_map()['results']!.as_array()[0].as_map()['locations']!.as_array()[0].as_map()
-	assert loc['physicalLocation']!.as_map()['artifactLocation']!.as_map()['uri']!.str() == 'm/a.arxml'
-	assert r.tally() == Tally{0, 1, 0}
-}

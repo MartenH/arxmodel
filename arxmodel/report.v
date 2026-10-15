@@ -4,7 +4,7 @@ import flatxml
 import strings
 
 // Reports: what a check found, as a document a machine reads. The same Report is written as
-// arxmodel's own JSON (docs/report.md, docs/report.schema.json), as SARIF 2.1.0 and as JUnit XML,
+// arxmodel's own JSON (docs/report.md, docs/report.schema.json) and as JUnit XML,
 // so a command that finds things (check now, others later) fills a Report and picks a format.
 
 // report_version is the version of arxmodel's JSON report format: a field removed or changed in
@@ -12,7 +12,7 @@ import strings
 pub const report_version = 1
 
 // report_formats are the formats a Report is written in, besides text.
-pub const report_formats = ['json', 'sarif', 'junit']
+pub const report_formats = ['json', 'junit']
 
 // Location is a place in a file: line and column from 1, 0 where unknown.
 pub struct Location {
@@ -88,9 +88,27 @@ pub:
 	merged     int      // of those, made of more than one element
 	layers     []string // the layers that ran, in order
 	took_ms    f64
-	first_file string // the model's first file: where a finding on no file is placed
 	inputs     []InputProblem
 	findings   []Finding
+	filters    []FilterTally
+}
+
+// FilterTally is a filter of the policy and how many findings it matched.
+pub struct FilterTally {
+pub:
+	number   int
+	severity Severity
+	reason   string
+	matched  int
+}
+
+// filter_tallies are the policy's filters a check applied, each with its count.
+pub fn filter_tallies(c &Checked) []FilterTally {
+	mut out := []FilterTally{}
+	for k, f in c.filters {
+		out << FilterTally{f.number, f.severity, f.reason, c.filter_counts[k] or { 0 }}
+	}
+	return out
 }
 
 // check_report is the report of check c of model m, whose schemas are sc.
@@ -125,9 +143,9 @@ pub fn check_report(m &Model, sc &Schemas, c &Checked) Report {
 		merged:     c.merged
 		layers:     layers
 		took_ms:    took
-		first_file: first_file(m)
 		inputs:     inputs
 		findings:   c.findings
+		filters:    filter_tallies(c)
 	}
 }
 
@@ -144,7 +162,6 @@ pub fn input_report(m &Model, why string) Report {
 		command:    'check'
 		files:      m.files.len
 		loaded:     m.set.docs.len
-		first_file: first_file(m)
 		inputs:     inputs
 	}
 }
@@ -183,7 +200,6 @@ pub fn (r &Report) failed() bool {
 pub fn (r &Report) format(f string) string {
 	return match f {
 		'json' { r.json() }
-		'sarif' { r.sarif() }
 		else { r.junit() }
 	}
 }
@@ -200,7 +216,14 @@ pub fn (r &Report) json() string {
 	b.write_string('"summary":{"files":${r.files},"loaded":${r.loaded},"elements":${r.elements},')
 	b.write_string('"nodes":${r.nodes},"merged":${r.merged},"layers":[${r.layers.map(jstr(it)).join(',')}],')
 	b.write_string('"errors":${t.errors},"warnings":${t.warnings},"ignored":${t.ignored},')
-	b.write_string('"inputs":${r.inputs.len},"took_ms":${r.took_ms:.1f}},')
+	b.write_string('"inputs":${r.inputs.len},"took_ms":${r.took_ms:.1f},"filters":[')
+	for k, f in r.filters {
+		if k > 0 {
+			b.write_u8(`,`)
+		}
+		b.write_string('{"number":${f.number},"severity":${jstr(f.severity.str())},"reason":${jstr(f.reason)},"matched":${f.matched}}')
+	}
+	b.write_string(']},')
 	b.write_string('"inputs":[')
 	for k, p in r.inputs {
 		if k > 0 {
@@ -217,6 +240,9 @@ pub fn (r &Report) json() string {
 		b.write_string('{"layer":${jstr(f.layer.str())},"kind":${jstr(f.kind)},"rule":${jstr(rule_id(f))},')
 		b.write_string('"severity":${jstr(f.severity.str())},"what":${jstr(f.what)},')
 		b.write_string('"in_conflict":${f.in_conflict},"path":${jstr(f.path)},"message":${jstr(f.message)},')
+		if f.filter > 0 {
+			b.write_string('"filter":${f.filter},"reason":${jstr(f.reason)},"policy_severity":${jstr(f.was.str())},')
+		}
 		b.write_string('"locations":[')
 		for j, at in f.at {
 			if j > 0 {
@@ -324,126 +350,6 @@ fn utf8_len_at(s string, i int) int {
 	return n
 }
 
-// --- SARIF -------------------------------------------------------------------------------------
-
-const sarif_schema = 'https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json'
-
-// sarif is the report as SARIF 2.1.0: one result per error or warning finding (ignored ones are
-// left out) and per input problem, its rule `layer.kind` (`input.not_read`, `input.undeclared`,
-// `input.ungoverned`), its level from the severity. Every result has a physical location: one per
-// place in the files, or the file it concerns (a finding on no file: the model's first file); the
-// element's path is its logical location.
-pub fn (r &Report) sarif() string {
-	mut rules := []string{}
-	mut index := map[string]int{}
-	for p in r.inputs {
-		id := 'input.${p.kind}'
-		if id !in index {
-			index[id] = rules.len
-			rules << id
-		}
-	}
-	for f in r.findings {
-		if f.severity == .ignore {
-			continue
-		}
-		id := rule_id(f)
-		if id !in index {
-			index[id] = rules.len
-			rules << id
-		}
-	}
-	mut b := strings.new_builder(4096 + r.findings.len * 384)
-	b.write_string('{"\$schema":${jstr(sarif_schema)},"version":"2.1.0","runs":[{"tool":{"driver":{')
-	b.write_string('"name":"arxmodel","version":${jstr(version)},"rules":[')
-	for k, id in rules {
-		if k > 0 {
-			b.write_u8(`,`)
-		}
-		b.write_string('{"id":${jstr(id)},"name":${jstr(id)},"shortDescription":{"text":${jstr(id)}}}')
-	}
-	b.write_string(']}},"results":[')
-	mut n := 0
-	for p in r.inputs {
-		if n > 0 {
-			b.write_u8(`,`)
-		}
-		n++
-		id := 'input.${p.kind}'
-		b.write_string('{"ruleId":${jstr(id)},"ruleIndex":${index[id]},"level":"error",')
-		b.write_string('"message":{"text":${jstr(p.message)}},"locations":[{')
-		physical(mut b, Location{p.file, p.line, p.column})
-		b.write_string('}]}')
-	}
-	for f in r.findings {
-		if f.severity == .ignore {
-			continue
-		}
-		if n > 0 {
-			b.write_u8(`,`)
-		}
-		n++
-		id := rule_id(f)
-		level := if f.severity == .error { 'error' } else { 'warning' }
-		b.write_string('{"ruleId":${jstr(id)},"ruleIndex":${index[id]},"level":"${level}",')
-		b.write_string('"message":{"text":${jstr(f.message + ': ' + f.path)}},"locations":[')
-		places := if f.at.len > 0 { f.at } else { [r.first_file] }
-		for j, at in places {
-			if j > 0 {
-				b.write_u8(`,`)
-			}
-			b.write_u8(`{`)
-			physical(mut b, parse_location(at))
-			b.write_string(',"logicalLocations":[{"fullyQualifiedName":${jstr(f.path)}}]}')
-		}
-		b.write_string(']')
-		if f.in_conflict {
-			b.write_string(',"properties":{"in_conflict":true}')
-		}
-		b.write_u8(`}`)
-	}
-	b.write_string(']}]}\n')
-	return b.str()
-}
-
-// physical writes l as a SARIF physicalLocation: the file, and its line and column where known.
-fn physical(mut b strings.Builder, l Location) {
-	b.write_string('"physicalLocation":{"artifactLocation":{"uri":${jstr(file_uri(l.file))}}')
-	if l.line > 0 {
-		b.write_string(',"region":{"startLine":${l.line}')
-		if l.column > 0 {
-			b.write_string(',"startColumn":${l.column}')
-		}
-		b.write_u8(`}`)
-	}
-	b.write_u8(`}`)
-}
-
-// file_uri is a file path as a URI reference: relative as it is, an absolute one as a `file:`
-// URI (a UNC path `\\host\share\x` as `file://host/share/x`); separators as `/`, and the
-// characters a URI reserves percent-encoded.
-fn file_uri(path string) string {
-	p := path.replace('\\', '/')
-	mut b := strings.new_builder(p.len + 8)
-	mut rest := p
-	if p.starts_with('//') {
-		b.write_string('file:')
-	} else if p.starts_with('/') {
-		b.write_string('file://')
-	} else if p.len > 1 && p[1] == `:` && p[0].is_letter() {
-		b.write_string('file:///${p[..2]}')
-		rest = p[2..]
-	}
-	for c in rest {
-		if c.is_letter() || c.is_digit() || c in [`/`, `-`, `.`, `_`, `~`] {
-			b.write_u8(c)
-		} else {
-			b.write_string('%${c:02X}')
-		}
-	}
-	return b.str()
-}
-
 // --- JUnit -------------------------------------------------------------------------------------
 
 // junit is the report as JUnit XML: one test case per `layer.kind` found (and per kind of input
@@ -489,6 +395,18 @@ pub fn (r &Report) junit() string {
 	b.write_string('<?xml version="1.0" encoding="UTF-8"?>\n')
 	b.write_string('<testsuites name="arxmodel ${xattr(r.command)}" tests="${kinds.len}" failures="${failures}" time="${r.took_ms / 1000:.3f}">\n')
 	b.write_string('  <testsuite name="arxmodel.${xattr(r.command)}" tests="${kinds.len}" failures="${failures}" errors="0" skipped="0">\n')
+	// the policy's filters and what each matched: an ignored finding is absent from the cases
+	if r.filters.len > 0 {
+		b.write_string('    <properties>\n')
+		for f in r.filters {
+			b.write_string('      <property name="filter ${f.number}" value="${f.matched} matched, ${f.severity}${if f.reason != '' {
+				': ' + xattr(f.reason)
+			} else {
+				''
+			}}"/>\n')
+		}
+		b.write_string('    </properties>\n')
+	}
 	for k in kinds {
 		layer := k.all_before('.')
 		b.write_string('    <testcase classname="arxmodel.${xattr(layer)}" name="${xattr(k)}"')
