@@ -8,15 +8,18 @@
 //                                              write the merge rules of the governing schema
 //                                              as flatxml rule text
 //   arxmodel check (--schema-dir DIR | --rules FILE) [--all] [--case-sensitive]
-//                  [--ignore-attr NAME]... [--check-attr NAME]... <file|dir>...
+//                  [--ignore-attr NAME]... [--check-attr NAME]... [--skip-xml]
+//                  [--skip-multiplicity] [--jobs N] <file|dir>...
 //                                              merge the files by the rules of the governing
-//                                              schema (or a rules file) and list what the
-//                                              rules forbid
+//                                              schema (or a rules file) and check them in three
+//                                              layers: the merge, each file against its XML
+//                                              schema, the merged model's multiplicities
 //
-// Every command takes --policy FILE, the merge policy (policy.txt, built in, by default).
+// rules and check take --policy FILE, the merge policy (policy.txt, built in, by default).
 //
-// Each exits 1 when a file could not be read, or (rules) a schema was not declared, not found
-// or did not compile; what could be done is still printed.
+// load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
+// found or did not compile; check exits 1 on findings the policy calls errors (and on files that
+// could not be read or declare no schema); what could be done is still printed.
 module main
 
 import arxmodel
@@ -32,19 +35,24 @@ const usage = 'usage:
       --problems lists every annotation that could not be applied, --dump writes the rules
       as tab-separated lines (FILE, or - for standard output, the summary then going to
       standard error)
-  arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]... <file|dir>...
+  arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]...
+                 [--check-attr NAME]... [--skip-xml] [--skip-multiplicity] [--jobs N] <file|dir>...
       merge the files into one model by the rules of the newest declared release (or the newest
-      at hand), and list what the rules forbid with every file and line: the first 20 of each
-      kind, or --all; keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
+      at hand) and check it in three layers: what the merge rules forbid, each file against its
+      XML schema (--skip-xml; --jobs threads), the count of each role in the merged model against the
+      meta-model (--skip-multiplicity). Each finding is an error, a warning or ignored, as the
+      severity lines of the policy say; the counts by severity and kind are printed, then the errors
+      and warnings with every file and line (the first 20 of each kind, or --all); exit 1 on
+      errors only. Keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
       attribute whose values may differ between fragments (namespace declarations, xsi
       attributes and UUID may; --check-attr UUID compares it after all)
   arxmodel rules --schema-dir DIR --emit FILE <file|dir>...
       write the merge rules the governing schema gives, as flatxml rule text with a header
       naming the schema; generated from the schema on this machine, never to be committed
   arxmodel check --rules FILE ... <file|dir>...
-      merge by a rules file instead of compiling the schema; warns when the files declare a
-      newer release than the file was made from
-  --policy FILE (any command): the merge policy, in place of the built-in policy.txt'
+      merge by a rules file instead of compiling the schema (the merge layer only); warns when
+      the files declare a newer release than the file was made from
+  --policy FILE (rules, check): the merge policy, in place of the built-in policy.txt'
 
 struct Opts {
 mut:
@@ -59,6 +67,8 @@ mut:
 	emit       string   // rules: write the merge rules here
 	rules_file string   // check: merge by these rules
 	policy     string   // the policy file; '' for the built-in one
+	skip_xml   bool     // check: no XML schema layer
+	skip_mult  bool     // check: no multiplicity layer
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -79,7 +89,7 @@ fn main() {
 		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
 			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
-				'--ignore-attr', '--check-attr', '--policy']
+				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity']
 		}
 		else { []string{} }
 	}
@@ -144,6 +154,12 @@ fn parse_opts(args []string) !Opts {
 			}
 			'--case-sensitive' {
 				o.exact = true
+			}
+			'--skip-xml' {
+				o.skip_xml = true
+			}
+			'--skip-multiplicity' {
+				o.skip_mult = true
 			}
 			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy' {
 				if k + 1 >= args.len {
@@ -445,7 +461,10 @@ fn emit_rules(out Out, sc &arxmodel.Schemas, path string) {
 		exit(1)
 	}
 	u := sc.uses.filter(it.name == name)[0]
-	text := arxmodel.format_rules(flat, arxmodel.provenance(u, sc.policy), sc.policy.settings())
+	text := arxmodel.format_rules(flat, arxmodel.provenance(u, sc.policy), sc.policy.settings()) or {
+		eprintln('--emit: ${err.msg()}')
+		exit(1)
+	}
 	os.write_file(path, text) or {
 		eprintln('${path}: ${err.msg()}')
 		exit(1)
@@ -458,9 +477,12 @@ fn cmd_check(o Opts) {
 	m := load_or_exit(o, out)
 	policy := load_policy(o)
 	opts := arxmodel.CheckOptions{
-		case_sensitive: o.exact
-		ignore_attrs:   o.ignore
-		compare_attrs:  o.compare
+		jobs:              o.jobs
+		skip_xml:          o.skip_xml
+		skip_multiplicity: o.skip_mult
+		case_sensitive:    o.exact
+		ignore_attrs:      o.ignore
+		compare_attrs:     o.compare
 	}
 	mut sw := time.new_stopwatch()
 	mut c := arxmodel.Checked{}
@@ -485,8 +507,9 @@ fn cmd_check(o Opts) {
 		for w in warnings {
 			out.line('warning: ${w}')
 		}
+		out.line('the XML schema and multiplicity layers need the schema (--schema-dir); not checked')
 		sw = time.new_stopwatch()
-		c = arxmodel.check_with(m, flat, pv.schema, st, opts) or {
+		c = arxmodel.check_with(m, flat, pv.schema, st, policy, opts) or {
 			out.line(err.msg())
 			exit(1)
 		}
@@ -513,46 +536,60 @@ fn cmd_check(o Opts) {
 	used := f.used()
 	unused := f.unused()
 	out.line('${f.rules.rules.len} flatxml rules; ${f.conflicts.len} element pairs in conflict (holders with different rules no parent path tells apart): ${used.len} used by the documents, ${unused.len} not')
-	for x in used {
-		out.line('  conflict: ${x.parent} ${x.child} (${x.occurs} in the documents): ${x.rules.join('; ')}')
-	}
 	if o.problems {
 		for x in unused {
 			out.line('  unused conflict: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
 		}
 	}
-	mut v := c.view
-	out.line('${c.elements} elements merged into ${v.len()} nodes in ${ms(took)}; ${c.merged} nodes made of more than one element, ${c.within} of them of two or more in one document')
-	mut by_kind := map[string]int{}
-	mut by_kind_conflict := map[string]int{}
-	for k, p in v.problems {
-		if c.in_conflict[k] {
-			by_kind_conflict['${p.kind}']++
-		} else {
-			by_kind['${p.kind}']++
+	out.line('${c.elements} elements merged into ${c.view.len()} nodes; ${c.merged} nodes made of more than one element, ${c.within} of them of two or more in one document')
+	mut layers := []string{}
+	for l in ['merge', 'xml_schema', 'multiplicity'] {
+		if t := c.times[l] {
+			layers << '${l} ${ms(t)}'
 		}
 	}
-	out.line('${c.violations} problems, and ${v.problems.len - c.violations} on element pairs in conflict (judged by a rule that may not be theirs)')
-	mut kinds := by_kind.keys()
-	kinds.sort()
-	for k in kinds {
-		out.line('  ${by_kind[k]:7}  ${k}')
+	out.line('checked in ${ms(took)}: ${layers.join(', ')}')
+	if c.unchecked_roles > 0 {
+		out.line("${c.unchecked_roles} occurrences of roles whose wrapper holds its items' content with no element per item: their counts not checked")
 	}
-	mut ckinds := by_kind_conflict.keys()
-	ckinds.sort()
-	for k in ckinds {
-		out.line('  ${by_kind_conflict[k]:7}  ${k} (in conflict)')
+	if c.xml_fallback > 0 {
+		out.line('${plural(c.xml_fallback, 'file')} checked against the governing XML schema, the one declared not being at hand')
 	}
-	mut shown := map[string]int{}
-	for k, p in v.problems {
-		key := '${p.kind}${c.in_conflict[k]}'
-		if !o.all && shown[key] >= 20 {
+	errors, warnings, ignored := c.count(.error), c.count(.warning), c.count(.ignore)
+	out.line('${errors} errors, ${warnings} warnings, ${ignored} ignored')
+	// per severity, the count of each layer and kind, then the findings (the first 20 of a kind)
+	for sev in [arxmodel.Severity.error, .warning, .ignore] {
+		mut by := map[string]int{}
+		for x in c.findings {
+			if x.severity == sev {
+				by['${x.layer}.${x.kind}${if x.in_conflict { ' (in conflict)' } else { '' }}']++
+			}
+		}
+		if by.len == 0 {
 			continue
 		}
-		shown[key]++
-		out.line((if c.in_conflict[k] { 'in conflict: ' } else { '' }) + v.describe(p))
+		out.line('${sev}s:')
+		mut keys := by.keys()
+		keys.sort()
+		for k in keys {
+			out.line('  ${by[k]:7}  ${k}')
+		}
 	}
-	if m.failed.len > 0 || sc.undeclared.len > 0 || c.violations > 0 || used.len > 0 {
+	for sev in [arxmodel.Severity.error, .warning] {
+		mut shown := map[string]int{}
+		for x in c.findings {
+			if x.severity != sev {
+				continue
+			}
+			key := '${x.layer}.${x.kind}'
+			if !o.all && shown[key] >= 20 {
+				continue
+			}
+			shown[key]++
+			out.line(x.str())
+		}
+	}
+	if m.failed.len > 0 || sc.undeclared.len > 0 || errors > 0 {
 		exit(1)
 	}
 }

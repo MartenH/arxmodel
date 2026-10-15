@@ -30,7 +30,8 @@ A merge is made of three things, kept apart:
 2. **Policy** ([policy.txt](policy.txt), committed): every choice that is arxmodel's and not the
    schema's, one setting a line, each saying why and which item of the specification it departs
    from: absent keys, the case of keys, attributes that may differ, the item-itself key, which
-   release governs, splittability, repeated-choice content, FILE-INFO-COMMENT. Read at run time
+   release governs, splittability, repeated-choice content, FILE-INFO-COMMENT, and each finding's
+   severity. Read at run time
    (`--policy FILE`; the committed one is built in); command-line flags (`--case-sensitive`,
    `--check-attr`, `--ignore-attr`) override it.
 3. **Mechanics** (the code): reading annotations, resolving keys, scoping rules by parent path,
@@ -59,9 +60,9 @@ attributes are added then), and its conflicts are placed against the documents b
 the output and the exit code are those of `--schema-dir` on them. `check --rules` refuses a file
 for another namespace or another schema family than the documents declare, and warns when they
 declare a newer release than the file was made from, and for every policy setting that differs
-from the file's (the file's applies). `flatxml merge --rules` reads it, except that the item's own
-text as a key is written `.`, which only arxmodel's reader takes for it: flatxml's rule text has no
-spelling for it yet (queued on the flatxml side).
+from the file's (the file's applies). The rule lines are written by flatxml's own `format_rules`, so `flatxml merge --rules` reads the
+file and merges as arxmodel does; it then also compares `xsi:schemaLocation` between fragments,
+since the documents' declaration attributes are added only by arxmodel (`ignore_declarations`).
 
 `load` reads every file whose name ends in `.arxml` (any case) below the paths, in parallel, into
 one flatxml document set with namespaces resolved, and lists the files that fail to parse and
@@ -166,17 +167,34 @@ one that does governs, and `rules` says so. Against the governing schema it repo
 schema at hand, the roles that have no rule in it (`--problems` lists them), and the element names
 the documents use that it does not declare, with counts, files and the first position.
 
-## Merging (`check`)
+## Checking (`check`)
 
 `check` merges every file into one model by the rules of the governing schema, on flatxml's
-merged view (`flatxml/merge.v`), and lists what the rules forbid with every file and line: one key
-twice where the role is not splittable, a key used in its scope already, an ordered role in two
-files, too many children, two fragments whose text or an attribute differ, one key under two
-names. It prints the first 20 of each kind (`--all` for every one) and exits 1 when there is any.
-How keys are compared and which attributes may differ between fragments are the policy's
-(`key_case`, `ignore_attrs`, `ignore_declarations`): by default keys ignore ASCII case, and
-namespace declarations, `xsi:` attributes and `UUID` may differ; `--case-sensitive`,
-`--check-attr UUID` and `--ignore-attr NAME` override that.
+merged view (`flatxml/merge.v`), and checks it in three layers, each finding with one shape
+(`Finding`: layer, kind, severity, element path, every file:line it involves):
+
+- **merge**: what the merge rules forbid: one key twice where the role is not splittable, a key
+  used in its scope already, an ordered role in two files, too many children, two fragments whose
+  text or an attribute differ, one key under two names, a pair whose holders' rules no path tells
+  apart;
+- **xml_schema**: each file against the XML schema it declares (the governing one where its own is
+  not at hand, said): every partial model must be valid on its own ([TPS_GST_00423]);
+- **multiplicity**: each role's count in the merged model against the meta-model's
+  pureMM.minOccurs and maxOccurs ([constr_2502]). The XML schema makes lower bounds 0 so a model
+  may be split, so a role below its fewest can only be found after merging (`below_min`); a role
+  that is one alternative of a choice in its holder's content (mixed content) has no fewest of its
+  own there. What the merge already reported on a role (too many, a collision) is not said again.
+  A wrapper holding its items' content has no element per item to count: such roles are not
+  checked, and `check` says how many occurrences that left out.
+
+Each finding's severity comes from the policy's `severity` lines (error, warning, ignore; by layer,
+by kind, or by kind and element or `@attribute`, the most specific winning; a line naming an
+unknown kind is refused). A merge problem on an element pair in conflict keeps its kind, marked
+`(in conflict)`: a line for its kind applies to it, else `merge.in_conflict`. No XML schema
+finding is dropped past a count; `--jobs` sets that layer's threads. `check` prints the
+counts by severity, layer and kind, then the errors and warnings (the first 20 of each kind,
+`--all` for every one), and exits 1 on errors only. `--skip-xml` and `--skip-multiplicity` leave
+a layer out; merging from a rules file has no schema, so it checks the merge layer only.
 
 flatxml names an aggregation by its parent (an element name, or a path of ancestor names) and its
 children's element names; the schema by the parent's type and the role. So each rule becomes

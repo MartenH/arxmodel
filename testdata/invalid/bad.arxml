@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd">
+  <SHELVES>
+    <SHELF>
+      <NOPE/>
+      <NOTES><NOTE>1</NOTE><NOTE>2</NOTE><NOTE>3</NOTE><NOTE>4</NOTE></NOTES>
+      <MARKS><ROW>1</ROW></MARKS>
+    </SHELF>
+  </SHELVES>
+</LIBRARY>

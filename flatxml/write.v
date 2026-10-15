@@ -45,11 +45,22 @@ pub fn (d &Doc) write(mut w io.Writer, opts WriteOptions) ! {
 // file. A file that is replaced keeps its permissions; a symbolic link stays one, and the file it
 // points to is written.
 pub fn (d &Doc) write_file(path string, opts WriteOptions) ! {
+	write_file_with(d, path, ModePlan{ mode: opts.mode })!
+}
+
+// write_file_with writes d to path as plan says, as write_file describes.
+fn write_file_with(d &Doc, path string, plan Plan) ! {
 	target := if os.is_link(path) { os.real_path(path) } else { path }
 	keep := if st := os.stat(target) { ?u32(st.mode) } else { ?u32(none) }
 	tmp := '${target}.${os.getpid()}.tmp'
 	mut f := create_file(tmp, keep)!
-	d.write(mut f, opts) or {
+	mut e := emitter_to(d, mut f, plan)
+	e.walk(0) or {
+		f.close() or {}
+		os.rm(tmp) or {}
+		return err
+	}
+	e.flush() or {
 		f.close() or {}
 		os.rm(tmp) or {}
 		return err
@@ -235,7 +246,8 @@ mut:
 	w      io.Writer = NoWriter{}
 	passes bool // to w
 	buf    strings.Builder
-	// the source range copied but not yet written
+	// the source range copied but not yet written: lo .. hi of pd
+	pd &Doc = unsafe { nil }
 	lo u32
 	hi u32
 }
@@ -269,11 +281,17 @@ fn emitter_in(d &Doc, plan Plan, cap int) Emitter {
 
 // copy writes the source bytes a .. b.
 fn (mut e Emitter) copy(a u32, b u32) ! {
+	e.copy_in(e.d, a, b)!
+}
+
+// copy_in writes the bytes a .. b of the source of document d.
+fn (mut e Emitter) copy_in(d &Doc, a u32, b u32) ! {
 	if b <= a {
 		return
 	}
-	if a != e.hi {
+	if a != e.hi || voidptr(d) != voidptr(e.pd) {
 		e.settle()!
+		e.pd = d
 		e.lo = a
 	}
 	e.hi = b
@@ -287,9 +305,9 @@ fn (mut e Emitter) settle() ! {
 	}
 	if n >= out_buf_size && e.passes {
 		e.flush_buf()!
-		write_all(mut e.w, unsafe { (e.d.src + e.lo).vbytes(n) })!
+		write_all(mut e.w, unsafe { (e.pd.src + e.lo).vbytes(n) })!
 	} else {
-		unsafe { e.buf.write_ptr(e.d.src + e.lo, n) }
+		unsafe { e.buf.write_ptr(e.pd.src + e.lo, n) }
 		e.spill()!
 	}
 	e.lo = e.hi

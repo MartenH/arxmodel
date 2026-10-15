@@ -2,6 +2,7 @@ module arxmodel
 
 import flatxml
 import flatxml.xsd
+import time
 
 // The schema's rules as flatxml's. flatxml names an aggregation by its parent's and its
 // children's element names; the schema by the parent's type and the role. So each rule here
@@ -604,9 +605,12 @@ pub fn declaration_attrs(m &Model) []string {
 @[params]
 pub struct CheckOptions {
 pub:
-	case_sensitive bool     // keys compared as written, whatever the settings say
-	ignore_attrs   []string // attributes that may differ, besides the settings'
-	compare_attrs  []string // attributes the settings let differ that are compared after all
+	jobs              int      // threads for the XML schema layer; 0 for one per CPU, at most 16
+	skip_xml          bool     // no XML schema layer
+	skip_multiplicity bool     // no multiplicity layer
+	case_sensitive    bool     // keys compared as written, whatever the settings say
+	ignore_attrs      []string // attributes that may differ, besides the settings'
+	compare_attrs     []string // attributes the settings let differ that are compared after all
 }
 
 // Settings are a merge's case and attribute settings: the policy's when the rules come from the
@@ -651,6 +655,19 @@ pub mut:
 	elements    int // elements in all documents
 	merged      int // merged nodes made of more than one element
 	within      int // of those, nodes two of whose elements are in one document
+	// every finding of every layer, with its severity
+	findings []Finding
+	// documents checked against the governing XML schema, their own not being at hand
+	xml_fallback int
+	// occurrences of roles the multiplicity layer could not count (wrappers of item content)
+	unchecked_roles int
+	// how long each layer took
+	times map[string]time.Duration
+}
+
+// count is the findings of one severity.
+pub fn (c &Checked) count(s Severity) int {
+	return c.findings.filter(it.severity == s).len
 }
 
 // governing_use is the schema governing m's documents. One model has one namespace; a namespace
@@ -683,15 +700,34 @@ pub fn with_settings(rs flatxml.RuleSet, fold bool, ignore []string) flatxml.Rul
 }
 
 // check merges m's documents by the rules of the schema governing their namespace, with the
-// policy's settings.
+// policy's settings and severities, and checks each file against its XML schema and the merged
+// model's multiplicities against the meta-model (each layer unless skipped).
 pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	flat, name := governing_flat(sc)!
-	return check_with(m, flat, name, sc.policy.settings(), opts)
+	mut c := check_with(m, flat, name, sc.policy.settings(), sc.policy, opts)!
+	if !opts.skip_xml {
+		sw := time.new_stopwatch()
+		found, fallback := xml_findings(m, sc, opts.jobs)
+		c.findings << found
+		c.xml_fallback = fallback
+		c.times['xml_schema'] = sw.elapsed()
+	}
+	if !opts.skip_multiplicity {
+		sw := time.new_stopwatch()
+		gov := governing_use(sc)!
+		mut v := c.view
+		found, unchecked := gov.rules.multiplicity_findings(mut v, sc.policy)
+		c.findings << found
+		c.unchecked_roles = unchecked
+		c.times['multiplicity'] = sw.elapsed()
+	}
+	return c
 }
 
 // check_with merges m's documents by the rules given (from the schema, or a rules file), with
-// the settings given and the overrides.
-pub fn check_with(m &Model, flat0 Flat, source string, st Settings, opts CheckOptions) !Checked {
+// the settings given and the overrides; the policy gives the findings their severities.
+pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, opts CheckOptions) !Checked {
+	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
 	flat.rules = with_settings(flat0.rules, fold, ignore)
@@ -718,11 +754,22 @@ pub fn check_with(m &Model, flat0 Flat, source string, st Settings, opts CheckOp
 	}
 	mut in_conflict := []bool{len: view.problems.len}
 	mut violations := 0
-	for k, p in view.problems {
+	mut findings := []Finding{}
+	for x in flat.used() {
+		findings << Finding{
+			layer:    .merge
+			kind:     'conflict'
+			what:     x.child
+			severity: p.severity(.merge, 'conflict', x.child)
+			path:     '${x.parent}/${x.child}'
+			message:  'holders with different rules no parent path tells apart, ${x.occurs} in the documents: ${x.rules.join('; ')}'
+		}
+	}
+	for k, pr in view.problems {
 		// the merged parent of the children concerned, and its parent: the path a conflict names
-		mut parent := view.node(p.node)
-		mut child := p.what
-		if p.kind == .value_differs {
+		mut parent := view.node(pr.node)
+		mut child := pr.what
+		if pr.kind == .value_differs {
 			child = parent.name()
 			parent = parent.parent()
 		}
@@ -731,7 +778,20 @@ pub fn check_with(m &Model, flat0 Flat, source string, st Settings, opts CheckOp
 		if !in_conflict[k] {
 			violations++
 		}
+		kind := '${pr.kind}'
+		findings << Finding{
+			layer:       .merge
+			kind:        kind
+			what:        pr.what
+			in_conflict: in_conflict[k]
+			severity:    p.merge_severity(kind, pr.what, in_conflict[k])
+			path:        merged_path(view.node(pr.node))
+			message:     problem_message(mut view, pr)
+			at:          pr.at.map(view.pos(it))
+		}
 	}
+	mut times := map[string]time.Duration{}
+	times['merge'] = sw.elapsed()
 	return Checked{
 		governing:   source
 		flat:        flat
@@ -741,5 +801,15 @@ pub fn check_with(m &Model, flat0 Flat, source string, st Settings, opts CheckOp
 		elements:    m.element_count()
 		merged:      merged
 		within:      within
+		findings:    findings
+		times:       times
 	}
+}
+
+// problem_message is what flatxml says of a problem, without its kind and its positions.
+fn problem_message(mut v flatxml.Merged, pr flatxml.Problem) string {
+	d := v.describe(pr)
+	at := ': ' + pr.at.map(v.pos(it)).join(', ')
+	body := if d.ends_with(at) { d[..d.len - at.len] } else { d }
+	return body.all_after(': ')
 }

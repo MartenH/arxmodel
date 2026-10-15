@@ -4,10 +4,10 @@ import crypto.sha256
 import flatxml
 import os
 
-// The merge rules as a file: flatxml's rule text (`flatxml.parse_rules` reads it), one rule a
-// line in the order the merge uses them, behind a header that says where they came from. The
-// file is derived from an AUTOSAR schema, so it is made on the user's machine and never
-// committed.
+// The merge rules as a file: flatxml's rule text (`flatxml.format_rules` writes it and
+// `flatxml.parse_rules` reads it), one rule a line in the order the merge uses them, behind a
+// header that says where they came from. The file is derived from an AUTOSAR schema, so it is
+// made on the user's machine and never committed.
 
 // version is arxmodel's version, from v.mod.
 pub const version = vmod_version(@VMOD_FILE)
@@ -60,16 +60,10 @@ pub fn provenance(u &SchemaUse, p Policy) Provenance {
 	}
 }
 
-// key_text spells a key part for the rule text: the item's own text, which flatxml writes as an
-// empty path, is `.` there, since flatxml's text has no spelling for an empty part yet.
-fn key_text(k string) string {
-	return if k == '' { '.' } else { k }
-}
-
 // format_rules writes the rules as flatxml's rule text, after a header: where they came from,
 // the policy they were made by, every pair in conflict, and the merge settings (the policy's:
 // case and attributes by name; the documents' declaration attributes are added when merging).
-pub fn format_rules(f Flat, pv Provenance, st Settings) string {
+pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	mut out := []string{}
 	out << '# arxmodel merge rules, generated on this machine from an AUTOSAR schema: do not commit.'
 	out << '# schema: ${pv.schema}'
@@ -85,39 +79,16 @@ pub fn format_rules(f Flat, pv Provenance, st Settings) string {
 	for c in f.conflicts {
 		out << '# conflict: ${c.parent} ${c.child} = ${c.rules.join(' ; ')}'
 	}
-	if st.fold {
-		out << '!fold'
-	}
-	if st.ignore_attrs.len > 0 {
-		out << '!ignore ' + st.ignore_attrs.join(' ')
-	}
-	for r in f.rules.rules {
-		mut w := [if r.parent == '' { '*' } else { r.parent }, r.children.join(',')]
-		if r.key.len > 0 {
-			w << 'key=' + r.key.map(key_text(it)).join(',')
-			if r.keyless == .empty {
-				w << 'keyless=empty'
-			}
-		}
-		if r.single {
-			w << 'single'
-		}
-		if r.merge {
-			w << 'merge'
-		}
-		if r.ordered {
-			w << 'ordered'
-		}
-		if r.max > 0 {
-			w << 'max=${r.max}'
-		}
-		out << w.join(' ')
-	}
-	return out.join('\n') + '\n'
+	body := flatxml.format_rules(flatxml.RuleSet{
+		...f.rules
+		fold:         st.fold
+		ignore_attrs: st.ignore_attrs
+	}) or { return error('the rules cannot be written as flatxml rule text: ${err.msg()}') }
+	return out.join('\n') + '\n' + body
 }
 
-// parse_rules_file reads a rules file back: the rules (a `.` key part the item's own text), every
-// pair in conflict, its provenance and its merge settings.
+// parse_rules_file reads a rules file back: the rules, every pair in conflict, its provenance
+// and its merge settings.
 pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	mut pv := Provenance{}
 	mut f := Flat{}
@@ -156,10 +127,7 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	st.fold = rs.fold
 	st.ignore_attrs = rs.ignore_attrs.clone()
 	f.rules = flatxml.RuleSet{
-		rules: rs.rules.map(flatxml.Rule{
-			...it
-			key: it.key.map(if it == '.' { '' } else { it })
-		})
+		rules: rs.rules
 	}
 	f.described = f.rules.rules.map('')
 	return f, pv, st

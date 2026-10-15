@@ -15,7 +15,7 @@ fn emit(path string, schemas string, p Policy) string {
 	sc := compile_schemas(m, rdata(schemas), policy: p)
 	f, name := governing_flat(sc) or { panic(err) }
 	u := sc.uses.filter(it.name == name)[0]
-	return format_rules(f, provenance(u, p), p.settings())
+	return format_rules(f, provenance(u, p), p.settings()) or { panic(err) }
 }
 
 fn problems_of(mut c Checked) []string {
@@ -34,7 +34,9 @@ fn test_rules_text_reads_back_to_the_same_rules() {
 	g, pv, st := parse_rules_file(text)!
 	for k, r in f.rules.rules {
 		x := g.rules.rules[k]
-		assert x.parent == r.parent && x.children == r.children && x.key == r.key
+		// flatxml reads the own text back as `.`, which compiles as '' does
+		assert x.parent == r.parent && x.children == r.children
+		assert x.key.map(if it == '.' { '' } else { it }) == r.key
 		assert x.keyless == r.keyless && x.single == r.single && x.merge == r.merge
 		assert x.ordered == r.ordered && x.max == r.max
 	}
@@ -57,7 +59,7 @@ fn test_a_file_made_from_some_documents_merges_others_like_the_schema() {
 	g, pv, st := parse_rules_file(text)!
 	sc := compile_schemas(m, rdata('schemas'))
 	mut by_schema := check(m, sc)!
-	mut by_file := check_with(m, g, pv.schema, st, CheckOptions{})!
+	mut by_file := check_with(m, g, pv.schema, st, default_policy(), CheckOptions{})!
 	assert by_schema.view.len() == by_file.view.len()
 	assert problems_of(mut by_schema) == problems_of(mut by_file)
 	assert by_schema.violations == by_file.violations
@@ -75,7 +77,7 @@ fn test_conflicts_are_kept_and_placed_against_the_documents_checked() {
 	}
 	sc := compile_schemas(m, rdata('schemas'))
 	by_schema := check(m, sc)!
-	by_file := check_with(m, g, pv.schema, st, CheckOptions{})!
+	by_file := check_with(m, g, pv.schema, st, default_policy(), CheckOptions{})!
 	assert by_schema.flat.used().len == 1 && by_file.flat.used().len == 1
 	assert by_file.flat.used()[0].occurs == by_schema.flat.used()[0].occurs
 	// and to the documents it was made from, which do not
@@ -83,7 +85,7 @@ fn test_conflicts_are_kept_and_placed_against_the_documents_checked() {
 	defer {
 		m2.free()
 	}
-	plain := check_with(m2, g, pv.schema, st, CheckOptions{})!
+	plain := check_with(m2, g, pv.schema, st, default_policy(), CheckOptions{})!
 	assert plain.flat.used().len == 0 && plain.flat.unused().len == 1
 }
 
@@ -144,4 +146,19 @@ fn test_not_a_rules_file() {
 	if _, _, _ := parse_rules_file('SHELF SHORT-NAME single merge\n') {
 		assert false
 	}
+}
+
+fn test_flatxml_alone_merges_by_the_file_as_arxmodel_does() {
+	text := emit('model/a.arxml', 'schemas', default_policy())
+	mut m := load([rdata('merge')])!
+	defer {
+		m.free()
+	}
+	// flatxml's own reader and merge, nothing of arxmodel's
+	rs := flatxml.parse_rules(text)!
+	mut plain := m.set.merge(rs)!
+	g, pv, st := parse_rules_file(text)!
+	mut ours := check_with(m, g, pv.schema, st, default_policy(), CheckOptions{})!
+	assert plain.len() == ours.view.len()
+	assert plain.problems.map(plain.describe(it)) == ours.view.problems.map(ours.view.describe(it))
 }

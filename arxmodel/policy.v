@@ -30,7 +30,9 @@ pub mut:
 	ignore_declarations      bool = true
 	item_itself              ItemItself
 	repeated_choice_as_mixed bool = true
-	text                     string // the text it was read from
+	// a finding's severity by `layer`, `layer.kind` or `layer.kind:what`; error where unset
+	severities map[string]Severity
+	text       string // the text it was read from
 }
 
 // default_policy is the built-in policy.txt.
@@ -80,6 +82,33 @@ pub fn parse_policy(text string) !Policy {
 		words := line.fields()
 		name := words[0]
 		args := words[1..]
+		if name == 'severity' {
+			if args.len != 2 || args[1] !in ['error', 'warning', 'ignore'] {
+				return error('policy line ${n + 1}: `severity <layer>[.<kind>[:<what>]] error|warning|ignore`')
+			}
+			layer := args[0].all_before('.')
+			kinds := known_kinds[layer] or {
+				return error('policy line ${n + 1}: no layer `${layer}`')
+			}
+			if args[0].contains('.') {
+				kind := args[0].all_after('.').all_before(':')
+				if kind !in kinds {
+					return error('policy line ${n + 1}: no kind `${kind}` in layer ${layer}')
+				}
+				if args[0].contains(':') && args[0].all_after(':') == '' {
+					return error('policy line ${n + 1}: an empty element or attribute after `:`')
+				}
+			}
+			if args[0] in p.severities {
+				return error('policy line ${n + 1}: the severity of `${args[0]}` given twice')
+			}
+			p.severities[args[0]] = match args[1] {
+				'error' { Severity.error }
+				'warning' { Severity.warning }
+				else { Severity.ignore }
+			}
+			continue
+		}
 		if name in seen {
 			return error('policy line ${n + 1}: `${name}` given twice')
 		}
@@ -98,6 +127,11 @@ pub fn parse_policy(text string) !Policy {
 				p.fold = one(['ignore', 'exact'])! == 'ignore'
 			}
 			'ignore_attrs' {
+				for a in args {
+					if a.contains(',') || a.starts_with('!') {
+						return error('policy line ${n + 1}: `${a}` is not an attribute name')
+					}
+				}
 				p.ignore_attrs = args.clone()
 			}
 			'ignore_declarations' {

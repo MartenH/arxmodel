@@ -46,3 +46,20 @@ file_info_comment compare
 # follow from the rules above, not settings. They differ from [TPS_GST_00449] and from
 # [constr_2524] / [TPS_GST_00447]. Items of an abstract type are keyed per item kind, not by the
 # union of the subclasses' identity contributors ([TPS_GST_00416]).
+
+# Severities: what each finding means for `check`, which fails (exit 1) on errors only. A line is
+# `severity <layer>[.<kind>[:<element or @attribute>]] error|warning|ignore`; the most specific one
+# applies, and a finding no line names is an error. Layers: merge (the merge rules), xml_schema
+# (each file against its XML schema), multiplicity (each role's count in the merged model against
+# the meta-model).
+severity merge error
+# A problem on an element pair whose holders' rules no parent path tells apart was judged by a
+# rule that may not be the pair's.
+severity merge.in_conflict warning
+severity xml_schema error
+# What the XML schema validator does not support (xsi:type) is not a fault of the file.
+severity xml_schema.unsupported warning
+# The XML schema makes every lower bound 0 so a model may be split; the merged model may still be
+# unfinished in a process phase, so a role below its fewest is a warning ([constr_2502]).
+severity multiplicity.below_min warning
+severity multiplicity.above_max error

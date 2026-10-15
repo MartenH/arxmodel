@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TOP xmlns="urn:arxmodel:test:alt" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="urn:arxmodel:test:alt ALT_1.xsd">
+  <CHOOSING><Y>y</Y></CHOOSING>
+  <PLAIN/>
+</TOP>
