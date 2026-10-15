@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd">
+  <SHELVES>
+    <SHELF>
+      <SHORT-NAME>fiction</SHORT-NAME>
+      <ITEMS>
+        <BOOK>
+          <SHORT-NAME>Dune</SHORT-NAME>
+          <NOTES><NOTE>signed</NOTE><NOTE>worn</NOTE></NOTES>
+        </BOOK>
+        <MAGAZINE><SHORT-NAME>Analog</SHORT-NAME></MAGAZINE>
+      </ITEMS>
+      <NOTES><NOTE>second</NOTE></NOTES>
+      <LOANS>
+        <LOAN><BORROWER-REF>/p/ann</BORROWER-REF><CONTEXT-REF>/a</CONTEXT-REF><CONTEXT-REF>/c</CONTEXT-REF></LOAN>
+      </LOANS>
+    </SHELF>
+  </SHELVES>
+</LIBRARY>

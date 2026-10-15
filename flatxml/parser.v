@@ -295,35 +295,22 @@ fn (mut d Doc) markup_decl(j int, cur u32, seen_root bool) !int {
 	s := d.src
 	n := d.src_len
 	if d.starts_at(j, '<!--') {
-		mut k := j + 4
-		for {
-			p := find_byte(s, k, n, `>`)
-			if p < 0 {
-				return d.err_at(j, 'comment is not closed')
-			}
-			if p >= j + 6 && unsafe { s[p - 1] == `-` && s[p - 2] == `-` } {
-				return p + 1
-			}
-			k = p + 1
+		e := d.comment_end(j)
+		if e < 0 {
+			return d.err_at(j, 'comment is not closed')
 		}
+		return e
 	}
 	if d.starts_at(j, '<![CDATA[') {
 		if cur == 0 {
 			return d.err_at(j, 'CDATA section outside the root element')
 		}
-		a := j + 9
-		mut k := a
-		for {
-			p := find_byte(s, k, n, `>`)
-			if p < 0 {
-				return d.err_at(j, 'CDATA section is not closed')
-			}
-			if p >= a + 2 && unsafe { s[p - 1] == `]` && s[p - 2] == `]` } {
-				d.add_text(cur, a, p - 2, true)!
-				return p + 1
-			}
-			k = p + 1
+		e := d.cdata_end(j)
+		if e < 0 {
+			return d.err_at(j, 'CDATA section is not closed')
 		}
+		d.add_text(cur, j + 9, e - 3, true)!
+		return e
 	}
 	if d.starts_at(j, '<!DOCTYPE') {
 		if cur != 0 || seen_root {
@@ -363,6 +350,41 @@ fn (mut d Doc) markup_decl(j int, cur u32, seen_root bool) !int {
 		return d.err_at(j, 'DOCTYPE is not closed')
 	}
 	return d.err_at(j, 'expected `<!--`, `<![CDATA[` or `<!DOCTYPE`')
+}
+
+// comment_end is the offset just past the comment that starts at j (`<!--`), or -1 if it is not
+// closed. `<!-->` does not close it.
+fn (d &Doc) comment_end(j int) int {
+	mut k := j + 4
+	for {
+		p := find_byte(d.src, k, d.src_len, `>`)
+		if p < 0 {
+			return -1
+		}
+		if p >= j + 6 && unsafe { d.src[p - 1] == `-` && d.src[p - 2] == `-` } {
+			return p + 1
+		}
+		k = p + 1
+	}
+	return -1
+}
+
+// cdata_end is the offset just past the CDATA section that starts at j (`<![CDATA[`), or -1 if it
+// is not closed.
+fn (d &Doc) cdata_end(j int) int {
+	a := j + 9
+	mut k := a
+	for {
+		p := find_byte(d.src, k, d.src_len, `>`)
+		if p < 0 {
+			return -1
+		}
+		if p >= a + 2 && unsafe { d.src[p - 1] == `]` && d.src[p - 2] == `]` } {
+			return p + 1
+		}
+		k = p + 1
+	}
+	return -1
 }
 
 // skip_pi skips a processing instruction (or the XML declaration) at j and returns the offset

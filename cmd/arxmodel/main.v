@@ -4,6 +4,9 @@
 //   arxmodel rules --schema-dir DIR [--jobs N] [--problems] [--dump FILE] <file|dir>...
 //                                              read them, find and compile the schemas they
 //                                              declare, and print the merge rules each gives
+//   arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]... [--check-attr NAME]... <file|dir>...
+//                                              merge the files by the rules of the governing
+//                                              schema and list what the rules forbid
 //
 // Each exits 1 when a file could not be read, or (rules) a schema was not declared, not found
 // or did not compile; what could be done is still printed.
@@ -21,7 +24,13 @@ const usage = 'usage:
       also find each declared schema in DIR, compile each once, and print its merge rules;
       --problems lists every annotation that could not be applied, --dump writes the rules
       as tab-separated lines (FILE, or - for standard output, the summary then going to
-      standard error)'
+      standard error)
+  arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]... <file|dir>...
+      merge the files into one model by the rules of the newest declared release (or the newest
+      at hand), and list what the rules forbid with every file and line: the first 20 of each
+      kind, or --all; keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
+      attribute whose values may differ between fragments (namespace declarations, xsi
+      attributes and UUID may; --check-attr UUID compares it after all)'
 
 struct Opts {
 mut:
@@ -29,6 +38,10 @@ mut:
 	schema_dir string
 	problems   bool
 	dump       string
+	all        bool     // check: every problem, not the first of each kind
+	exact      bool     // check: keys compared as written
+	ignore     []string // check: attributes whose values may differ between fragments
+	compare    []string // check: attributes ignored by default that are compared after all
 	paths      []string
 }
 
@@ -46,6 +59,13 @@ fn main() {
 	match args[0] {
 		'load' {
 			cmd_load(opts)
+		}
+		'check' {
+			if opts.schema_dir == '' {
+				eprintln('check needs --schema-dir')
+				exit(2)
+			}
+			cmd_check(opts)
 		}
 		'rules' {
 			if opts.schema_dir == '' {
@@ -67,6 +87,24 @@ fn parse_opts(args []string) !Opts {
 	for k < args.len {
 		a := args[k]
 		match a {
+			'--ignore-attr', '--check-attr' {
+				if k + 1 >= args.len {
+					return error('${a} needs a value')
+				}
+				if a == '--ignore-attr' {
+					o.ignore << args[k + 1]
+				} else {
+					o.compare << args[k + 1]
+				}
+				k += 2
+				continue
+			}
+			'--all' {
+				o.all = true
+			}
+			'--case-sensitive' {
+				o.exact = true
+			}
 			'--jobs', '--schema-dir', '--dump' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
@@ -336,4 +374,97 @@ fn ms(d time.Duration) string {
 
 fn plural(n int, word string) string {
 	return if n == 1 { '1 ${word}' } else { '${n} ${word}s' }
+}
+
+// default_ignored are the attributes check lets differ between fragments unless asked to compare
+// them (--check-attr): a UUID is often generated per file for one element.
+const default_ignored = ['UUID']
+
+fn cmd_check(o Opts) {
+	out := Out{}
+	m := load_or_exit(o, out)
+	sc := arxmodel.compile_schemas(m, o.schema_dir)
+	print_undeclared(out, m, sc)
+	for g in sc.governing {
+		if g.use >= 0 {
+			out.line('governed by ${sc.uses[g.use].name}${if g.note != '' {
+				' (' + g.note + ')'
+			} else {
+				''
+			}}')
+		}
+	}
+	sw := time.new_stopwatch()
+	mut ignore := o.ignore.clone()
+	for a in default_ignored {
+		if a !in o.compare {
+			ignore << a
+		}
+	}
+	mut c := arxmodel.check(m, sc, case_sensitive: o.exact, ignore_attrs: ignore) or {
+		out.line(err.msg())
+		exit(1)
+	}
+	took := sw.elapsed()
+	f := c.flat
+	out.line('${f.rules.rules.len} flatxml rules; ${c.pairs.len} element pairs that roles of different holders give different rules: ${f.settled.len} settled by the holders the documents use, ${f.conflicts.len} in conflict where the documents use them, ${f.unused.len} in conflict and unused')
+	out.line('  ${f.key_fns} keyed rules (absent parts read as empty), ${f.lost_keys} item kinds one child each for a key part that did not resolve, ${f.flat_wrappers} wrappers of item content whose items are not told apart')
+	for x in f.conflicts {
+		out.line('  conflict: ${x.parent} ${x.child} (${x.occurs} in the documents): ${x.rules.join('; ')}')
+	}
+	if o.problems {
+		for x in f.unused {
+			out.line('  unused conflict: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
+		}
+		for x in f.settled {
+			out.line('  settled: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
+		}
+	}
+	mut v := c.view
+	out.line('${c.elements} elements merged into ${v.len()} nodes in ${ms(took)}; ${c.merged} nodes made of more than one element, ${c.within} of them of two or more in one document')
+	mut by_kind := map[string]int{}
+	mut by_kind_conflict := map[string]int{}
+	for k, p in v.problems {
+		if c.in_conflict[k] {
+			by_kind_conflict['${p.kind}']++
+		} else {
+			by_kind['${p.kind}']++
+		}
+	}
+	out.line('${c.violations} problems, and ${v.problems.len - c.violations} on element pairs in conflict (judged by a rule that may not be theirs)')
+	mut kinds := by_kind.keys()
+	kinds.sort()
+	for k in kinds {
+		out.line('  ${by_kind[k]:7}  ${k}')
+	}
+	mut ckinds := by_kind_conflict.keys()
+	ckinds.sort()
+	for k in ckinds {
+		out.line('  ${by_kind_conflict[k]:7}  ${k} (in conflict)')
+	}
+	mut shown := map[string]int{}
+	for k, p in v.problems {
+		key := '${p.kind}${c.in_conflict[k]}'
+		if !o.all && shown[key] >= 20 {
+			continue
+		}
+		shown[key]++
+		out.line((if c.in_conflict[k] { 'in conflict: ' } else { '' }) + v.describe(p))
+	}
+	if m.failed.len > 0 || sc.undeclared.len > 0 || c.violations > 0 || f.conflicts.len > 0 {
+		exit(1)
+	}
+}
+
+// print_undeclared lists the files that declare no schema.
+fn print_undeclared(out Out, m &arxmodel.Model, sc &arxmodel.Schemas) {
+	if sc.undeclared.len == 0 {
+		return
+	}
+	out.line('${plural(sc.undeclared.len, 'file')} with no schema declared:')
+	mut ks := sc.undeclared.keys()
+	ks.sort()
+	for k in ks {
+		out.line('  ${m.set.docs[k].path}: ${sc.undeclared[k]}')
+	}
 }

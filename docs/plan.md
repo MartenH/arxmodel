@@ -37,8 +37,12 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
    - **Done: decisions.** A split key naming the item itself identifies an item with children by
      its single-valued children; the newest release declared governs, falling back to the newest
      at hand (README, *Releases*).
-   - **Next: the merged view**, once flatxml's rules and merged view land: these rules turned
-     into flatxml's, keyed by parent type and child element; the merge problems of the real files.
+   - **Done: the merged view** (`arxmodel check`): the governing schema's rules as flatxml's
+     (one per parent and child element name), the documents settling pairs that holders of
+     different types give different rules, and every problem with its positions. What
+     flatxml's rule model cannot say yet is listed as requests in the PR (rules scoped by the
+     parent's type, a key of every occurrence, a key whose parts are all absent).
+
 2. Paths and references.
 3. `diff`, `merge`, `check` as commands.
 4. Edits and writing back.

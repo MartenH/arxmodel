@@ -29,6 +29,7 @@ pub:
 	type_name string // '' for an anonymous or built-in type
 	decl      u32    // its element declaration in the schema
 	key       []KeyPath
+	key_lost  bool // a part of the split key could not be resolved, so key is not the whole key
 }
 
 // Rule is what the schema says about one aggregation (a meta-model role): the XML element that
@@ -549,6 +550,7 @@ fn (rs &RuleSet) resolve_keys(mut r Rule) {
 	}
 	s := rs.schema
 	mut done := map[string][]KeyPath{}
+	mut lost := map[string]bool{}
 	mut items := []Item{}
 	for it in r.items {
 		start := if r.flat { s.elements[r.decl].typ } else { s.elements[it.decl].typ }
@@ -560,15 +562,21 @@ fn (rs &RuleSet) resolve_keys(mut r Rule) {
 					names << x.element
 				}
 			}
+			before := r.problems.filter(it.kind in key_failures).len
 			done[tk] = rs.resolve_key(mut r, start, names.join(', '))
+			lost[tk] = r.problems.filter(it.kind in key_failures).len > before
 		}
 		items << Item{
 			...it
-			key: done[tk]
+			key:      done[tk]
+			key_lost: lost[tk]
 		}
 	}
 	r.items = items
 }
+
+// key_failures are the problems that leave a part of a split key out.
+const key_failures = ['key role not found', 'key through a multi-valued role']
 
 // resolve_key resolves r's split key from type start, for the items named in for_items.
 fn (rs &RuleSet) resolve_key(mut r Rule, start xsd.TypeRef, for_items string) []KeyPath {

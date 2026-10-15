@@ -24,6 +24,7 @@ See [docs/plan.md](docs/plan.md).
 arxmodel load <file|dir>...                        # every .arxml below the paths, one set
 arxmodel rules --schema-dir DIR <file|dir>...      # and the merge rules of the schemas they declare
 arxmodel rules --schema-dir DIR --problems --dump rules.tsv <file|dir>...
+arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   # merge, and what the rules forbid
 ```
 
 `load` reads every file whose name ends in `.arxml` (any case) below the paths, in parallel, into
@@ -128,6 +129,48 @@ When the newest declared schema is not in the schema directory, or does not comp
 one that does governs, and `rules` says so. Against the governing schema it reports, per older
 schema at hand, the roles that have no rule in it (`--problems` lists them), and the element names
 the documents use that it does not declare, with counts, files and the first position.
+
+## Merging (`check`)
+
+`check` merges every file into one model by the rules of the governing schema, on flatxml's
+merged view (`flatxml/merge.v`), and lists what the rules forbid with every file and line: one key
+twice where the role is not splittable, a key used in its scope already, an ordered role in two
+files, too many children, two fragments whose text or an attribute differ, one key under two
+names, an item without its key. It prints the first 20 of each kind (`--all` for every one) and
+exits 1 when there is any. Keys are compared ignoring ASCII case unless `--case-sensitive`;
+namespace declarations, `xsi:` attributes and `UUID` may differ between fragments (a UUID is
+often generated per file for one element; `--check-attr UUID` compares it), and so may any
+attribute named with `--ignore-attr`. An item whose key parts are all absent has the empty key,
+which every such item of the aggregation shares, so their fragments merge and what differs between
+them is reported (a computed key today; flatxml's per-rule choice for an absent key once it is
+there).
+
+flatxml names an aggregation by its parent's and its children's element names; the schema by the
+parent's type and the role. So each rule becomes one flatxml rule per element name its holding
+type is declared with (`arxmodel/merge.v`):
+
+- a role element that wraps its items is a single child of its holder, merged across fragments;
+  its items are keyed by the split key and merged when the role is splittable, else one child
+  each, ordered and limited as the role is; the item kinds of one role are one flatxml rule with
+  several children, so ordered and the most hold across them;
+- a role element that is itself the item is keyed or one child each in the same way;
+- a role of one item is a single, merged child whatever its key and splittability: its element is
+  in every fragment of the object that holds it, and fragments that disagree are reported as
+  differing values;
+- a wrapper of item content holds its content one child each, at most its most items times as
+  often as one item holds each element;
+- a split key with a part that did not resolve is not used: one child each (the rules report the
+  part);
+- keys are computed here: an absent part reads as '', and a repeated element's every occurrence,
+  joined by a separator no text holds, is one part.
+
+Where roles of different holders give one element pair different rules (a `CONTAINERS` keyed under
+one class and not under another), flatxml cannot tell them apart by the names, so the documents
+decide a wrapper's items: where only one of the holders occurs above the pair, its rule is the
+rule. Every other such pair the documents use is a conflict: it is reported with its occurrences,
+one rule is applied, and the problems on the pair are marked as the conflict's rather than
+counted as violations; `check` exits 1. Pairs in conflict that no document uses are counted
+(`--problems` lists them).
 
 ## Build and test
 
