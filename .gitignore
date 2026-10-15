@@ -1,0 +1,5 @@
+bin/
+*.tmp.c
+__pycache__/
+*_test
+!*_test.v
