@@ -12,7 +12,7 @@ fn pdata(p ...string) string {
 // policy_text_with is the built-in policy with one setting's value replaced, written as TOML.
 fn policy_text_with(name string, value string) string {
 	mut lines := []string{}
-	for line in default_policy_text.split_into_lines() {
+	for line in automat_policy_text.split_into_lines() {
 		lines << if line.starts_with(name + ' = ') { '${name} = ${value}' } else { line }
 	}
 	return lines.join('\n')
@@ -27,17 +27,32 @@ fn lib_rules_by(p Policy) &RuleSet {
 	return read_rules_with(s, p)
 }
 
-fn test_the_built_in_policy() {
+fn test_the_built_in_policies() {
+	// the default: the specification's merge
 	p := default_policy()
-	assert p.absent_keys == .empty && p.fold && p.ignore_attrs == ['UUID']
-	assert p.ignore_declarations && p.item_itself == .single_values && p.repeated_choice_as_mixed
-	assert p.package_element == 'AR-PACKAGE'
+	assert p.absent_keys == .own && !p.fold && p.ignore_attrs == ['UUID']
+	assert p.ignore_declarations && p.item_itself == .copy && p.primitive_values == .copy
+	assert p.repeated_content == .identical && p.abstract_items == .@union && p.ignore_structured
+	assert p.repeated_choice_as_mixed && p.package_element == 'AR-PACKAGE'
+	// automat's
+	a := automat_policy()
+	assert a.absent_keys == .empty && a.fold && a.item_itself == .single_values
+	assert a.primitive_values == .merge_identical && a.repeated_content == .copy
+	assert a.abstract_items == .per_kind && !a.ignore_structured
+	// both identify ECUC values by their definition, and say the same severities
+	assert p.item_identity == a.item_identity && p.severities == a.severities
+	// by name or path
+	assert named_policy('automat')!.fold && !named_policy('spec')!.fold
+	assert named_policy('')!.source.starts_with('built-in')
+	if _ := named_policy('/nonexistent/policy.toml') {
+		assert false
+	}
 }
 
 // with_severity is the built-in policy with keys added to its [severity] table, wherever the
 // table is.
 fn with_severity(keys string) string {
-	return default_policy_text.replace('\n[severity]\n', '\n[severity]\n${keys}\n')
+	return automat_policy_text.replace('\n[severity]\n', '\n[severity]\n${keys}\n')
 }
 
 // refused asserts that a policy is refused with a message containing says.
@@ -51,22 +66,22 @@ fn refused(text string, says string) {
 
 fn test_a_policy_must_say_everything_it_knows() {
 	refused('[merge]\nabsent_keys = "empty"', 'no table [schema]')
-	refused(default_policy_text.replace('key_case = "ignore"', ''), '`merge.key_case` is not set')
+	refused(automat_policy_text.replace('key_case = "ignore"', ''), '`merge.key_case` is not set')
 	refused('[severity]\nmerge = "error"', 'no table [merge]')
-	refused(default_policy_text.replace('package_element = "AR-PACKAGE"', ''),
+	refused(automat_policy_text.replace('package_element = "AR-PACKAGE"', ''),
 		'`references.package_element` is not set')
-	refused(policy_text_with('absent_keys', '"maybe"'), '`merge.absent_keys` takes one of "empty", "own", not "maybe"')
+	refused(policy_text_with('absent_keys', '"maybe"'), '`merge.absent_keys` takes one of "own", "empty", not "maybe"')
 	refused(policy_text_with('governing', '"oldest"'), '`schema.governing` takes one of "newest_declared", not "oldest"')
-	refused(policy_text_with('item_itself', '"whole"'), '`merge.item_itself` takes one of "single_values", not "whole"')
+	refused(policy_text_with('item_itself', '"whole"'), '`merge.item_itself` takes one of "copy", "single_values", not "whole"')
 	// typed: a boolean is a boolean, a list a list
 	refused(policy_text_with('ignore_declarations', '"yes"'), '`merge.ignore_declarations` takes true or false, not "yes"')
 	refused(policy_text_with('ignore_attrs', '"UUID"'), '`merge.ignore_attrs` takes a list of attribute names, not "UUID"')
 	// unknown tables and keys, by name; a setting above its table, told where it belongs
-	refused(default_policy_text.replace('[schema]', '[schema]\nwhatever = true'), 'unknown setting `schema.whatever`')
-	refused(default_policy_text + '\n[extra]\na = 1', 'unknown table [extra]')
-	refused('absent_keys = "empty"\n' + default_policy_text, '`absent_keys` is outside its table; it belongs in [merge]')
-	refused('whatever = 1\n' + default_policy_text, 'unknown setting `whatever`, outside any table')
-	refused(default_policy_text.replace('key_case = "ignore"', 'key_case = "ignore"\nkey_case = "exact"'),
+	refused(automat_policy_text.replace('[schema]', '[schema]\nwhatever = true'), 'unknown setting `schema.whatever`')
+	refused(automat_policy_text + '\n[extra]\na = 1', 'unknown table [extra]')
+	refused('absent_keys = "empty"\n' + automat_policy_text, '`absent_keys` is outside its table; it belongs in [merge]')
+	refused('whatever = 1\n' + automat_policy_text, 'unknown setting `whatever`, outside any table')
+	refused(automat_policy_text.replace('key_case = "ignore"', 'key_case = "ignore"\nkey_case = "exact"'),
 		'"key_case" is already initialized')
 }
 
@@ -110,10 +125,10 @@ fn test_settings_are_named_as_the_policy_file_spells_them() {
 }
 
 fn test_policy_absent_keys_reaches_the_rules() {
-	rs := lib_rules_by(default_policy())
+	rs := lib_rules_by(automat_policy())
 	own := policy_with('absent_keys', '"own"')
 	assert rs.to_flat(keyless: own.absent_keys).rules.rules.filter(it.key.len > 0).all(it.keyless == .own)
-	assert rs.to_flat().rules.rules.filter(it.key.len > 0).all(it.keyless == .empty)
+	assert rs.to_flat(keyless: .empty).rules.rules.filter(it.key.len > 0).all(it.keyless == .empty)
 }
 
 fn test_policy_takes_only_what_is_implemented() {
@@ -128,7 +143,7 @@ fn test_policy_absent_keys_changes_the_merge() {
 		m.free()
 	}
 	// a LOAN with no key part in each of two files
-	empty := check(m, compile_schemas(m, pdata('schemas')))!
+	empty := check(m, compile_schemas(m, pdata('schemas'), policy: automat_policy()))!
 	own := check(m, compile_schemas(m, pdata('schemas'),
 		policy: policy_with('absent_keys', '"own"')
 	))!
@@ -159,7 +174,7 @@ fn test_policy_settings_and_their_overrides() {
 	defer {
 		m.free()
 	}
-	st := default_policy().settings()
+	st := automat_policy().settings()
 	fold, ignore := st.apply(m, CheckOptions{})
 	assert fold && 'UUID' in ignore && 'xsi:schemaLocation' in ignore
 	exact, _ := policy_with('key_case', '"exact"').settings().apply(m, CheckOptions{})
@@ -172,11 +187,15 @@ fn test_policy_settings_and_their_overrides() {
 	_, decl := policy_with('ignore_declarations', 'false').settings().apply(m, CheckOptions{})
 	assert 'xsi:schemaLocation' !in decl
 	// and it shows in the merge: Fiction and fiction are two shelves when case counts
-	folded := check(m, compile_schemas(m, pdata('schemas')))!
+	folded := check(m, compile_schemas(m, pdata('schemas'), policy: automat_policy()))!
 	apart := check(m, compile_schemas(m, pdata('schemas'),
 		policy: policy_with('key_case', '"exact"')
 	))!
 	assert folded.view.len() < apart.view.len()
+	// and keys that differ only in case are said ([constr_2508])
+	assert !folded.findings.any(it.kind == 'case_only')
+	assert apart.findings.any(it.kind == 'case_only' && it.path == '#LIBRARY/SHELVES'
+		&& it.message.contains('Fiction') && it.message.contains('fiction'))
 }
 
 fn test_item_identity_is_a_table_of_roles() {

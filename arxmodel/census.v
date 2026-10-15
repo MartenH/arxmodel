@@ -23,7 +23,7 @@ pub mut:
 // of); an attribute role's name is used for split keys. The wrapper tag is also checked.
 const role_tags = ['mmt.qualifiedName', 'atp.Splitkey', 'pureMM.maxOccurs', 'pureMM.minOccurs',
 	'pureMM.isOrdered', 'xml.roleElement', 'xml.typeElement']
-const role_stereotypes = ['atpSplitable']
+const role_stereotypes = ['atpSplitable', structured_comment]
 // What the reader applies to a role written as an attribute: its name, for split keys.
 const attribute_role_tags = ['mmt.qualifiedName']
 // A class's stereotype the reader applies: a reference to an instance is keyed by its children.

@@ -66,10 +66,7 @@ pub fn ruling_by_rules(flat Flat, name string, st Settings, models []&Model, opt
 // new_ruling reads versions by a flat rule set: the items of identity roles keyed by what all the
 // versions hold, so one definition reads alike in each.
 pub fn new_ruling(flat0 Flat, name string, st Settings, ty &Typing, models []&Model, opts CheckOptions) Ruling {
-	mut flat := flat0
-	flat.rules = with_value_keys(flat0.rules, flat0.value_keys(models))
 	mut r := Ruling{
-		flat:   flat
 		name:   name
 		typing: ty
 	}
@@ -83,6 +80,11 @@ pub fn new_ruling(flat0 Flat, name string, st Settings, ty &Typing, models []&Mo
 			}
 		}
 	}
+	mut flat := flat0
+	flat.rules = with_settings(flat0.rules, r.fold, r.ignore)
+	mut ch := new_content_hashes(r.ignore)
+	flat.rules = flat.merge_rules(models, mut ch)
+	r.flat = flat
 	for k, rule in flat.rules.rules {
 		children := if rule.children.len == 0 { ['*'] } else { rule.children }
 		for c in children {
@@ -173,6 +175,22 @@ fn (r &Ruling) reordered(c flatxml.Change) bool {
 		&& c.old.parent().i == c.parent.i && !r.ordered(c.old)
 }
 
+// in_ignored_content reports whether a change lies in content a merge does not compare
+// (structured comments, by the policy).
+fn (r &Ruling) in_ignored_content(c flatxml.Change) bool {
+	if r.flat.ignored_content.len == 0 {
+		return false
+	}
+	mut cur := if c.new.ok() { c.new } else { c.old }
+	for cur.ok() {
+		if cur.name() in r.flat.ignored_content {
+			return true
+		}
+		cur = cur.parent()
+	}
+	return false
+}
+
 // ignored reports whether a change is one of an attribute the merge lets differ.
 fn (r &Ruling) ignored(c flatxml.Change) bool {
 	return c.kind == .attr && (c.name in r.ignore || c.old_name in r.ignore)
@@ -215,7 +233,7 @@ pub fn (r &Ruling) diff(a &Version, b &Version) []PathChange {
 	mut d := flatxml.diff(a.view, b.view)
 	mut out := []PathChange{}
 	for c in d.changes {
-		if r.reordered(c) || r.ignored(c) {
+		if r.reordered(c) || r.ignored(c) || r.in_ignored_content(c) {
 			continue
 		}
 		out << match c.kind {
@@ -281,6 +299,10 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 	mut out := []PathConflict{}
 	for c in m3.conflicts {
 		if c.kind == .attr && c.name in r.ignore {
+			continue
+		}
+		// structured comments are not compared, by the policy: ours is kept
+		if r.flat.ignored_content.len > 0 && in_ignored(c.node, r.flat.ignored_content) {
 			continue
 		}
 		if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {

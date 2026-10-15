@@ -89,6 +89,14 @@ pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	for r in f.identity_roles {
 		out << '# identity: ${r.parent} ${r.items.join(',')} ${r.definition} ${r.label}'.trim_space()
 	}
+	// the rules (by their number, from 0) of non-splittable roles that must repeat identically,
+	// and the elements a merge does not compare
+	if f.repeat_rules.len > 0 {
+		out << '# repeat: ${f.repeat_rules.map(it.str()).join(' ')}'
+	}
+	if f.ignored_content.len > 0 {
+		out << '# ignore-content: ${f.ignored_content.join(' ')}'
+	}
 	body := flatxml.format_rules(flatxml.RuleSet{
 		...f.rules
 		fold:         st.fold
@@ -121,6 +129,12 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 			'flatxml' { pv.flatxml = value }
 			'policy' { pv.policy << value }
 			'ignore-declarations' { st.ignore_declarations = value == 'yes' }
+			'repeat' {
+				f.repeat_rules = value.fields().map(it.int())
+			}
+			'ignore-content' {
+				f.ignored_content = value.fields()
+			}
 			'identity' {
 				w := value.fields()
 				if w.len >= 3 {

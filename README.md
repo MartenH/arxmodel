@@ -28,14 +28,21 @@ A merge is made of three things, kept apart:
    that file instead of compiling the schema. Such a file is derived from the AUTOSAR schema, so it
    is **never committed**.
 2. **Policy** ([policy.toml](policy.toml), committed): every choice that is arxmodel's and not the
-   schema's, in TOML, each setting with a comment saying why and which item of the specification
-   it departs from: `[merge]` absent keys, the case of keys, attributes that may differ, the
-   item-itself key, repeated-choice content, FILE-INFO-COMMENT; `[schema]` which release governs,
-   splittability; `[references]` the package element; `[severity]` each finding's severity. Every
-   setting must be given, with a value of its type this build supports; an unknown table, key or
-   value is refused by name. Read at run time
-   (`--policy FILE`; the committed one is built in); command-line flags (`--case-sensitive`,
-   `--check-attr`, `--ignore-attr`) override it.
+   schema's, in TOML. The default follows the AUTOSAR specification (Generic Structure Template
+   R24-11); [automat.policy.toml](automat.policy.toml) is automat's behaviour (`--policy
+   automat`), and `--policy FILE` reads one's own. Each setting has a comment saying why and the
+   specification item it concerns: `[merge]` absent keys, the case of keys, attributes that may
+   differ, items and primitive values named by their role alone, non-splittable repetitions,
+   items of several types, ECUC values by definition, repeated-choice content, structured
+   comments; `[schema]` which release governs, splittability; `[references]` the package element;
+   `[severity]` each finding's severity. Every setting must be given, with a value of its type
+   this build supports; an unknown table, key or value is refused by name.
+   [policy.schema.json](policy.schema.json) is its JSON Schema (draft-07, generated from the code's
+   one list of settings by `arxmodel policy --schema`; a test holds the committed file to it), which
+   editors read through the files' first line, `#:schema ./policy.schema.json` (Taplo, Even Better
+   TOML). `arxmodel policy` prints every setting with the values it takes, its value and its
+   specification item; `arxmodel policy --diff automat` how two policies differ. Command-line flags
+   (`--case-sensitive`, `--check-attr`, `--ignore-attr`) override it.
 3. **Mechanics** (the code): reading annotations, resolving keys, scoping rules by parent path,
    merging on flatxml's view. It holds no choice of its own.
 
@@ -224,13 +231,16 @@ keeps every one, in document order.
   A path held by several elements is itself a finding, `duplicate_path`. `check` prints the
   external and unresolved references by the top-level package they point into.
 **ECUC values by their definition.** The schema's split key for an ECUC parameter or reference
-value is the item itself, which the policy's `item_itself` reads as its single-valued children, the
-value included: two files giving one parameter different values would be two values, and two
-sides of a merge changing it would keep both. The policy's `item_identity` names the roles whose
+value is the item itself (with its variation point's label). Copied, as the specification's
+`item_itself` has it, two files giving one parameter a value would give it two values; keyed by
+its single-valued children, as automat's has it, the value is part of the identity, and two files
+giving it different values would again be two values, two sides of a merge changing it keeping
+both. The policy's `item_identity` names the roles whose
 items are identified by one role of theirs instead (ECUC values by `definition`, and their
 variation point's label); a definition given more than once under one container in the documents
 read takes several values, which are a set told apart by content, as with the built-in rules. A
-rules file records these roles (`# identity:`), since rule text cannot say a set.
+rules file records these roles (`# identity:`), since rule text cannot say a set; likewise the
+repeated roles (`# repeat:`) and the elements not compared (`# ignore-content:`).
 
 Each finding's severity comes from the policy's `[severity]` table (`"error"`, `"warning"`,
 `"ignore"`; keyed by layer, `"layer.kind"` or `"layer.kind:element"` / `"layer.kind:@attribute"`,
@@ -310,35 +320,45 @@ inside an input directory, is refused. Nothing is written where `check` would ex
 (findings the policy calls errors, files that could not be read or declare no schema), unless
 `--force`; `merge` says so.
 
-### Differences from the AUTOSAR specification
+### The specification's merge, and the automat profile: differences
 
-arxmodel's merge model follows automat where the user chose it, so it differs from the AUTOSAR FO
-TPS Generic Structure Template, R24-11, in these known ways. The behaviour is as
-described above; this list says where it departs from the specification, and which line of
-[policy.toml](policy.toml) holds the choice where one does.
+The default policy merges as the AUTOSAR FO TPS Generic Structure Template, R24-11, has it; what
+flatxml's merge does not do by itself is done here:
 
-1. **Items with every key part absent.** Here they share one empty key and merge, as automat
-   does. The specification does not merge items whose split key has no value ([TPS_GST_00417]):
-   each stays an item of its own. Policy: `absent_keys`.
-2. **A split key naming only the role itself, on a multi-valued role.** The specification treats
-   such items as copied, not merged. Here they are keyed by their single-valued element children
-   and merged by that key. Policy: `item_itself`.
-3. **Case of keys.** Keys are compared ignoring ASCII case here, as automat does. In the
-   specification short names are compared case-sensitively, while their uniqueness within a
-   namespace is case-insensitive ([TPS_GST_00021], [constr_2508]). Policy: `key_case`.
-4. **Multi-valued primitive values.** The specification copies all values of such a role from
-   every fragment ([TPS_GST_00449]). Here identical values of a value-keyed role merge into one,
-   a consequence of `item_itself` (a value is its own key) and splittability (`splittable`).
-5. **Non-splittable collections repeated across fragments.** The specification allows such a
-   collection in several fragments only as an identical repetition ([constr_2524],
-   [TPS_GST_00447]). Here an unkeyed one keeps each occurrence as a child of its own, and a keyed
-   one reports a key met twice as a collision; nothing checks that repetitions are identical.
-6. **FILE-INFO-COMMENT.** The specification allows a structured comment (atpStructuredComment)
-   to be ignored when fragments are merged ([TPS_GST_00382]). Here it is compared like any other
-   content, so differing comments are reported. Policy: `file_info_comment`.
-7. **Abstract item types.** For an aggregation whose items may be of several subclasses, the
-   specification takes the identity contributors of all of them together ([TPS_GST_00416]).
-   Here each item kind is keyed by its own type's key.
+- an item whose split key parts are all absent stays an item of its own ([TPS_GST_00417]); such
+  items are counted as `merge.missing_key`, ignored by default;
+- keys are compared as written ([TPS_GST_00021]), and keys of one aggregation that differ only in
+  case are reported, `merge.case_only` ([constr_2508]);
+- the items of a multi-valued role whose split key is the role alone are copied, never merged
+  ([TPS_GST_00417]), and so are primitive values, duplicates kept ([TPS_GST_00449]);
+- a non-splittable multi-valued role in several fragments must repeat identically ([constr_2524],
+  [TPS_GST_00447]): identical repetitions are one (unkeyed items keyed by their content, a
+  document's own duplicates kept apart), and documents that give it differently are reported,
+  `merge.repeated_differs`, as are two items of one key in one document;
+- a structured comment (atpStructuredComment, FILE-INFO-COMMENT) is not compared
+  ([TPS_GST_00382]);
+- the items of a role of several item types are keyed by the union of their types' key parts
+  ([TPS_GST_00416]).
+
+The automat profile ([automat.policy.toml](automat.policy.toml), `--policy automat`) differs from
+it in each of those, as automat does (`arxmodel policy --diff automat` lists them):
+
+1. **Items with every key part absent** share one empty key and merge (`absent_keys = "empty"`).
+2. **A split key naming only the role itself, on a multi-valued role**: items are keyed by their
+   single-valued element children and merged by that key (`item_itself = "single_values"`).
+3. **Case of keys**: compared ignoring ASCII case (`key_case = "ignore"`).
+4. **Multi-valued primitive values**: identical values merge into one
+   (`primitive_values = "merge_identical"`).
+5. **Non-splittable collections repeated across fragments**: an unkeyed one keeps each
+   occurrence, a keyed one reports a key met twice as a collision; nothing checks that
+   repetitions are identical (`repeated_content = "copy"`).
+6. **FILE-INFO-COMMENT** is compared like any other content (`file_info_comment = "compare"`).
+7. **Abstract item types**: each item kind is keyed by its own type's key
+   (`abstract_items = "per_kind"`).
+
+Both identify ECUC parameter and reference values by their definition (`item_identity`, below):
+the schema's split key for them is the item itself, which neither copying (two values for one
+parameter given by two files) nor single values (the value part of the identity) keys usefully.
 
 ## Which rules (schema, rules file, or built-in)
 

@@ -6,8 +6,8 @@ const identity_line = 'item_identity = { "EcucContainerValue.parameterValue" = "
 
 // a policy identifying the synthetic schema's settings by their definition, or nothing so
 fn vk_policy(identity string) Policy {
-	assert default_policy_text.contains(identity_line)
-	return parse_policy(default_policy_text.replace(identity_line, 'item_identity = ${identity}')) or {
+	assert automat_policy_text.contains(identity_line)
+	return parse_policy(automat_policy_text.replace(identity_line, 'item_identity = ${identity}')) or {
 		panic(err)
 	}
 }

@@ -10,7 +10,7 @@ fn fdata(p ...string) string {
 
 fn ref_check(opts CheckOptions) !Checked {
 	mut m := load([fdata('refs')])!
-	return check(m, compile_schemas(m, fdata('schemas')), opts)
+	return check(m, compile_schemas(m, fdata('schemas'), policy: automat_policy()), opts)
 }
 
 // the reference findings as `kind line`, in the order they are reported
@@ -23,7 +23,7 @@ fn test_paths_are_indexed_from_short_names() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, fdata('schemas')))!
+	c := check(m, compile_schemas(m, fdata('schemas'), policy: automat_policy()))!
 	ix := c.index
 	assert ix.by_path.keys().sorted() == ['/fiction', '/fiction/analog', '/fiction/dune']
 	dune := c.view.node(ix.holders('/Fiction/Dune')[0])
@@ -35,7 +35,7 @@ fn test_paths_are_indexed_from_short_names() {
 
 fn test_referrable_from_the_schema() {
 	mut m := load([fdata('refs')])!
-	sc := compile_schemas(m, fdata('schemas'))
+	sc := compile_schemas(m, fdata('schemas'), policy: automat_policy())
 	mut ty := new_typing(sc.uses[0].schema)
 	// the class whose own content declares SHORT-NAME
 	assert ty.referrable.len == 1
@@ -99,7 +99,7 @@ fn test_paths_compared_as_the_merge_compares_keys() {
 fn test_external_by_the_nearest_existing_ancestor() {
 	// with SHELF the package element, a book missing from a shelf is a definition not loaded
 	mut m := load([fdata('refs')])!
-	p := parse_policy(default_policy_text.replace('package_element = "AR-PACKAGE"', 'package_element = "SHELF"'))!
+	p := parse_policy(automat_policy_text.replace('package_element = "AR-PACKAGE"', 'package_element = "SHELF"'))!
 	c := check(m, compile_schemas(m, fdata('schemas'), policy: p))!
 	assert 'external 14' in ref_kinds_at(c)
 	// files loaded only to resolve against: /Elsewhere/Atlas is there, and nothing of them is
@@ -110,10 +110,10 @@ fn test_external_by_the_nearest_existing_ancestor() {
 }
 
 fn test_a_policy_key_sets_a_reference_severity() {
-	p := parse_policy(default_policy_text.replace('"reference.relative" = "warning"',
+	p := parse_policy(automat_policy_text.replace('"reference.relative" = "warning"',
 		'"reference.relative" = "ignore"'))!
 	assert p.severity(.reference, 'relative', 'X') == .ignore
-	bad := default_policy_text.replace('\n[severity]\n', '\n[severity]\n"reference.dangling" = "error"\n')
+	bad := automat_policy_text.replace('\n[severity]\n', '\n[severity]\n"reference.dangling" = "error"\n')
 	parse_policy(bad) or {
 		assert err.msg().contains('no kind `dangling` in layer reference'), err.msg()
 		return

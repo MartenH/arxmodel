@@ -96,7 +96,7 @@ fn test_newest_declared_governs_or_the_newest_at_hand() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, tdata('schemas'))
+	sc := compile_schemas(m, tdata('schemas'), policy: automat_policy())
 	assert sc.governing.len == 1
 	g := sc.governing[0]
 	assert sc.uses[g.newest].name == 'LIB_3.xsd'
@@ -110,7 +110,7 @@ fn test_older_roles_and_documents_against_the_governing_schema() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, tdata('schemas'))
+	sc := compile_schemas(m, tdata('schemas'), policy: automat_policy())
 	g := sc.governing[0]
 	gov := sc.uses[g.use]
 	old := sc.uses.filter(it.name == 'LIB_1.xsd')[0]
@@ -126,7 +126,7 @@ fn test_one_schema_governs_alone() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, tdata('schemas'))
+	sc := compile_schemas(m, tdata('schemas'), policy: automat_policy())
 	g := sc.governing[0]
 	assert sc.uses[g.use].name == 'LIB_1.xsd' && g.note == ''
 	assert undeclared_elements(m, sc, g).len == 0

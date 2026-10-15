@@ -32,7 +32,11 @@
 //                                              AUTOSAR path
 //   arxmodel git-setup, git-diff                git's merge and diff drivers
 //
-// rules, check and merge take --policy FILE, the merge policy (policy.toml, built in, by default).
+//   arxmodel policy [--policy NAME|FILE] [--diff NAME|FILE] [--schema [-o FILE]]
+//                                              the policy's settings, how two differ, its schema
+//
+// rules, check and merge take --policy: `spec` (policy.toml, the AUTOSAR specification's, built
+// in, the default), `automat` (automat.policy.toml, automat's) or a file.
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
 // found or did not compile; check exits 1 on findings the policy calls errors (and on files that
@@ -113,7 +117,13 @@ const usage = 'usage:
   arxmodel git-diff (--schema-dir DIR | --rules FILE) path old-file old-hex old-mode new-file new-hex new-mode
       the external diff driver of git
   Exit 2, for any command, when something kept it from answering (an option, a file not read)
-  --policy FILE (rules, check, merge, get, list, diff, merge3): the merge policy, in place of the built-in policy.toml
+  arxmodel policy [--policy NAME|FILE] [--diff NAME|FILE] [--schema [-o FILE]]
+      every setting of the policy with the values it takes, its value and the specification item
+      it concerns, then the severities; --diff, how another policy differs; --schema, the JSON
+      Schema of a policy file (policy.schema.json)
+  --policy NAME|FILE (rules, check, merge, get, list, diff, merge3, policy): the merge policy:
+      spec (policy.toml, as the AUTOSAR specification has it, the default), automat
+      (automat.policy.toml, as automat behaves), or a file
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU, at
       most 8'
 
@@ -137,6 +147,8 @@ mut:
 	out        string   // merge: where the merged model is written ('-' for standard output)
 	force      bool     // merge: write it whatever the findings
 	no_schema  bool     // the built-in identity rules, whatever schema is configured
+	schema     bool     // policy: write policy.schema.json
+	diff       string   // policy: the policy to compare with
 	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
 	origin     string   // resolved: where the rules come from, for the `rules:` line
 	format     string = 'text' // check: how the report is written
@@ -224,9 +236,10 @@ fn main() {
 				'--ignore-attr', '--check-attr', '--out']
 		}
 		'git-setup' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
+		'policy' { ['--policy', '--schema', '--diff', '--out'] }
 		else { []string{} }
 	}
-	if opts.paths.len == 0 && args[0] != 'git-setup' {
+	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy'] {
 		eprintln('no files or directories given')
 		eprintln(usage)
 		exit(2)
@@ -295,6 +308,9 @@ fn main() {
 		'git-setup' {
 			cmd_git_setup(opts)
 		}
+		'policy' {
+			cmd_policy(opts)
+		}
 		'rules' {
 			if opts.schema_dir == '' {
 				eprintln('rules needs a schema directory (--schema-dir, ${arxmodel.schema_dir_env} or schema_dir in ${arxmodel.config_path()})')
@@ -351,6 +367,9 @@ fn parse_opts(args []string) !Opts {
 			'--no-schema' {
 				o.no_schema = true
 			}
+			'--schema' {
+				o.schema = true
+			}
 			'-o', '--out' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
@@ -363,7 +382,7 @@ fn parse_opts(args []string) !Opts {
 				continue
 			}
 			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from',
-			'--format' {
+			'--format', '--diff' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -376,6 +395,7 @@ fn parse_opts(args []string) !Opts {
 					'--policy' { o.policy = v }
 					'--refs-from' { o.refs_from << v }
 					'--format' { o.format = v }
+					'--diff' { o.diff = v }
 					else { o.dump = v }
 				}
 				k += 2
@@ -640,17 +660,10 @@ fn plural(n int, word string) string {
 	return if n == 1 { '1 ${word}' } else { '${n} ${word}s' }
 }
 
-// load_policy is the policy file named, or the built-in one.
+// load_policy is the policy named (spec, automat) or the file, or the built-in one.
 fn load_policy(o Opts) arxmodel.Policy {
-	if o.policy == '' {
-		return arxmodel.default_policy()
-	}
-	text := os.read_file(o.policy) or {
-		eprintln('${o.policy}: ${err.msg()}')
-		exit(2)
-	}
-	return arxmodel.parse_policy(text) or {
-		eprintln('${o.policy}: ${err.msg()}')
+	return arxmodel.named_policy(o.policy) or {
+		eprintln(err.msg())
 		exit(2)
 	}
 }

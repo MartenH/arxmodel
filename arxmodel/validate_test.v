@@ -11,7 +11,7 @@ fn vdata(p ...string) string {
 
 // vpolicy is the built-in policy with keys added to its [severity] table.
 fn vpolicy(extra string) Policy {
-	return parse_policy(default_policy_text.replace('\n[severity]\n', '\n[severity]\n${extra}\n')) or {
+	return parse_policy(automat_policy_text.replace('\n[severity]\n', '\n[severity]\n${extra}\n')) or {
 		panic(err)
 	}
 }
@@ -33,7 +33,7 @@ fn test_findings_of_every_layer() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, vdata('schemas')))!
+	c := check(m, compile_schemas(m, vdata('schemas'), policy: automat_policy()))!
 	xml := c.findings.filter(it.layer == .xml_schema)
 	assert xml.len > 0
 	assert xml.any(it.kind == 'undeclared_element' && it.what == 'NOPE' && it.severity == .error
@@ -48,7 +48,7 @@ fn test_findings_of_every_layer() {
 	assert !mult.any(it.kind == 'above_max')
 	assert c.times['merge'] > 0 && c.times['xml_schema'] > 0 && c.times['multiplicity'] > 0
 	// layers can be skipped
-	d := check(m, compile_schemas(m, vdata('schemas')), skip_xml: true, skip_multiplicity: true)!
+	d := check(m, compile_schemas(m, vdata('schemas'), policy: automat_policy()), skip_xml: true, skip_multiplicity: true)!
 	assert d.findings.all(it.layer == .merge)
 }
 
@@ -57,7 +57,7 @@ fn test_severity_decides_what_fails() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, vdata('schemas')))!
+	c := check(m, compile_schemas(m, vdata('schemas'), policy: automat_policy()))!
 	assert c.count(.error) == 2
 	p := vpolicy('"merge.value_differs:SHORT-NAME" = "warning"\n"merge.ordered_split" = "ignore"')
 	d := check(m, compile_schemas(m, vdata('schemas'), policy: p))!
@@ -70,7 +70,7 @@ fn test_choice_alternatives_have_no_fewest_in_that_holder_only() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, vdata('schemas')), skip_xml: true)!
+	c := check(m, compile_schemas(m, vdata('schemas'), policy: automat_policy()), skip_xml: true)!
 	below := c.findings.filter(it.kind == 'below_min')
 	assert below.len == 1
 	assert below[0].path == '#TOP/PLAIN' && below[0].what == 'X'
@@ -88,7 +88,7 @@ fn test_no_xml_finding_is_lost_past_a_cap() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, vdata('schemas'))
+	sc := compile_schemas(m, vdata('schemas'), policy: automat_policy())
 	one, _ := xml_findings(m, sc, 1)
 	three, _ := xml_findings(m, sc, 3)
 	assert one.len >= 1500 && one.len == three.len
@@ -118,6 +118,6 @@ fn test_wrappers_of_item_content_are_counted_as_unchecked() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, vdata('schemas')))!
+	c := check(m, compile_schemas(m, vdata('schemas'), policy: automat_policy()))!
 	assert c.unchecked_roles == 1
 }

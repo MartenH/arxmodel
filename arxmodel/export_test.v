@@ -14,7 +14,7 @@ fn test_a_split_model_exports_as_one_document() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, edata('schemas'))
+	sc := compile_schemas(m, edata('schemas'), policy: automat_policy())
 	c := check(m, sc)!
 	assert c.governing == 'LIB_2.xsd'
 	assert c.findings.filter(it.severity == .error).len == 0
@@ -38,7 +38,7 @@ fn test_a_split_model_exports_as_one_document() {
 	defer {
 		w.free()
 	}
-	wsc := compile_schemas(w, edata('schemas'))
+	wsc := compile_schemas(w, edata('schemas'), policy: automat_policy())
 	wc := check(w, wsc)!
 	assert wc.governing == 'LIB_2.xsd'
 	assert wc.findings.filter(it.severity == .error).len == 0, wc.findings.map(it.str()).join('\n')
@@ -58,7 +58,7 @@ fn test_a_model_whose_first_file_declares_the_governing_schema_is_written_as_mer
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, edata('schemas'))
+	sc := compile_schemas(m, edata('schemas'), policy: automat_policy())
 	c := check(m, sc)!
 	out := os.join_path(os.vtmp_dir(), 'arxmodel_export_one_${os.getpid()}.arxml')
 	defer {
@@ -89,9 +89,9 @@ fn test_a_model_merged_by_a_rules_file_names_the_release_of_its_rules() {
 		'both': 'LIB_2.xsd'
 	} {
 		flat, name := governing_flat(compile_schemas(if rules_of == 'one' { one } else { m },
-			edata('schemas')))!
+			edata('schemas'), policy: automat_policy()))!
 		assert name == want
-		c := check_with(m, flat, name, default_policy().settings(), default_policy())!
+		c := check_with(m, flat, name, automat_policy().settings(), automat_policy())!
 		export(c, m, sc, out)!
 		text := os.read_file(out)!
 		assert text.contains('xsi:schemaLocation="urn:arxmodel:test:lib ${want}"')
@@ -110,7 +110,7 @@ fn export_files(dir string, files map[string]string, out string) ![]string {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, edata('schemas'))
+	sc := compile_schemas(m, edata('schemas'), policy: automat_policy())
 	c := check(m, sc, skip_xml: true, skip_multiplicity: true)!
 	return export(c, m, sc, out)!
 }

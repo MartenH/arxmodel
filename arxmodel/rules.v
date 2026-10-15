@@ -47,6 +47,7 @@ pub mut:
 	key_spec   []string        // the split key as the schema writes it, in meta-model roles
 	splittable bool            // items of one key from several files are one item
 	ordered    bool            // the order of the items means something
+	copied     bool            // the items are copied, never merged (a split key of the role alone, by the policy)
 	min        u32             // the meta-model's fewest (pureMM.minOccurs); the XML schema makes most roles optional in a file
 	max        u32             // unbounded for no most
 	held_by    []u32           // the complex types whose content holds the role (indices in the schema)
@@ -608,7 +609,47 @@ fn (rs &RuleSet) resolve_keys(mut r Rule) {
 			key_lost: lost[tk]
 		}
 	}
+	// items of several types: by the policy, every type keyed by the union of their key parts
+	// (the types whose key resolved: a type whose key lost a part keeps its own)
+	if done.len > 1 && rs.policy.abstract_items == .@union {
+		mut all := []KeyPath{}
+		mut seen := map[string]bool{}
+		for it in items {
+			if it.key_lost {
+				continue
+			}
+			for k in it.key {
+				if k.str() !in seen {
+					seen[k.str()] = true
+					all << k
+				}
+			}
+		}
+		items = items.map(if it.key_lost {
+			it
+		} else {
+			Item{
+				...it
+				key: all
+			}
+		})
+	}
 	r.items = items
+}
+
+// structured_comment is the stereotype of a structured comment, which a merge may ignore.
+const structured_comment = 'atpStructuredComment'
+
+// structured_elements are the elements of roles of structured comments.
+pub fn (rs &RuleSet) structured_elements() []string {
+	mut out := []string{}
+	for r in rs.rules {
+		ann := rs.elem_ann[r.decl] or { continue }
+		if structured_comment in ann.stereo && r.element !in out {
+			out << r.element
+		}
+	}
+	return out
 }
 
 // key_failures are the problems that leave a part of a split key out.
@@ -628,6 +669,15 @@ fn (rs &RuleSet) resolve_key(mut r Rule, start xsd.TypeRef, for_items string) []
 				}
 				keys << KeyPath{w.steps, w.all}
 				continue
+			}
+			// a split key of the role alone, on a multi-valued role: the policy may copy the items
+			if r.key_spec.len == 1 && r.max > 1 {
+				with_children := rs.has_children(start)
+				if (with_children && rs.policy.item_itself == .copy)
+					|| (!with_children && rs.policy.primitive_values == .copy) {
+					r.copied = true
+					continue
+				}
 			}
 			own := rs.itself_keys(start)
 			if own.len == 0 {

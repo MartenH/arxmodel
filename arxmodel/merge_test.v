@@ -33,7 +33,7 @@ fn rule_at(f Flat, parent string, child string) flatxml.Rule {
 
 fn test_rules_become_flatxml_rules() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	// a wrapper is a single, merged child; its items keyed and merged when splittable, an item
 	// with no key part being the one with the empty key
 	w := flat_rule(f, 'LIBRARY', 'SHELVES')
@@ -66,12 +66,12 @@ fn test_rules_become_flatxml_rules() {
 
 fn lib_schema_rules() &RuleSet {
 	s := xsd.load(mdata('schemas', 'LIB_1', 'LIB_1.xsd')) or { panic(err) }
-	return read_rules(s)
+	return read_rules_with(s, automat_policy())
 }
 
 fn test_each_holder_its_own_rule_by_parent_path() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	assert f.scoped == ['ITEMS MAGAZINE', 'NOTES NOTE', 'TAG-SET TAG']
 	assert f.conflicts.len == 0
 	// a wrapper's items, by the holder above the wrapper
@@ -88,7 +88,7 @@ fn test_each_holder_its_own_rule_by_parent_path() {
 
 fn test_a_scoped_role_keeps_its_item_kinds_together_and_its_place() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	// only MAGAZINE is given different rules, but the book's whole role is scoped, so ordered and
 	// the most hold across its item kinds
 	k := flat_index(f, 'BOOK/ITEMS', 'MAGAZINE')
@@ -103,8 +103,8 @@ fn test_a_scoped_role_keeps_its_item_kinds_together_and_its_place() {
 
 fn test_a_holder_no_path_names_is_a_conflict() {
 	s := xsd.load(mdata('schemas', 'ROOTS_1', 'ROOTS_1.xsd')) or { panic(err) }
-	rs := read_rules(s)
-	f := rs.to_flat()
+	rs := read_rules_with(s, automat_policy())
+	f := rs.to_flat(keyless: .empty)
 	// the global ROOT's ITEM differs from the first (a ROOT inside PARENT), and nothing is
 	// above the global one
 	assert f.scoped == ['ROOT ITEM']
@@ -122,7 +122,7 @@ fn test_flat_wrapper_content_is_scoped_by_its_holders() {
 
 fn test_item_kinds_of_one_rule_are_one_flatxml_rule() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	mut found := false
 	for r in f.rules.rules {
 		if r.parent == 'ITEMS' && 'BOOK' in r.children {
@@ -148,7 +148,7 @@ fn test_spec_tells_own_text_from_another_key() {
 
 fn test_unresolved_key_is_one_child_each() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	b := flat_rule(f, 'BROKEN-KEYS', 'LOAN')
 	assert b.key.len == 0 && !b.single
 	assert f.lost_keys == 1
@@ -156,7 +156,7 @@ fn test_unresolved_key_is_one_child_each() {
 
 fn test_flat_wrapper_content_most_per_item() {
 	rs := lib_schema_rules()
-	f := rs.to_flat()
+	f := rs.to_flat(keyless: .empty)
 	// MARKS holds any number of marks, each a ROW or a COLUMN
 	assert flat_rule(f, 'MARKS', 'ROW').max == 0
 }
@@ -166,7 +166,7 @@ fn test_check_merges_and_reports_with_positions() {
 	defer {
 		m.free()
 	}
-	sc := compile_schemas(m, mdata('schemas'))
+	sc := compile_schemas(m, mdata('schemas'), policy: automat_policy())
 	mut c := check(m, sc)!
 	assert c.governing == 'LIB_1.xsd'
 	assert c.flat.conflicts.len == 0
@@ -195,14 +195,14 @@ fn test_check_merges_and_reports_with_positions() {
 }
 
 fn test_a_parents_rules_follow_its_content_order() {
-	f := lib_schema_rules().to_flat()
+	f := lib_schema_rules().to_flat(keyless: .empty)
 	mut kids := map[string][]string{} // parent -> the first child of each of its rules, in order
 	for r in f.rules.rules {
 		kids[r.parent] << r.children[0]
 	}
 	// the content models of LIB_1.xsd as written there, groups expanded
 	assert kids['SHELF'] == ['SHORT-NAME', 'ITEMS', 'NOTES', 'LABELS', 'FAVOURITES', 'LOANS', 'TAG-SET',
-		'MARKS', 'PAIR', 'MOTTO', 'OPENING-HOURS', 'COPIES', 'BOX', 'CRATES', 'SETTINGS', 'PICK-REF', 'BROKEN-KEYS',
+		'MARKS', 'PAIR', 'MOTTO', 'OPENING-HOURS', 'COPIES', 'BOX', 'CRATES', 'SETTINGS', 'MEDIA', 'PICK-REF', 'BROKEN-KEYS',
 		'VARIATION-POINT']
 	assert kids['BOOK'] == ['SHORT-NAME', 'PICK-REF', 'ITEMS', 'PALLETS', 'TAG-SET', 'NOTES', 'BLURB']
 	assert kids['COPY'] == ['EDITION', 'STAMPS', 'YEAR', 'PRICE', 'BINDING', 'LOCATION-IREF', 'CODES']
@@ -231,7 +231,7 @@ fn test_a_child_no_role_names_keeps_its_place() {
 	defer {
 		m.free()
 	}
-	c := check(m, compile_schemas(m, mdata('schemas')), skip_xml: true, skip_multiplicity: true)!
+	c := check(m, compile_schemas(m, mdata('schemas'), policy: automat_policy()), skip_xml: true, skip_multiplicity: true)!
 	shelf := c.view.root().child('SHELVES', '').child('SHELF', 'S' + flatxml.key_sep)
 	mut names := []string{}
 	for k in shelf.children() {

@@ -79,6 +79,12 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
    - **Done: the policy in TOML.** `policy.toml` (tables `[merge]`, `[schema]`, `[references]`,
      `[severity]`), read by vlib's `toml`; every setting required and typed, anything unknown
      refused by name.
+   - **Done: the specification's merge as the default policy.** policy.toml follows the Generic
+     Structure Template (copied items and primitive values, keys as written with `case_only`,
+     identical repetitions of non-splittable roles with `repeated_differs`, structured comments
+     not compared, the union of item types' keys, absent keys kept apart); automat's behaviour is
+     automat.policy.toml (`--policy automat`). policy.schema.json is generated from the code's one
+     list of settings; `arxmodel policy` shows a policy and `--diff` how two differ.
    - **Next, in this order** (arxmodel is used in ordinary flows elsewhere too: merging .arxml
      files in CI and in git merges):
      1. *CI and git:*

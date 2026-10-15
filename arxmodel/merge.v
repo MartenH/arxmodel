@@ -55,6 +55,10 @@ pub mut:
 	unkeyed_by_design bool
 	// roles whose items are identified by a definition (the policy's item_identity)
 	identity_roles []IdentityRole
+	// rules of non-splittable roles allowed in several fragments only as identical repetitions
+	repeat_rules []int
+	// elements whose content a merge does not compare (structured comments, by the policy)
+	ignored_content []string
 }
 
 // Conflict is an element pair under a parent path that roles of different holders still give
@@ -128,11 +132,14 @@ struct Spec {
 	max     int
 	keyed   bool
 	key     []string // flatxml key paths: '' for the item's own text, a final `+` for every occurrence
+	// a non-splittable multi-valued role, allowed in several fragments only as an identical
+	// repetition (the policy's repeated_content): its items merged, unkeyed ones by content
+	repeat bool
 }
 
 fn (a Spec) same(b Spec) bool {
 	return a.single == b.single && a.merge == b.merge && a.ordered == b.ordered && a.max == b.max
-		&& a.keyed == b.keyed && a.key == b.key
+		&& a.keyed == b.keyed && a.key == b.key && a.repeat == b.repeat
 }
 
 fn (s Spec) str() string {
@@ -149,6 +156,9 @@ fn (s Spec) str() string {
 	}
 	if s.ordered {
 		out << 'ordered'
+	}
+	if s.repeat {
+		out << 'repeat'
 	}
 	if s.max > 0 {
 		out << 'max=${s.max}'
@@ -187,6 +197,16 @@ fn (rs &RuleSet) item_spec(r &Rule, it Item) Spec {
 	if r.max <= 1 {
 		return single_merge
 	}
+	// a non-splittable role repeated in fragments must repeat identically: its items merge
+	repeat := !r.splittable && rs.policy.repeated_content == .identical
+	if r.copied {
+		return Spec{
+			ordered: r.ordered
+			max:     flat_max(r.max)
+			merge:   repeat
+			repeat:  repeat
+		}
+	}
 	if r.key_spec.len > 0 && !it.key_lost && it.key.len == 0 {
 		// nothing tells the items apart: one key for all, merged only where the role is
 		// splittable (one child of the name; a second is a collision otherwise)
@@ -198,15 +218,18 @@ fn (rs &RuleSet) item_spec(r &Rule, it Item) Spec {
 	if r.key_spec.len > 0 && !it.key_lost {
 		return Spec{
 			keyed:   true
-			merge:   r.splittable
+			merge:   r.splittable || repeat
 			ordered: r.ordered
 			max:     flat_max(r.max)
 			key:     it.key.map(flat_path(it))
+			repeat:  repeat
 		}
 	}
 	return Spec{
 		ordered: r.ordered
 		max:     flat_max(r.max)
+		merge:   repeat
+		repeat:  repeat
 	}
 }
 
@@ -449,6 +472,9 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 		lost_keys:      c.lost_keys
 		identity_roles: rs.identity_roles()
 	}
+	if rs.policy.ignore_structured {
+		f.ignored_content = rs.structured_elements()
+	}
 	// the pairs roles give different rules
 	for pair in c.pairs {
 		ks := c.by_pair[pair]
@@ -592,6 +618,14 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 	})
 	descs := f.described.clone()
 	f.described = at.map(descs[it])
+	// the repeated roles' rules, by their place in the sorted list
+	old_repeat := f.repeat_rules.clone()
+	f.repeat_rules = []
+	for k, i in at {
+		if i in old_repeat {
+			f.repeat_rules << k
+		}
+	}
 	// the settings (case, attributes) are the policy's, given by the caller that merges
 	f.rules = flatxml.RuleSet{
 		rules: at.map(rules[it])
@@ -655,6 +689,9 @@ fn (c &Cands) children_of(rule int, parent string) []string {
 // emit appends one flatxml rule for the candidates ks (one rule, one spec) under parent.
 fn (mut f Flat) emit(c Cands, parent string, ks []int, keyless flatxml.Keyless, mut rules []flatxml.Rule) {
 	sp := c.list[ks[0]].spec
+	if sp.repeat {
+		f.repeat_rules << rules.len
+	}
 	f.described << sp.str()
 	rules << flatxml.Rule{
 		parent:   parent
@@ -878,8 +915,9 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
-	flat.rules = with_settings(with_value_keys(flat0.rules, flat0.value_keys([m])), fold,
-		ignore)
+	flat.rules = with_settings(flat0.rules, fold, ignore)
+	mut ch := new_content_hashes(ignore)
+	flat.rules = flat.merge_rules([m], mut ch)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
 	msw := time.new_stopwatch()
@@ -923,6 +961,10 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 		if flat.unkeyed_by_design && pr.kind == .missing_key {
 			continue
 		}
+		// structured comments are not compared, by the policy
+		if ignored_problem(view, pr, flat.ignored_content) {
+			continue
+		}
 		// the merged parent of the children concerned, and its parent: the path a conflict names
 		mut parent := view.node(pr.node)
 		mut child := pr.what
@@ -947,6 +989,11 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 			at:          pr.at.map(view.pos(it))
 		}
 	}
+	// keys that differ only in case, where keys are compared as written; repeated roles
+	if !fold {
+		findings << case_only_findings(mut view, index, flat.rules, p)
+	}
+	findings << repeated_findings(mut view, index, flat.rules, flat.repeat_rules, mut ch, p)
 	mut times := map[string]time.Duration{}
 	times['merge'] = sw.elapsed() - paths_took
 	times['paths'] = paths_took

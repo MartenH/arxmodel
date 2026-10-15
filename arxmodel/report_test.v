@@ -77,7 +77,7 @@ fn test_the_default_threads_are_at_most_eight() {
 // checked_report is check's report of the files at dir, a directory of testdata.
 fn checked_report(dir string) !Report {
 	mut m := load([rdata(dir)])!
-	sc := compile_schemas(m, rdata('schemas'))
+	sc := compile_schemas(m, rdata('schemas'), policy: automat_policy())
 	c := check(m, sc)!
 	return check_report(m, sc, c)
 }

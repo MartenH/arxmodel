@@ -79,7 +79,7 @@ pub fn (p Policy) merge_severity(kind string, what string, in_conflict bool) Sev
 // table may name.
 pub const known_kinds = {
 	'merge':        ['collision', 'key_reused', 'ordered_split', 'too_many', 'value_differs',
-		'name_differs', 'missing_key', 'conflict', 'in_conflict']
+		'name_differs', 'missing_key', 'conflict', 'in_conflict', 'case_only', 'repeated_differs']
 	'xml_schema':   ['undeclared_element', 'undeclared_attribute', 'missing_attribute',
 		'text_not_allowed', 'children_not_allowed', 'abstract_type', 'not_nillable', 'invalid_value',
 		'duplicate_id', 'unknown_idref', 'unbound_prefix', 'unexpected_element', 'missing_element',

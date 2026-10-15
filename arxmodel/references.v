@@ -301,12 +301,33 @@ pub fn merged_path(n flatxml.MNode, ix &PathIndex) string {
 		k := cur.key()
 		inner << if flatxml.empty_key(k) || k == list_key(cur.name()) {
 			cur.name()
+		} else if k.starts_with(content_mark) {
+			// an item keyed by its content: by its place among its namesakes
+			'${cur.name()}[#${place_of(cur)}]'
 		} else {
 			'${cur.name()}[${flatxml.show_key(k)}]'
 		}
 		cur = cur.parent()
 	}
 	return join_path('', inner)
+}
+
+// place_of is a node's place among its parent's children of its name, from 1.
+fn place_of(n flatxml.MNode) int {
+	p := n.parent()
+	if !p.ok() {
+		return 1
+	}
+	mut k := 0
+	for c in p.children() {
+		if c.tag() == n.tag() {
+			k++
+		}
+		if c.i == n.i {
+			break
+		}
+	}
+	return k
 }
 
 fn join_path(path string, inner []string) string {

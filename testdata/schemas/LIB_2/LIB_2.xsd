@@ -40,6 +40,13 @@
 
    <xsd:complexType name="LIBRARY">
       <xsd:sequence>
+         <!-- a structured comment, which a merge may ignore -->
+         <xsd:element name="FILE-NOTE" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Library.fileNote";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpStructuredComment</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
          <xsd:element name="SHELVES" minOccurs="0">
             <xsd:annotation>
                <xsd:appinfo source="tags">atp.Splitkey="shelf.shortName, shelf.variationPoint.shortLabel";mmt.qualifiedName="Library.shelf";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
@@ -187,6 +194,19 @@
             <xsd:complexType>
                <xsd:choice minOccurs="0" maxOccurs="unbounded">
                   <xsd:element name="SETTING" type="L:SETTING"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <!-- items of two types named by the role itself, each type with its own single values -->
+         <xsd:element name="MEDIA" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="medium";mmt.qualifiedName="Shelf.medium";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="DISC" type="L:DISC"/>
+                  <xsd:element name="TAPE" type="L:TAPE"/>
                </xsd:choice>
             </xsd:complexType>
          </xsd:element>
@@ -383,6 +403,21 @@
             <xsd:annotation>
                <xsd:appinfo source="tags">mmt.qualifiedName="Book.blurb";pureMM.maxOccurs="1";pureMM.minOccurs="0";nonsense</xsd:appinfo>
             </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="DISC">
+      <xsd:sequence>
+         <xsd:element name="TITLE" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Disc.title";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+   <xsd:complexType name="TAPE">
+      <xsd:sequence>
+         <xsd:element name="LABEL-TEXT" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Tape.labelText";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
          </xsd:element>
       </xsd:sequence>
    </xsd:complexType>

@@ -24,7 +24,7 @@ fn version_of(name string, edits ...string) &Model {
 }
 
 fn builtin_versions(models ...&Model) (Ruling, []Version) {
-	r := ruling_builtin(models, default_policy().settings(), CheckOptions{})
+	r := ruling_builtin(models, automat_policy().settings(), CheckOptions{})
 	return r, models.map(r.read(it) or { panic(err) })
 }
 
@@ -128,7 +128,7 @@ fn test_versions_read_by_the_schema() {
 	// the exact rules: the LIB schema's, the release the versions declare
 	mut a := load([cdata('merge')])!
 	mut b := load([cdata('merge')])!
-	r := ruling_by_schema([a, b], cdata('schemas'), default_policy(), CheckOptions{})!
+	r := ruling_by_schema([a, b], cdata('schemas'), automat_policy(), CheckOptions{})!
 	assert r.name == 'LIB_1.xsd' && !r.builtin
 	va, vb := r.read(a)!, r.read(b)!
 	assert r.diff(&va, &vb).len == 0
@@ -148,7 +148,7 @@ fn test_check_by_the_built_in_rules() {
 	// the merge layer and the references, by their DEST: an unnamed element is matched by its
 	// place by design, so it is no missing key
 	m := load([cdata('compare')])!
-	p := default_policy()
+	p := automat_policy()
 	c := check_with(m, identity_flat(builtin_identity(), [m]), 'built-in identity rules', p.settings(),
 		p, CheckOptions{})!
 	assert c.refs.checked == 5

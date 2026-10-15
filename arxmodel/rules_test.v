@@ -7,7 +7,7 @@ fn lib_rules() &RuleSet {
 	s := xsd.load(os.join_path(@VMODROOT, 'testdata', 'schemas', 'LIB_1', 'LIB_1.xsd')) or {
 		panic(err)
 	}
-	return read_rules(s)
+	return read_rules_with(s, automat_policy())
 }
 
 fn rule_named(rs &RuleSet, name string) Rule {
@@ -119,7 +119,7 @@ fn test_repeated_class_content_takes_the_schema_count() {
 fn test_census_accounts_for_every_annotation() {
 	rs := lib_rules()
 	c := rs.census
-	assert c.appinfo == 66
+	assert c.appinfo == 72
 	// counted by what the reader did, never by a list of the schema's vocabulary
 	assert c.other['tag foo.bar'] == 1
 	assert c.other['stereotype atpWeird'] == 1
@@ -127,16 +127,17 @@ fn test_census_accounts_for_every_annotation() {
 	assert c.other['tag atp.Status'] == 1
 	assert c.other['stereotype atpIdentityContributor'] == 1
 	assert c.checked['tag xml.roleWrapperElement'] == 4
-	assert c.used['stereotype atpSplitable'] == 13
+	assert c.used['stereotype atpSplitable'] == 14
 	assert c.used['stereotype instanceRef'] == 1
-	assert c.used['tag atp.Splitkey'] == 14
+	assert c.used['stereotype atpStructuredComment'] == 1
+	assert c.used['tag atp.Splitkey'] == 15
 	// a tag the reader uses, where it does not read it
 	assert c.not_read['tag mmt.qualifiedName on group'] == 1
 	assert c.not_read['tag pureMM.minOccurs on attribute'] == 2
 	assert c.not_read['tag pureMM.maxOccurs on attribute'] == 2
-	assert c.used['tag pureMM.maxOccurs'] == 45 // element roles; one of the 46 has none
+	assert c.used['tag pureMM.maxOccurs'] == 49 // element roles; one of the 50 has none
 	assert c.not_read['tag pureMM.maxOccurs on element'] == 1
-	assert c.used['tag mmt.qualifiedName'] == 48 // 46 element roles and two attribute roles
+	assert c.used['tag mmt.qualifiedName'] == 52 // 50 element roles and two attribute roles
 	assert c.malformed == ['nonsense']
 	assert c.notes['xml.roleWrapperElement agrees with the schema'] == 3
 	assert c.problems['xml.roleWrapperElement disagrees with the schema'] == 1

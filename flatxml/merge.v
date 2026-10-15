@@ -56,7 +56,8 @@ pub:
 pub mut:
 	problems []Problem
 mut:
-	rules CompiledRules
+	rules  CompiledRules
+	source []Rule // the rules as given, so a node can say which put it together
 	count u32 // merged nodes; the arrays below are allocated for as many as the set has nodes
 	// per merged node
 	name    []u32
@@ -129,6 +130,7 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 	mut m := &Merged{
 		set:     s
 		rules:   rules.compile(s.tab)!
+		source:  rules.rules.clone()
 		name:    []u32{len: total}
 		parent:  []u32{len: total}
 		scope:   []u32{len: total}
@@ -952,6 +954,24 @@ pub fn (n MNode) name() string {
 // with no key.
 pub fn (n MNode) key() string {
 	return if n.i == no_mnode { '' } else { n.m.key_of(n.i) }
+}
+
+// rule is the rule, of the rule set the view was merged by, that put the node together with its
+// siblings: its aggregation's rule. None for the root, for a child no rule names, and for an
+// empty handle. A child of a keyed rule that has no key (one missing its key, a child of its own)
+// still has the rule: `keyed` tells it from its keyed siblings.
+pub fn (n MNode) rule() ?Rule {
+	k := n.rule_number()?
+	return n.m.source[k]
+}
+
+// rule_number is the number of `rule` in the rule set the view was merged by, from 0: the index
+// into `RuleSet.rules` (problems name rule k as `rule k+1`). None where `rule` is.
+pub fn (n MNode) rule_number() ?int {
+	if n.i == no_mnode || n.m.rule[n.i] == no_rule {
+		return none
+	}
+	return int(n.m.rule[n.i])
 }
 
 // keyed reports whether the node is identified by a key.
