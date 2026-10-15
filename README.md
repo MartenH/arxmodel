@@ -96,6 +96,52 @@ the rules as tab-separated lines (`--dump -` to standard output, the summary the
 standard error). Both commands exit 1 when a file could not be read, or a schema
 was not declared, not found or did not compile; what could be done is still printed.
 
+### The input set
+
+Every command that reads models takes the same paths, and makes one predictable set of them:
+
+- a **file** is itself; a path that does not exist is an error;
+- a **directory** is every `.arxml` file below it, recursively (`DIR/*.arxml` for its own files);
+- a **glob** (`'model/modules/*/*.arxml'`: `*` and `?` within one name, `**` any depth;
+  quoted, so arxmodel expands it, not the shell) is the `.arxml` files and the directories it
+  matches; a glob whose last name has no wildcard (`'*/model.xml'`) names its files, whatever
+  their extension; a directory a glob walks that cannot be read is a failure, as in a directory;
+- **`@FILE`** is the paths FILE lists: one a line, spaces and all (no shell splitting or
+  quoting), blank lines and `#` comments ignored, relative ones read from FILE's directory, and a
+  listed `@FILE` read the same way;
+- **`--exclude GLOB`** (repeatable) leaves out the files it matches: a relative glob against the
+  path as found, an absolute one against the absolute path;
+- a file reached twice (overlapping paths, two spellings) is one file;
+- the set is **sorted by path**, as found: the load order, and so which file's value a merge keeps
+  where files differ, depends on neither the order of the arguments nor the file system.
+
+The extension `.arxml` is taken in any case (`.ARXML`), by directories and globs alike; every
+other part of a path matches as the file system spells it. The set also knows where its files came
+from (a directory given, a glob's fixed part, a file's directory, a list's directory): a filter's
+relative `file` glob is read from there, and `merge` refuses an output that is one of the files or
+lies in one of those directories. `--refs-from` takes the same rules and `--exclude`s. `merge3`
+works on a set of files (written under `-o DIR`, each where it lies below the base's common
+directory) where a version is a directory, a glob or a list, or holds more than one document.
+
+A glob that matches nothing, or a directory with no `.arxml` file, is a warning. Each command
+prints how many files it loaded and the first and last three (`--verbose`: every one), so a CI log
+shows what was checked.
+
+In CI the build already knows its model's files; a makefile target writes them as a list, and
+the check reads it:
+
+```make
+gen/arxmodel_args.txt: Makefile
+	mkdir -p gen
+	printf '%s\n' $(abspath $(ARXML_DIRS) $(ARXML_FILES)) > $@
+
+check-arxml: gen/arxmodel_args.txt
+	arxmodel check --exclude '**/utest/**' @gen/arxmodel_args.txt
+```
+
+The list's relative paths would be read from `gen/`, so the target writes absolute ones
+(`$(abspath ...)`); a glob in the list (`.../modules/*/*.arxml`) is expanded by arxmodel.
+
 ## Rules from the schema
 
 An AUTOSAR schema describes each meta-class as an `xsd:group` and each role of the class as a

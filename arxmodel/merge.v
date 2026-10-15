@@ -744,7 +744,8 @@ pub:
 	skip_multiplicity bool     // no multiplicity layer
 	skip_references   bool     // no reference layer
 	refs_from         []string // files loaded only to resolve references against
-	roots             []string // the paths the model was loaded from: a filter's relative file glob is read from them
+	roots             []string // where a filter's relative file glob is read from; the model's bases where none
+	exclude           []string // file globs left out of --refs-from's input set, as of the model's
 	result_check      bool     // the model is a merge's result: file filters and unused filters do not apply
 	case_sensitive    bool     // keys compared as written, whatever the settings say
 	ignore_attrs      []string // attributes that may differ, besides the settings'
@@ -801,10 +802,12 @@ pub mut:
 	unchecked_roles int
 	// the referrable elements by AUTOSAR path, and what the reference layer counted
 	index  &PathIndex = unsafe { nil }
-	typing &Typing = unsafe { nil }
+	typing &Typing    = unsafe { nil }
 	refs   RefStats
 	// files loaded only to resolve references against
 	refs_from_files int
+	// what the input sets of --refs-from matched nothing of
+	input_warnings []string
 	// the policy's filters, and per filter the findings it matched
 	filters       []Filter
 	filter_counts []int
@@ -888,7 +891,8 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 		sw := time.new_stopwatch()
 		mut extra := []RefView{}
 		if opts.refs_from.len > 0 {
-			mx := load(opts.refs_from)!
+			mx := load(opts.refs_from, exclude: opts.exclude)!
+			c.input_warnings << mx.warnings.map('--refs-from: ${it}')
 			c.refs_from_files = mx.set.docs.len
 			cx := check_typed(mx, flat, name, sc.policy.settings(), sc.policy, CheckOptions{
 				...opts
@@ -905,7 +909,7 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 		c.refs = stats
 		c.times['reference'] = sw.elapsed()
 	}
-	c.filter(sc.policy, opts)
+	c.filter(sc.policy, opts, m)
 	return c
 }
 
@@ -913,17 +917,17 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 // the settings given and the overrides; the policy gives the findings their severities.
 pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, opts CheckOptions) !Checked {
 	mut c := check_typed(m, flat0, source, st, p, opts, unsafe { nil })!
-	c.filter(p, opts)
+	c.filter(p, opts, m)
 	return c
 }
 
 // filter applies the policy's filters, after its severities, to what the check found: every layer
 // that ran, the inputs as the paths checked.
-fn (mut c Checked) filter(p Policy, opts CheckOptions) {
+fn (mut c Checked) filter(p Policy, opts CheckOptions, m &Model) {
 	mut ran := c.times.keys()
 	ran << 'policy'
 	c.findings, c.filter_counts = apply_filters(c.findings, p, FilterOptions{
-		roots:  opts.roots
+		roots:  if opts.roots.len > 0 { opts.roots } else { m.bases }
 		ran:    ran
 		result: opts.result_check
 	})
@@ -1021,12 +1025,14 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	// with no schema, references are found by their DEST attribute and resolved by path alone
 	mut refs := RefStats{}
 	mut refs_from_files := 0
+	mut input_warnings := []string{}
 	if !typed && !opts.skip_references {
 		rsw := time.new_stopwatch()
 		// files loaded only to resolve references against, merged on their own
 		mut extra := []RefView{}
 		if opts.refs_from.len > 0 {
-			mx := load(opts.refs_from)!
+			mx := load(opts.refs_from, exclude: opts.exclude)!
+			input_warnings << mx.warnings.map('--refs-from: ${it}')
 			refs_from_files = mx.set.docs.len
 			cx := check_typed(mx, flat0, source, st, p, CheckOptions{
 				...opts
@@ -1046,18 +1052,19 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	return Checked{
 		refs:            refs
 		refs_from_files: refs_from_files
-		governing:   source
-		flat:        flat
-		view:        view
-		in_conflict: in_conflict
-		violations:  violations
-		elements:    m.element_count()
-		merged:      merged
-		within:      within
-		findings:    findings
-		times:       times
-		index:       index
-		typing:      if typed { ty } else { unsafe { nil } }
+		input_warnings:  input_warnings
+		governing:       source
+		flat:            flat
+		view:            view
+		in_conflict:     in_conflict
+		violations:      violations
+		elements:        m.element_count()
+		merged:          merged
+		within:          within
+		findings:        findings
+		times:           times
+		index:           index
+		typing:          if typed { ty } else { unsafe { nil } }
 	}
 }
 

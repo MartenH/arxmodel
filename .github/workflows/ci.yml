@@ -50,6 +50,9 @@ jobs:
       - name: Git merge and diff drivers, with no schema
         run: scripts/git_driver_test.sh bin/arxmodel
 
+      - name: The input set through the command
+        run: scripts/inputs_cli_test.sh bin/arxmodel
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

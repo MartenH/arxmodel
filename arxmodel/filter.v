@@ -1,7 +1,6 @@
 module arxmodel
 
 import flatxml.xsd
-import os
 import toml
 
 // Filters: the policy's [[filter]] entries, each giving a severity to the findings it matches,
@@ -23,10 +22,9 @@ pub:
 	severity   Severity
 	reason     string
 mut:
-	re       ?xsd.Pattern
-	path_pat []string // path's segments, compiled once
-	file_pat []string // file's segments, compiled once
-	file_abs bool     // file is an absolute glob
+	re        ?xsd.Pattern
+	path_pat  []string // path's segments, compiled once
+	file_glob FileGlob // file, compiled once
 }
 
 // FilterField is one field of a [[filter]]: its name, the kind of value, and what it means.
@@ -140,8 +138,7 @@ fn read_filters(v toml.Any) ![]Filter {
 			}
 		}
 		f.path_pat = segments(f.path)
-		f.file_pat = f.file.replace('\\', '/').split('/').filter(it != '')
-		f.file_abs = os.is_abs_path(f.file)
+		f.file_glob = compile_file_glob(f.file)
 		if text.len == 1 || (text.len == 2 && 'reason' in text) {
 			return error('policy: filter ${n} matches every finding: give it a field to match')
 		}
@@ -225,6 +222,11 @@ fn glob_segment(pat string, seg string) bool {
 		return pat == seg
 	}
 	s := if !pat.contains('[') && seg.contains('[') { seg.all_before('[') } else { seg }
+	return glob_name(pat, s)
+}
+
+// glob_name reports whether a name matches a pattern: `*` any characters, `?` one.
+fn glob_name(pat string, s string) bool {
 	if pat == '*' {
 		return true
 	}
@@ -256,36 +258,40 @@ fn glob_segment(pat string, seg string) bool {
 	return p == pat.len
 }
 
-// glob_segments reports whether segments match a pattern's segments, `**` matching any number.
+// glob_segments reports whether a path's segments match a pattern's segments, `**` matching any
+// number.
 fn glob_segments(pat []string, segs []string) bool {
+	return glob_match(pat, segs, false)
+}
+
+// glob_files reports whether a file path's segments match a pattern's, `**` matching any number,
+// each segment by its name alone.
+pub fn glob_files(pat []string, segs []string) bool {
+	return glob_match(pat, segs, true)
+}
+
+fn glob_match(pat []string, segs []string, files bool) bool {
 	if pat.len == 0 {
 		return segs.len == 0
 	}
 	if pat[0] == '**' {
 		for k in 0 .. segs.len + 1 {
-			if glob_segments(pat[1..], segs[k..]) {
+			if glob_match(pat[1..], segs[k..], files) {
 				return true
 			}
 		}
 		return false
 	}
-	if segs.len == 0 || !glob_segment(pat[0], segs[0]) {
+	if segs.len == 0 {
 		return false
 	}
-	return glob_segments(pat[1..], segs[1..])
+	ok := if files { glob_file_name(pat[0], segs[0]) } else { glob_segment(pat[0], segs[0]) }
+	return ok && glob_match(pat[1..], segs[1..], files)
 }
 
 // path_glob reports whether an AUTOSAR path (with its `#` part) matches a path glob.
 pub fn path_glob(pattern string, path string) bool {
 	return glob_segments(segments(pattern), segments(path))
-}
-
-// FileNames is a file as file globs read it, worked out once per file in a run: its segments as
-// written, absolute, and relative to each root it lies under.
-struct FileNames {
-	written  []string
-	absolute []string
-	relative [][]string
 }
 
 // FilterRun is one application of a policy's filters: the roots, resolved once, and the files met.
@@ -297,7 +303,7 @@ mut:
 
 fn new_filter_run(roots []string) FilterRun {
 	return FilterRun{
-		roots: roots.map(os.abs_path(it).replace('\\', '/').trim_right('/'))
+		roots: abs_roots(roots)
 	}
 }
 
@@ -305,41 +311,9 @@ fn (mut run FilterRun) names(file string) FileNames {
 	if n := run.files[file] {
 		return n
 	}
-	a := os.abs_path(file).replace('\\', '/')
-	mut rel := [][]string{}
-	for r in run.roots {
-		if a == r {
-			rel << [os.file_name(a)]
-		} else if a.starts_with(r + '/') {
-			rel << a[r.len + 1..].split('/').filter(it != '')
-		}
-	}
-	n := FileNames{
-		written:  file.replace('\\', '/').split('/').filter(it != '' && it != '.')
-		absolute: a.split('/').filter(it != '')
-		relative: rel
-	}
+	n := file_names(file, run.roots)
 	run.files[file] = n
 	return n
-}
-
-// file_glob reports whether a file matches a file glob: an absolute glob against the file's
-// absolute path, a relative one against the file as written or relative to any of the roots.
-pub fn file_glob(pattern string, file string, roots []string) bool {
-	mut run := new_filter_run(roots)
-	pat := pattern.replace('\\', '/').split('/').filter(it != '')
-	return run.file_matches(pat, os.is_abs_path(pattern), file)
-}
-
-fn (mut run FilterRun) file_matches(pat []string, abs bool, file string) bool {
-	n := run.names(file)
-	if abs {
-		return glob_segments(pat, n.absolute)
-	}
-	if glob_segments(pat, n.written) {
-		return true
-	}
-	return n.relative.any(glob_segments(pat, it))
 }
 
 // matches_kind reports whether a finding is of the layer, kind and what of a `match`:
@@ -395,7 +369,7 @@ fn (f &Filter) matches_in(mut run FilterRun, x &Finding, files bool) bool {
 		}
 		mut any := false
 		for at in x.at {
-			if run.file_matches(f.file_pat, f.file_abs, parse_location(at).file) {
+			if f.file_glob.matches(run.names(parse_location(at).file)) {
 				any = true
 				break
 			}

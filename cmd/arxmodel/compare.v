@@ -15,11 +15,18 @@ const exit_trouble = 2
 
 // read_version loads one version, a file or a directory; /dev/null (git's side of an added or a
 // removed file) is an empty one.
-fn read_version(o Opts, path string) !&arxmodel.Model {
+fn read_version(o Opts, path string, quiet bool) !&arxmodel.Model {
 	if path == '/dev/null' {
 		return arxmodel.empty_model()
 	}
-	m := arxmodel.load([path], jobs: o.jobs)!
+	m := arxmodel.load([path], jobs: o.jobs, exclude: o.exclude)!
+	if !quiet {
+		eprintln('${path}: ${plural(m.files.len, 'file')}')
+		print_files(Out{ err: true }, m.files, o.verbose)
+	}
+	for w in m.warnings {
+		eprintln('warning: ${w}')
+	}
 	if m.failed.len > 0 {
 		return error(m.failed.map('not read: ${it.msg}').join('; '))
 	}
@@ -31,7 +38,7 @@ fn read_version(o Opts, path string) !&arxmodel.Model {
 fn versions(o Opts, paths []string, quiet bool) !(arxmodel.Ruling, []arxmodel.Version) {
 	mut models := []&arxmodel.Model{}
 	for p in paths {
-		models << read_version(o, p)!
+		models << read_version(o, p, quiet)!
 	}
 	ch := choose(o, models, load_policy(o))!
 	if !quiet {
@@ -74,14 +81,16 @@ fn cmd_merge3(o Opts) {
 	if o.paths.len != 3 {
 		trouble('merge3 takes three versions: BASE OURS THEIRS (files or directories)')
 	}
-	set := os.is_dir(o.paths[0])
-	out := if o.out == '' { '-' } else { o.out }
-	if set && out == '-' {
-		trouble('merge3 of directories needs -o DIR')
-	}
 	r, v := versions(o, o.paths, false) or {
 		trouble(err.msg())
 		return
+	}
+	// a set of files (a directory, a glob, a list), or a single document
+	set := o.paths.any(os.is_dir(it) || arxmodel.is_glob(it) || it.starts_with('@'))
+		|| v.any(it.model.set.docs.len > 1)
+	out := if o.out == '' { '-' } else { o.out }
+	if set && (out == '-' || (os.exists(out) && !os.is_dir(out))) {
+		trouble('merge3 of sets of files needs -o DIR')
 	}
 	mut res := r.merge3(&v[0], &v[1], &v[2]) or {
 		trouble(err.msg())
@@ -100,10 +109,12 @@ fn cmd_merge3(o Opts) {
 		os.write_file(tmp, text) or { trouble('${tmp}: ${err.msg()}') }
 		written = [tmp]
 	} else if set {
-		root := os.real_path(o.paths[0])
+		// each document of the base under OUT as it lies below the base's common directory
+		root := common_dir(v[0].model.set.docs.map(os.real_path(it.path)))
 		me.write_to(fn [root, out] (d &flatxml.Doc) string {
 			return os.join_path(out, os.real_path(d.path).all_after(root + os.path_separator))
 		}) or { trouble('${out}: ${err.msg()}') }
+		written = [out]
 	} else {
 		me.write_to(fn [out] (d &flatxml.Doc) string {
 			return out
@@ -255,4 +266,21 @@ fn validate_result(o Opts, paths []string) {
 	for f in errors#[..20] {
 		eprintln('  ${f}')
 	}
+}
+
+// common_dir is the deepest directory every path lies below.
+fn common_dir(paths []string) string {
+	if paths.len == 0 {
+		return ''
+	}
+	mut parts := os.dir(paths[0]).split(os.path_separator)
+	for p in paths[1..] {
+		q := os.dir(p).split(os.path_separator)
+		mut k := 0
+		for k < parts.len && k < q.len && parts[k] == q[k] {
+			k++
+		}
+		parts = parts[..k].clone()
+	}
+	return parts.join(os.path_separator)
 }

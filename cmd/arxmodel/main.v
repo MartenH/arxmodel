@@ -124,6 +124,10 @@ const usage = 'usage:
   --policy NAME|FILE (rules, check, merge, get, list, diff, merge3, policy): the merge policy:
       spec (policy.toml, as the AUTOSAR specification has it, the default), automat
       (automat.policy.toml, as automat behaves), or a file
+  <file|dir>...: the input set, for every command reading models: a file; a directory (every
+      .arxml below it); a glob (`*`, `?` within a name, `**` any depth; one matching nothing is
+      a warning); @FILE (the paths FILE lists, one a line, `#` comments, relative to FILE);
+      --exclude GLOB leaves files out; each file once, sorted by path; --verbose lists them all
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU, at
       most 8'
 
@@ -136,6 +140,8 @@ mut:
 	all        bool     // check: every problem, not the first of each kind
 	exact      bool     // check: keys compared as written
 	ignore     []string // check: attributes whose values may differ between fragments
+	exclude    []string // file globs left out of the input set
+	verbose    bool     // list every file of the input set
 	compare    []string // check: attributes ignored by default that are compared after all
 	emit       string   // rules: write the merge rules here
 	rules_file string   // check: merge by these rules
@@ -217,7 +223,7 @@ fn main() {
 		eprintln(usage)
 		exit(2)
 	}
-	allowed := match args[0] {
+	mut allowed := match args[0] {
 		'load' { ['--jobs'] }
 		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
@@ -238,6 +244,10 @@ fn main() {
 		'git-setup' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
 		'policy' { ['--policy', '--schema', '--diff', '--out'] }
 		else { []string{} }
+	}
+	// the input set: every command reading models takes excludes, and lists its files
+	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'merge', 'diff', 'merge3'] {
+		allowed << ['--exclude', '--verbose']
 	}
 	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy'] {
 		eprintln('no files or directories given')
@@ -288,8 +298,19 @@ fn main() {
 				eprintln('merge needs -o OUT (or -o - for standard output)')
 				exit(2)
 			}
-			mut inputs := opts.paths.clone()
-			inputs << opts.refs_from
+			// against the input sets as expanded: every file read, and the directories they came from
+			mut inputs := []string{}
+			for paths in [opts.paths, opts.refs_from] {
+				if paths.len == 0 {
+					continue
+				}
+				found := arxmodel.find_arxml(paths, exclude: opts.exclude) or {
+					eprintln(err.msg())
+					exit(2)
+				}
+				inputs << found.files
+				inputs << found.bases
+			}
 			if why := arxmodel.output_clash(opts.out, inputs) {
 				eprintln('merge: ${why}')
 				exit(2)
@@ -334,17 +355,20 @@ fn parse_opts(args []string) !Opts {
 			o.given << a
 		}
 		match a {
-			'--ignore-attr', '--check-attr' {
+			'--ignore-attr', '--check-attr', '--exclude' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
-				if a == '--ignore-attr' {
-					o.ignore << args[k + 1]
-				} else {
-					o.compare << args[k + 1]
+				match a {
+					'--ignore-attr' { o.ignore << args[k + 1] }
+					'--check-attr' { o.compare << args[k + 1] }
+					else { o.exclude << args[k + 1] }
 				}
 				k += 2
 				continue
+			}
+			'--verbose' {
+				o.verbose = true
 			}
 			'--all' {
 				o.all = true
@@ -417,16 +441,38 @@ fn parse_opts(args []string) !Opts {
 }
 
 fn load_or_exit(o Opts, out Out) &arxmodel.Model {
-	m := arxmodel.load(o.paths, jobs: o.jobs) or {
+	m := arxmodel.load(o.paths, jobs: o.jobs, exclude: o.exclude) or {
 		eprintln(err.msg())
 		exit(1)
 	}
 	mb := f64(m.bytes) / 1e6
 	out.line('${m.files.len} files, ${m.set.docs.len} loaded (${mb:.1f} MB) in ${ms(m.took)}, ${m.failed.len} failed')
+	print_files(out, m.files, o.verbose)
+	for w in m.warnings {
+		out.line('warning: ${w}')
+	}
 	for f in m.failed {
 		out.line('  failed: ${f.msg}')
 	}
 	return m
+}
+
+// print_files lists the input set, in its order: every file with --verbose, else the first and
+// last three, so a CI log shows what was loaded.
+fn print_files(out Out, files []string, verbose bool) {
+	if verbose || files.len <= 6 {
+		for f in files {
+			out.line('  ${f}')
+		}
+		return
+	}
+	for f in files[..3] {
+		out.line('  ${f}')
+	}
+	out.line('  ... ${files.len - 6} more (--verbose lists them)')
+	for f in files[files.len - 3..] {
+		out.line('  ${f}')
+	}
 }
 
 fn cmd_load(o Opts) {
@@ -805,7 +851,7 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 		skip_multiplicity: o.skip_mult
 		skip_references:   o.skip_refs
 		refs_from:         o.refs_from
-		roots:             o.paths
+		exclude:           o.exclude
 		case_sensitive:    o.exact
 		ignore_attrs:      o.ignore
 		compare_attrs:     o.compare
@@ -908,6 +954,9 @@ fn report(out Out, o Opts, c &arxmodel.Checked, took time.Duration) int {
 			return c.refs.by_top[*b] - c.refs.by_top[*a]
 		})
 		out.line('${kind} references by top-level package: ${tops.map('${it.all_after(' ')} ${c.refs.by_top[it]}').join(', ')}')
+	}
+	for w in c.input_warnings {
+		out.line('warning: ${w}')
 	}
 	// what each filter of the policy matched
 	for fl in arxmodel.filter_tallies(c) {

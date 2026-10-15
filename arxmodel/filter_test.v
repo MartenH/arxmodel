@@ -188,3 +188,26 @@ fn test_a_result_check_applies_no_file_filter_and_reports_none_unused() {
 	plain, _ := apply_filters([x], p, FilterOptions{})
 	assert plain[0].severity == .ignore && plain.filter(it.layer == .policy).len == 1
 }
+
+fn test_relative_file_filters_read_from_the_input_set_s_bases() {
+	// the model read through a list: a relative file glob is read from where its files came from
+	dir := os.join_path(os.temp_dir(), 'arxmodel_fbases_${os.getpid()}')
+	os.mkdir_all(dir)!
+	list := os.join_path(dir, 'args.txt')
+	os.write_file(list, ffdata('refs') + '\n')!
+	p := parse_policy(default_policy_text + '\n[[filter]]\nfile = "r.arxml"\nmatch = "reference.empty"\nseverity = "ignore"')!
+	m := load(['@' + list])!
+	c := check(m, compile_schemas(m, ffdata('schemas'), policy: p))!
+	assert c.filter_counts == [1]
+}
+
+fn test_refs_from_takes_the_input_set_rules() {
+	p := default_policy()
+	m := load([ffdata('refs')])!
+	c := check(m, compile_schemas(m, ffdata('schemas'), policy: p),
+		refs_from: [ffdata('refs_extra'), ffdata('refs_extra', '*.nothing')]
+		exclude:   ['**/e.arxml']
+	)!
+	assert c.refs_from_files == 0
+	assert c.input_warnings.len == 1 && c.input_warnings[0].ends_with('*.nothing: matches nothing')
+}
