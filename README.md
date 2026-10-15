@@ -48,6 +48,7 @@ arxmodel rules --schema-dir DIR --problems --dump rules.tsv <file|dir>...
 arxmodel rules --schema-dir DIR --emit autosar.rules.txt <file|dir>...           # the merge rules, as a file
 arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   # merge, and what the rules forbid
 arxmodel check --rules autosar.rules.txt <file|dir>...                         # the same, by the rules file
+arxmodel check --schema-dir DIR --format sarif <file|dir>... > check.sarif      # or json, junit: for machines
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
@@ -239,12 +240,17 @@ references: `unresolved`, `wrong_kind`, `empty` and `duplicate_path` are errors;
 kind, marked `(in conflict)`: a key for its kind applies to it, else `merge.in_conflict`. No XML schema
 finding is dropped past a count; `--jobs` sets that layer's threads. `check` prints the
 counts by severity, layer and kind, then the errors and warnings (the first 20 of each kind,
-`--all` for every one), and exits 1 on errors only. `--skip-xml`, `--skip-multiplicity` and
+`--all` for every one), and exits 1 on errors only (0 clean, 1 errors, files not read or
+declaring no schema, 2 when it cannot run, for every command). `--format json|sarif|junit`
+writes the report for machines instead (arxmodel's own JSON with a versioned schema, SARIF
+2.1.0, JUnit XML; [docs/report.md](docs/report.md)) to standard output, what was read going to
+standard error. `--skip-xml`, `--skip-multiplicity` and
 `--skip-references` leave a layer out; merging from a rules file has no schema, so it checks the
 merge layer only (the path index is still built). `get` and `list` merge the same way and read
 the index: `get` prints the element's name, how many elements it is merged from and where each
 is (every one, for a path several hold), `list` the path of every referrable element of a name.
-`--jobs` sets their loading threads.
+`--jobs` sets their loading threads. Without `--jobs`, loading and the XML schema layer use one
+thread per CPU, at most 8, leaving room for what shares the machine.
 
 flatxml names an aggregation by its parent (an element name, or a path of ancestor names) and its
 children's element names; the schema by the parent's type and the role. So each rule becomes
@@ -398,6 +404,12 @@ export V_MACOS_V3_NO_FALLBACK=1
 v test .                                    # unit tests, on the synthetic schema in testdata/
 v -prod -o bin/arxmodel cmd/arxmodel         # the command
 ```
+
+A release is cut by pushing a tag equal to v.mod's version (`v0.1.0`) on a commit of main:
+`.github/workflows/release.yml` builds the command with `-prod` for Linux (statically linked, on
+ubuntu-22.04) and for Windows (cross-built with mingw-w64, then run on a Windows runner), and
+attaches both with their SHA-256 sums to the GitHub release. `arxmodel version` prints the
+version.
 
 flatxml is vendored in `flatxml/` (the library, without its tests) at the commit
 `flatxml/VENDORED` names, by `scripts/vendor_flatxml.sh <full commit sha>`; the copy is never

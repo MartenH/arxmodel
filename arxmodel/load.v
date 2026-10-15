@@ -7,6 +7,7 @@ module arxmodel
 
 import flatxml
 import os
+import runtime
 import time
 
 // Model is the files of one load: the document set, and what could not be read.
@@ -23,7 +24,7 @@ pub mut:
 @[params]
 pub struct LoadOptions {
 pub:
-	jobs int // threads; 0 for one per CPU, at most 16
+	jobs int // threads; 0 for the default (`default_jobs`), at most 16
 }
 
 // Found is the .arxml files at some paths, and the directories that could not be read.
@@ -77,6 +78,24 @@ fn collect_arxml(dir string, mut out []string, mut failed []flatxml.LoadError) {
 	}
 }
 
+// default_jobs is the threads used for loading and for the XML schema layer where none are asked
+// for: one per CPU, at most 8, so a run leaves room for what shares the machine with it.
+pub fn default_jobs() int {
+	n := runtime.nr_cpus()
+	return if n > 8 {
+		8
+	} else if n < 1 {
+		1
+	} else {
+		n
+	}
+}
+
+// jobs_or_default is the threads asked for, or the default where none are.
+fn jobs_or_default(asked int) int {
+	return if asked > 0 { asked } else { default_jobs() }
+}
+
 // load reads every .arxml at the paths given into one document set. A file that fails to parse,
 // or a directory that cannot be read, is listed in failed; the rest load all the same.
 pub fn load(paths []string, opts LoadOptions) !&Model {
@@ -84,7 +103,7 @@ pub fn load(paths []string, opts LoadOptions) !&Model {
 	sw := time.new_stopwatch()
 	mut set := flatxml.DocSet.new()
 	mut failed := found.failed.clone()
-	failed << set.load(found.files, jobs: opts.jobs, namespaces: true)
+	failed << set.load(found.files, jobs: jobs_or_default(opts.jobs), namespaces: true)
 	took := sw.elapsed()
 	mut bytes := i64(0)
 	for d in set.docs {

@@ -46,3 +46,12 @@ jobs:
 
       - name: Git merge and diff drivers, with no schema
         run: scripts/git_driver_test.sh bin/arxmodel
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reports against their schemas
+        run: |
+          python -m pip install --quiet jsonschema lxml
+          scripts/check_reports.sh bin/arxmodel "$RUNNER_TEMP/reports"

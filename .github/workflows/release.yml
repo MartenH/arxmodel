@@ -1,0 +1,115 @@
+# A release is cut by pushing a version tag equal to v.mod's version: `git tag v0.1.0 && git push
+# origin v0.1.0`. The tagged commit must be on main. The command is built with -prod for Linux
+# (statically linked, on ubuntu-22.04) and cross-built for Windows (mingw-w64); the Windows build
+# is run on a Windows runner before anything is published. The release carries both binaries and
+# their SHA-256 sums.
+name: release
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  V_MACOS_V3_NO_FALLBACK: 1
+  V_C_ERROR_BUG_REPORT_DISABLED: 1
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag equals v.mod and is on main
+        run: |
+          ver="$(sed -n "s/^\s*version: '\(.*\)'\s*\$/\1/p" v.mod)"
+          [ -n "$ver" ] || { echo "no version in v.mod"; exit 1; }
+          [ "v$ver" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME is not v.mod's v$ver"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "the tagged commit is not on main"; exit 1; }
+
+  build:
+    needs: guard
+    # the oldest runner: a static binary still asks the kernel for what glibc's build host knew
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pinned V
+        uses: ./.github/actions/setup-v
+
+      - name: Unit tests
+        run: v test .
+
+      - name: Build for Linux
+        run: |
+          mkdir -p dist
+          v -prod -cflags -static -o dist/arxmodel cmd/arxmodel
+          file dist/arxmodel
+          [ "$(dist/arxmodel --version)" = "arxmodel ${GITHUB_REF_NAME#v}" ]
+          dist/arxmodel check --schema-dir testdata/schemas testdata/export
+
+      - name: Build for Windows
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          v -prod -os windows -cc x86_64-w64-mingw32-gcc -o dist/arxmodel.exe cmd/arxmodel
+          file dist/arxmodel.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist
+          if-no-files-found: error
+
+  windows:
+    needs: build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist
+      - name: Run on Windows
+        run: |
+          set -e
+          [ "$(dist/arxmodel.exe --version | tr -d '\r')" = "arxmodel ${GITHUB_REF_NAME#v}" ]
+          dist/arxmodel.exe check --schema-dir testdata/schemas testdata/export
+          dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
+          dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
+          dist/arxmodel.exe check --schema-dir testdata/schemas "$RUNNER_TEMP/model.arxml"
+          dist/arxmodel.exe check --format sarif --schema-dir testdata/schemas testdata/merge > "$RUNNER_TEMP/merge.sarif" || [ $? -eq 1 ]
+
+  publish:
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist
+      - name: Name, sum and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          mv arxmodel "arxmodel-${GITHUB_REF_NAME}-linux-x64"
+          mv arxmodel.exe "arxmodel-${GITHUB_REF_NAME}-windows-x64.exe"
+          chmod +x "arxmodel-${GITHUB_REF_NAME}-linux-x64"
+          sha256sum arxmodel-* > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "arxmodel ${GITHUB_REF_NAME}" \
+            arxmodel-* SHA256SUMS

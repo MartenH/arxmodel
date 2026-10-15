@@ -2,7 +2,6 @@ module arxmodel
 
 import flatxml
 import flatxml.xsd
-import runtime
 
 // --- XML schema --------------------------------------------------------------------------------
 
@@ -27,7 +26,7 @@ pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]XmlFound, int) {
 			}
 		}
 	}
-	mut jobs := if jobs_asked > 0 { jobs_asked } else { runtime.nr_cpus() }
+	mut jobs := jobs_or_default(jobs_asked)
 	jobs = if jobs > 16 {
 		16
 	} else if jobs < 1 {
@@ -71,6 +70,7 @@ fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Poli
 					severity: p.severity(.xml_schema, 'not_checked', '')
 					path:     d.path
 					message:  err.msg()
+					at:       [d.path]
 				}
 			}
 			continue

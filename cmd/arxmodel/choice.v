@@ -17,6 +17,17 @@ mut:
 	warnings []string
 }
 
+// InputError is a choice the documents themselves leave without an answer (no schema governs
+// them, or the rules file is for other documents): their problem, not the command's.
+struct InputError {
+	Error
+	msg string
+}
+
+fn (e InputError) msg() string {
+	return e.msg
+}
+
 // choose reads the rules for models (versions of one model; their first is the one checked):
 // the one place the choice is made. A schema is that of the newest release any of them declares.
 fn choose(o Opts, models []&arxmodel.Model, policy arxmodel.Policy) !Chosen {
@@ -36,7 +47,9 @@ fn choose(o Opts, models []&arxmodel.Model, policy arxmodel.Policy) !Chosen {
 		}
 		sc := arxmodel.declare_schemas(models[0])
 		warnings := arxmodel.rules_file_check(sc, pv, st, policy) or {
-			return error('${o.rules_file}: ${err.msg()}')
+			return InputError{
+				msg: '${o.rules_file}: ${err.msg()}'
+			}
 		}
 		return Chosen{
 			flat:     flat
@@ -49,8 +62,16 @@ fn choose(o Opts, models []&arxmodel.Model, policy arxmodel.Policy) !Chosen {
 	}
 	pick := arxmodel.newest_declaring(models)
 	sc := arxmodel.compile_schemas(models[pick], o.schema_dir, policy: policy)
-	flat, name := arxmodel.governing_flat(sc)!
-	gov := arxmodel.governing_use(sc)!
+	flat, name := arxmodel.governing_flat(sc) or {
+		return InputError{
+			msg: err.msg()
+		}
+	}
+	gov := arxmodel.governing_use(sc) or {
+		return InputError{
+			msg: err.msg()
+		}
+	}
 	return Chosen{
 		flat:   flat
 		st:     policy.settings()

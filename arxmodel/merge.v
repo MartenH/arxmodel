@@ -702,7 +702,7 @@ pub fn declaration_attrs(m &Model) []string {
 @[params]
 pub struct CheckOptions {
 pub:
-	jobs              int      // threads for the XML schema layer; 0 for one per CPU, at most 16
+	jobs              int      // threads for the XML schema layer; 0 for `default_jobs`, at most 16
 	skip_xml          bool     // no XML schema layer
 	skip_multiplicity bool     // no multiplicity layer
 	skip_references   bool     // no reference layer

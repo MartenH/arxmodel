@@ -36,7 +36,12 @@
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
 // found or did not compile; check exits 1 on findings the policy calls errors (and on files that
-// could not be read or declare no schema); what could be done is still printed.
+// could not be read or declare no schema, or a model no schema governs); what could be done is
+// still printed. Every command exits 2 when it cannot run at all (usage, a rules or policy file
+// that cannot be read).
+//
+// check --format json|sarif|junit writes its report (arxmodel's JSON, docs/report.md; SARIF
+// 2.1.0; JUnit XML) to standard output and what it read to standard error.
 module main
 
 import arxmodel
@@ -45,6 +50,7 @@ import strings
 import time
 
 const usage = 'usage:
+  arxmodel version                             the version (also --version)
   arxmodel load [--jobs N] <file|dir>...
       read every .arxml below the paths into one document set and print what it holds
   arxmodel rules --schema-dir DIR [--jobs N] [--problems] [--dump FILE] <file|dir>...
@@ -72,6 +78,10 @@ const usage = 'usage:
   arxmodel check --rules FILE ... <file|dir>...
       merge by a rules file instead of compiling the schema (the merge layer only); warns when
       the files declare a newer release than the file was made from
+  arxmodel check ... --format text|json|sarif|junit <file|dir>...
+      the report as text (the default), JSON (docs/report.md), SARIF 2.1.0 or JUnit XML on
+      standard output, what was read on standard error; exit 0 clean, 1 errors (or files not
+      read, declaring no schema, or no schema governing them), 2 when it cannot run
   arxmodel get (--schema-dir DIR | --rules FILE) [--jobs N] <path> <file|dir>...
       the merged element at an AUTOSAR path (/Pkg/Name): its element and every file and line;
       every element holding it, where the merge keeps two apart
@@ -104,7 +114,8 @@ const usage = 'usage:
       the external diff driver of git
   Exit 2, for any command, when something kept it from answering (an option, a file not read)
   --policy FILE (rules, check, merge, get, list, diff, merge3): the merge policy, in place of the built-in policy.toml
-  --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU'
+  --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU, at
+      most 8'
 
 struct Opts {
 mut:
@@ -128,6 +139,7 @@ mut:
 	no_schema  bool     // the built-in identity rules, whatever schema is configured
 	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
 	origin     string   // resolved: where the rules come from, for the `rules:` line
+	format     string = 'text' // check: how the report is written
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -184,6 +196,10 @@ fn main() {
 		eprintln(usage)
 		exit(2)
 	}
+	if args[0] in ['version', '--version'] {
+		println('arxmodel ${arxmodel.version}')
+		return
+	}
 	mut opts := parse_opts(args[1..]) or {
 		eprintln(err.msg())
 		eprintln(usage)
@@ -195,7 +211,7 @@ fn main() {
 		'check' {
 			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
-				'--skip-multiplicity', '--skip-references', '--refs-from']
+				'--skip-multiplicity', '--skip-references', '--refs-from', '--format']
 		}
 		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
 		'merge' {
@@ -248,6 +264,10 @@ fn main() {
 			cmd_list(opts)
 		}
 		'check' {
+			if opts.format != 'text' && opts.format !in arxmodel.report_formats {
+				eprintln('--format is text, json, sarif or junit, not ${opts.format}')
+				exit(2)
+			}
 			cmd_check(opts)
 		}
 		'merge' {
@@ -342,7 +362,8 @@ fn parse_opts(args []string) !Opts {
 				k += 2
 				continue
 			}
-			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from' {
+			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from',
+			'--format' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -354,6 +375,7 @@ fn parse_opts(args []string) !Opts {
 					'--rules' { o.rules_file = v }
 					'--policy' { o.policy = v }
 					'--refs-from' { o.refs_from << v }
+					'--format' { o.format = v }
 					else { o.dump = v }
 				}
 				k += 2
@@ -657,8 +679,11 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 	m := load_or_exit(o, out)
 	policy := load_policy(o)
 	ch := choose(o, [m], policy) or {
+		if err is InputError {
+			fail_input(o, m, err.msg())
+		}
 		eprintln(err.msg())
-		exit(1)
+		exit(2)
 	}
 	sc := ch.sc
 	print_undeclared(out, m, sc)
@@ -688,10 +713,7 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 		}
 	}
 	sw := time.new_stopwatch()
-	c := check_by(&ch, m, policy, opts) or {
-		out.line(err.msg())
-		exit(1)
-	}
+	c := check_by(&ch, m, policy, opts) or { fail_input(o, m, err.msg()) }
 	return m, sc, c, sw.elapsed()
 }
 
@@ -776,7 +798,28 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 	}
 }
 
+// fail_input ends a command whose input left nothing to check by (no schema governs the model):
+// exit 1, check's report saying why where one is asked for.
+@[noreturn]
+fn fail_input(o Opts, m &arxmodel.Model, why string) {
+	if o.format != 'text' {
+		r := arxmodel.input_report(m, why)
+		print(r.format(o.format))
+		eprintln(why)
+	} else {
+		eprintln(why)
+	}
+	exit(1)
+}
+
 fn cmd_check(o Opts) {
+	if o.format != 'text' {
+		// the report alone on standard output, what was read on standard error
+		m, sc, c, _ := merged(o, Out{ err: true }, check_options(o))
+		r := arxmodel.check_report(m, sc, c)
+		print(r.format(o.format))
+		exit(if r.failed() { 1 } else { 0 })
+	}
 	out := Out{}
 	m, sc, c, took := merged(o, out, check_options(o))
 	errors := report(out, o, c, took)

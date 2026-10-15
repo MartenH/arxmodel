@@ -1,0 +1,82 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/MartenH/arxmodel/docs/report.schema.json",
+  "title": "arxmodel report, version 1",
+  "type": "object",
+  "required": ["version", "tool", "command", "governing", "summary", "inputs", "findings"],
+  "properties": {
+    "version": { "const": 1 },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "arxmodel" }, "version": { "type": "string" } }
+    },
+    "command": { "type": "string" },
+    "governing": { "type": "string" },
+    "summary": {
+      "type": "object",
+      "required": ["files", "loaded", "elements", "nodes", "merged", "layers", "errors",
+        "warnings", "ignored", "inputs", "took_ms"],
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "loaded": { "type": "integer", "minimum": 0 },
+        "elements": { "type": "integer", "minimum": 0 },
+        "nodes": { "type": "integer", "minimum": 0 },
+        "merged": { "type": "integer", "minimum": 0 },
+        "layers": {
+          "type": "array",
+          "items": { "enum": ["merge", "xml_schema", "multiplicity", "reference"] }
+        },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "ignored": { "type": "integer", "minimum": 0 },
+        "inputs": { "type": "integer", "minimum": 0 },
+        "took_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "file", "line", "column", "message"],
+        "properties": {
+          "kind": { "enum": ["not_read", "undeclared", "ungoverned"] },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 0 },
+          "column": { "type": "integer", "minimum": 0 },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["layer", "kind", "rule", "severity", "what", "in_conflict", "path", "message",
+          "locations"],
+        "properties": {
+          "layer": { "enum": ["merge", "xml_schema", "multiplicity", "reference"] },
+          "kind": { "type": "string" },
+          "rule": { "type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$" },
+          "severity": { "enum": ["error", "warning", "ignore"] },
+          "what": { "type": "string" },
+          "in_conflict": { "type": "boolean" },
+          "path": { "type": "string" },
+          "message": { "type": "string" },
+          "locations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["file", "line", "column"],
+              "properties": {
+                "file": { "type": "string" },
+                "line": { "type": "integer", "minimum": 0 },
+                "column": { "type": "integer", "minimum": 0 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
