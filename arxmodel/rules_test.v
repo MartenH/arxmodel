@@ -119,7 +119,7 @@ fn test_repeated_class_content_takes_the_schema_count() {
 fn test_census_accounts_for_every_annotation() {
 	rs := lib_rules()
 	c := rs.census
-	assert c.appinfo == 32
+	assert c.appinfo == 51
 	// counted by what the reader did, never by a list of the schema's vocabulary
 	assert c.other['tag foo.bar'] == 1
 	assert c.other['stereotype atpWeird'] == 1
@@ -127,13 +127,16 @@ fn test_census_accounts_for_every_annotation() {
 	assert c.other['tag atp.Status'] == 1
 	assert c.other['stereotype atpIdentityContributor'] == 1
 	assert c.checked['tag xml.roleWrapperElement'] == 4
-	assert c.used['stereotype atpSplitable'] == 6
-	assert c.used['tag atp.Splitkey'] == 7
+	assert c.used['stereotype atpSplitable'] == 10
+	assert c.used['stereotype instanceRef'] == 1
+	assert c.used['tag atp.Splitkey'] == 10
 	// a tag the reader uses, where it does not read it
 	assert c.not_read['tag mmt.qualifiedName on group'] == 1
-	assert c.not_read['tag pureMM.maxOccurs on attribute'] == 1
+	assert c.not_read['tag pureMM.minOccurs on attribute'] == 2
+	assert c.not_read['tag pureMM.maxOccurs on attribute'] == 2
+	assert c.used['tag pureMM.maxOccurs'] == 33 // element roles; one of the 34 has none
 	assert c.not_read['tag pureMM.maxOccurs on element'] == 1
-	assert c.used['tag mmt.qualifiedName'] == 22 // 21 element roles and one attribute role
+	assert c.used['tag mmt.qualifiedName'] == 36 // 34 element roles and two attribute roles
 	assert c.malformed == ['nonsense']
 	assert c.notes['xml.roleWrapperElement agrees with the schema'] == 3
 	assert c.problems['xml.roleWrapperElement disagrees with the schema'] == 1
@@ -177,4 +180,31 @@ fn test_declared_flat_wrapper_with_a_value_is_its_own_item() {
 	assert !r.flat && !r.wrapper
 	assert r.items.map(it.element) == ['MOTTO']
 	assert r.problems.map(it.kind) == ['xml.roleWrapperElement disagrees with the schema']
+}
+
+fn test_item_itself_keyed_by_its_single_valued_children() {
+	rs := lib_rules()
+	// text values in the order the type writes them; not an attribute (BARCODE), the
+	// multi-valued, the splittable or another object; a reference to an instance by its own
+	// children; a value behind an element of no role
+	r := rule_named(rs, 'Shelf.copy')
+	assert item_keys(r, 'COPY') == ['EDITION', 'YEAR', 'LOCATION-IREF/CONTEXT-REF',
+		'LOCATION-IREF/TARGET-REF', 'CODES/CODE']
+	assert r.problems.len == 0
+	// a value is its own key
+	assert item_keys(rule_named(rs, 'Shelf.label'), 'LABEL') == ['.']
+}
+
+fn test_item_itself_with_no_single_value() {
+	rs := lib_rules()
+	// one item: every fragment is it
+	b := rule_named(rs, 'Shelf.box')
+	assert item_keys(b, 'BOX') == []
+	assert b.problems.len == 0
+	assert b.notes == ['key of a single item with no single-valued children: every fragment is the one item']
+	assert b.empty_keys == ['BOX']
+	// several items that nothing tells apart
+	c := rule_named(rs, 'Shelf.crate')
+	assert item_keys(c, 'CRATE') == []
+	assert c.problems.map(it.kind) == ['key item has no single-valued children']
 }

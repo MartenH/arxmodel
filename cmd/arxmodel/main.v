@@ -151,6 +151,9 @@ fn cmd_rules(o Opts) {
 			out.line('    ${m.set.docs[k].path}: ${sc.undeclared[k]}')
 		}
 	}
+	for g in sc.governing {
+		print_governing(out, m, sc, g, o.problems)
+	}
 	mut dumped := strings.new_builder(1 << 20)
 	for u in sc.uses {
 		if u.rules == unsafe { nil } {
@@ -162,7 +165,8 @@ fn cmd_rules(o Opts) {
 		}
 	}
 	defer {
-		if m.failed.len > 0 || sc.undeclared.len > 0 || sc.uses.any(it.error != '') {
+		if m.failed.len > 0 || sc.undeclared.len > 0 || sc.uses.any(it.error != '')
+			|| sc.governing.any(it.use < 0) {
 			exit(1)
 		}
 	}
@@ -179,9 +183,52 @@ fn cmd_rules(o Opts) {
 	}
 }
 
+// print_governing says which schema governs a namespace and why, the releases in order, the
+// roles of older schemas it has no rule for, and the elements the documents use that it does not
+// declare.
+fn print_governing(out Out, m &arxmodel.Model, sc &arxmodel.Schemas, g arxmodel.Governing, problems bool) {
+	order := g.ranked.map(sc.uses[it].name).join(' < ')
+	out.line('releases declared for ${g.ns}, oldest first: ${order}')
+	if g.others.len > 0 {
+		out.line('  of other schema families, not ranked against ${g.family}: ${g.others.map(sc.uses[it].name).join(', ')}')
+	}
+	if g.unranked.len > 0 {
+		out.line('  with no release in their names: ${g.unranked.map(sc.uses[it].name).join(', ')}')
+	}
+	if g.use < 0 {
+		out.line('  no schema governs: ${g.note}')
+		return
+	}
+	gov := sc.uses[g.use]
+	out.line('  governed by ${gov.name}${if g.note != '' { ' (' + g.note + ')' } else { '' }}')
+	for k, u in sc.uses {
+		if k == g.use || u.ns != g.ns || u.rules == unsafe { nil } {
+			continue
+		}
+		missing := arxmodel.missing_roles(u.rules, gov.rules)
+		out.line('  ${u.name}: ${missing.len} of its ${u.rules.rules.len} roles with no rule in ${gov.name}')
+		if problems {
+			for x in missing {
+				out.line('    ${x}')
+			}
+		}
+	}
+	und := arxmodel.undeclared_elements(m, sc, g)
+	mut n := 0
+	for x in und {
+		n += x.count
+	}
+	out.line('  ${plural(und.len, 'element name')} in the documents not declared by ${gov.name} (${plural(n, 'element')})')
+	if problems {
+		for x in und {
+			out.line('    ${x.name}: ${x.count} in ${plural(x.files, 'file')}, first at ${x.first}')
+		}
+	}
+}
+
 fn print_rules(out Out, name string, rs &arxmodel.RuleSet, problems bool) {
 	mut multi, mut wrapped, mut keyed, mut split, mut ordered, mut resolved, mut parts := 0, 0, 0, 0, 0, 0, 0
-	mut key_not_split, mut split_no_key := 0, 0
+	mut key_not_split, mut split_no_key, mut unresolved := 0, 0, 0
 	for r in rs.rules {
 		if r.max > 1 {
 			multi++
@@ -208,11 +255,13 @@ fn print_rules(out Out, name string, rs &arxmodel.RuleSet, problems bool) {
 			parts += r.key_spec.len
 			resolved += it.key.len
 		}
+		unresolved += r.problems.filter(it.kind in ['key role not found',
+			'key through a multi-valued role']).len
 	}
 	out.line('${name}:')
 	out.line('  ${rs.rules.len} aggregations (meta-model roles): ${multi} multi-valued, ${wrapped} wrapped; held by ${rs.typed} types (${rs.by_type.len} type and role pairs)')
 	out.line('  ${keyed} with a split key, ${split} splittable (${key_not_split} keyed and not splittable, ${split_no_key} splittable without a key), ${ordered} ordered')
-	out.line('  split keys: ${resolved} of ${parts} key paths resolved (per item kind)')
+	out.line('  split keys: ${parts} key parts over the items, ${unresolved} unresolved (once per item type); ${resolved} key paths')
 	c := rs.census
 	out.line('  ${c.appinfo} annotations')
 	print_counts(out, 'used', c.used)

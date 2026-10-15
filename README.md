@@ -73,8 +73,7 @@ class's roles apply to every type that includes its group, inheritance included,
 types an XML element name is declared with.
 
 **Split keys.** Each part of `atp.Splitkey` is a path of meta-model roles. A leading part equal
-to the role's own name is dropped; the role's name alone is the item itself (its text, or its
-whole content when it has children). Each further role is found by its role name among the
+to the role's own name is dropped; the role's name alone is the item itself. Each further role is found by its role name among the
 roles of the type reached so far, and becomes that role's XML element: `shortName` becomes
 `SHORT-NAME`, `variationPoint.shortLabel` becomes `VARIATION-POINT/SHORT-LABEL`. A role realised
 as an XML attribute becomes `@NAME`. A role holding several values may end a path (its values in
@@ -82,6 +81,16 @@ order are the value, written `*`); one holding several items may not be passed t
 spelled with another case is matched and reported. Keys resolve per item kind, since several
 kinds can sit in one aggregation. What cannot be resolved is reported with the part and the type
 it was looked for in.
+
+**The item itself as key.** A value (text, a reference) is its own key. An item with children is
+identified by its single-valued element children (attributes do not count), in the order its type
+writes them: each child role holding one value as text: not a wrapper, at most one by its rule
+(which mixed content may raise), not splittable, its type simple or mixed. A role behind an
+element of no role of its own is reached through that element. A child whose class has the
+stereotype `instanceRef` (a reference to an instance, by context and target) counts by its own
+such children, below it; other object children do not count. When the whole key comes out empty,
+a single-valued role's fragments are the one item (a note, naming the type); for a multi-valued
+role every item gets one key, which is reported.
 
 **Counts.** `max` is the meta-model's. Where a class's content repeats its roles (mixed content:
 text between the elements, or a content model that is a repeated choice of the roles), each
@@ -100,6 +109,25 @@ group), every other tag, stereotype and appinfo source (`other`, counted per nam
 schema has it), and tag text that is not `key="value"` (`malformed`). The code names only the
 annotations it applies; nothing is classified by a list of the schema's vocabulary, and nothing is
 dropped without being counted.
+
+## Releases
+
+The files of one model may declare different releases of the schema. The **newest release the
+files declare governs** the merged model: one rule set, by which files of older releases are
+merged too. A release is read from the schema's file name, `<prefix>_<release>[_<qualifier>].xsd`:
+the first part after the prefix that is one number (`_00049`) or numbers joined by `-` (`_4-2-2`);
+a qualifier after it (`_STRICT`) does not change the rank, and case does not matter. Releases
+rank only within one family (one prefix). Dotted releases order number by number
+(`4-2-2 < 4-3-0 < 4-6-0`), and any numbered release is newer than any dotted one
+(`4-6-0 < 00044 < 00046`). Where one namespace has several families, the one most documents
+declare is ranked and the others are reported. A name with no release cannot be ordered and is
+said; it governs only when it is the one schema that compiled. One release under two spellings
+is one release: one that compiled stands for it.
+
+When the newest declared schema is not in the schema directory, or does not compile, the newest
+one that does governs, and `rules` says so. Against the governing schema it reports, per older
+schema at hand, the roles that have no rule in it (`--problems` lists them), and the element names
+the documents use that it does not declare, with counts, files and the first position.
 
 ## Build and test
 

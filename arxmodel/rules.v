@@ -7,9 +7,9 @@ pub const unbounded = xsd.unbounded
 
 // KeyPath is one part of a split key: the element names below an item whose text is the value
 // (`SHORT-NAME`, `VARIATION-POINT/SHORT-LABEL`). A step `@NAME` is an attribute. No steps means
-// the item itself: its text, or its whole content when it has children. When the last step
-// repeats (a role holding several values, written one element each), the value is all of them
-// in order.
+// the item's own text: an item with children is keyed by paths to its single-valued children
+// instead (`itself_keys`). When the last step repeats (a role holding several values, written
+// one element each), the value is all of them in order.
 pub struct KeyPath {
 pub:
 	steps []string
@@ -51,6 +51,8 @@ pub mut:
 	held_by    []u32           // the complex types whose content holds the role (indices in the schema)
 	naming     map[string]bool // the XML naming tags declared (xml.roleElement, ...), as declared
 	problems   []Problem       // what of the annotations could not be applied, with why
+	notes      []string        // facts about the rule worth counting, each once
+	empty_keys []string        // item types whose item-itself key is empty, for a role of one item
 }
 
 // Problem is something an annotation says that could not be applied as written.
@@ -83,10 +85,11 @@ mut:
 	by_decl    map[u32]int
 	elem_ann   map[u32]Ann
 	attr_ann   map[u32]Ann
+	inst_refs  map[u32]bool      // complex types of the stereotype instanceRef: a reference to an instance, by its context and target
 	roles      map[string]u32    // complex type and role name (type_key) -> element declaration
 	roles_cf   map[string]u32    // the same, the role name in lower case
 	attr_roles map[string]string // complex type and role name -> attribute name
-	repeat_max  map[u32]u32       // element declaration -> the most times a class's content model repeats it, over every class type holding it
+	repeat_max map[u32]u32       // element declaration -> the most times a class's content model repeats it, over every class type holding it
 	inner_of   map[u32]u32       // an untagged wrapper element -> the role declaration it wraps
 	outer_of   map[u32]u32       // a role declaration -> the untagged wrapper element around it
 }
@@ -157,6 +160,9 @@ pub fn read_rules(s &xsd.Schema) &RuleSet {
 		for p in r.problems {
 			rs.census.problem(p.kind)
 		}
+		for n in r.notes {
+			rs.census.note(n)
+		}
 	}
 	rs.take_census()
 	return rs
@@ -182,6 +188,11 @@ fn (mut rs RuleSet) read_annotations() {
 				match a.owner {
 					.element { rs.elem_ann[a.idx].stereo << st }
 					.attribute { rs.attr_ann[a.idx].stereo << st }
+					.complex_type {
+						if instance_ref_stereotype in st {
+							rs.inst_refs[a.idx] = true
+						}
+					}
 					else {}
 				}
 			}
@@ -562,9 +573,14 @@ fn (rs &RuleSet) resolve_keys(mut r Rule) {
 // resolve_key resolves r's split key from type start, for the items named in for_items.
 fn (rs &RuleSet) resolve_key(mut r Rule, start xsd.TypeRef, for_items string) []KeyPath {
 	mut keys := []KeyPath{}
+	mut empty_itself := []string{}
 	for spec in r.key_spec {
 		if spec == r.role {
-			keys << KeyPath{}
+			own := rs.itself_keys(start)
+			if own.len == 0 {
+				empty_itself << spec
+			}
+			keys << own
 			continue
 		}
 		rest := if spec.starts_with(r.role + '.') { spec[r.role.len + 1..] } else { spec }
@@ -578,7 +594,91 @@ fn (rs &RuleSet) resolve_key(mut r Rule, start xsd.TypeRef, for_items string) []
 		}
 		keys << KeyPath{w.steps, w.all}
 	}
+	// the item itself gave nothing: what tells two items apart is the rest of the key
+	if empty_itself.len > 0 && keys.len == 0 {
+		type_name := if start.kind == .complex { rs.type_name(start.idx) } else { '' }
+		if r.max > 1 {
+			r.problems << Problem{'key item has no single-valued children', 'split key "${empty_itself.join(', ')}" for ${for_items}: type ${type_name} has no single-valued child, and nothing else is in the key, so every item has one key'}
+		} else {
+			note := 'key of a single item with no single-valued children: every fragment is the one item'
+			if note !in r.notes {
+				r.notes << note
+			}
+			r.empty_keys << type_name
+		}
+	}
 	return keys
+}
+
+// itself_keys is the key of an item named by the role's own name: a value is its own key; an
+// item with children is identified by its single-valued element children, in the order its type
+// writes them (attributes do not count). A child counts when it is a role holding one value as
+// text: not a wrapper, at most one by its rule, not splittable, its type simple or mixed. A child that is a reference to an instance
+// (its type of the stereotype instanceRef) counts by its own such children, below it; other
+// objects do not count. None when the item has children and none of them qualifies.
+fn (rs &RuleSet) itself_keys(start xsd.TypeRef) []KeyPath {
+	if !rs.has_children(start) {
+		return [KeyPath{}]
+	}
+	mut out := []KeyPath{}
+	rs.single_values(start, []string{}, mut []u32{}, mut out)
+	return out
+}
+
+// has_children reports whether a type holds elements, so its value is not its text.
+fn (rs &RuleSet) has_children(t xsd.TypeRef) bool {
+	if t.kind != .complex {
+		return false
+	}
+	ct := rs.schema.complex_types[t.idx]
+	return ct.particle != xsd.no_particle && ct.content == .element_only
+}
+
+// one_value reports whether a role holds one value by its rule (its most, which mixed content
+// may raise above pureMM.maxOccurs) and is not splittable.
+fn (rs &RuleSet) one_value(d u32) bool {
+	k := rs.by_decl[d] or { return false }
+	r := rs.rules[k]
+	// a role behind an element of no role is a wrapper by its shape, and may still hold one
+	return (!r.wrapper || d in rs.outer_of) && r.max <= 1 && !r.splittable
+}
+
+// single_values appends, below path, the single-valued text children of type t,
+// and those of its references to instances; seen guards against a type that holds itself.
+fn (rs &RuleSet) single_values(t xsd.TypeRef, path []string, mut seen []u32, mut out []KeyPath) {
+	if t.idx in seen {
+		return
+	}
+	seen << t.idx
+	defer {
+		seen.pop()
+	}
+	s := rs.schema
+	ct := s.complex_types[t.idx]
+	mut occ := []Occ{}
+	rs.walk(ct.particle, 1, mut occ)
+	for o in occ {
+		// a role behind an element of no role of its own is reached through that element
+		d := rs.inner_of[o.decl] or { o.decl }
+		if !rs.tagged(d) || !rs.one_value(d) {
+			continue
+		}
+		mut steps := path.clone()
+		if d != o.decl {
+			steps << s.names[s.elements[o.decl].name.local]
+		}
+		steps << s.names[s.elements[d].name.local]
+		typ := s.elements[d].typ
+		if rs.has_children(typ) {
+			if typ.idx in rs.inst_refs {
+				rs.single_values(typ, steps, mut seen, mut out)
+			}
+		} else {
+			out << KeyPath{
+				steps: steps
+			}
+		}
+	}
 }
 
 // KeyError is why a split key's path could not be followed, with a kind for counting.

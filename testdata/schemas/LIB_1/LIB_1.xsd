@@ -146,6 +146,35 @@
                <xsd:appinfo source="tags">pureMM.maxOccurs="1"</xsd:appinfo>
             </xsd:annotation>
          </xsd:element>
+         <!-- items named by the role itself: keyed by their single-valued children -->
+         <xsd:element name="COPIES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="copy";mmt.qualifiedName="Shelf.copy";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="COPY" type="L:COPY"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="BOX" type="L:BOX" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="box";mmt.qualifiedName="Shelf.box";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:element name="CRATES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="crate";mmt.qualifiedName="Shelf.crate";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="CRATE" type="L:BOX"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
          <xsd:element name="BROKEN-KEYS" minOccurs="0">
             <xsd:annotation>
                <xsd:appinfo source="tags">atp.Splitkey="broken.variatioPoint.shortLabel, broken.variationPoint.ShortLabel, broken.context.shortName";mmt.qualifiedName="Shelf.broken";pureMM.maxOccurs="-1";pureMM.minOccurs="0";foo.bar="1"</xsd:appinfo>
@@ -176,6 +205,77 @@
          </xsd:element>
       </xsd:choice>
    </xsd:group>
+
+   <xsd:complexType name="COPY">
+      <xsd:sequence>
+         <xsd:element name="EDITION" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.edition";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="STAMPS" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.stamp";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="STAMP" type="xsd:string"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="YEAR" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.year";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="PRICE" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Copy.price";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:element name="BINDING" type="L:VARIATION-POINT" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.binding";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="LOCATION-IREF" type="L:LOCATION-IREF" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.location";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <!-- one value behind an element of no role -->
+         <xsd:element name="CODES" minOccurs="0">
+            <xsd:complexType>
+               <xsd:sequence>
+                  <xsd:element name="CODE" type="xsd:string" minOccurs="0">
+                     <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.code";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+                  </xsd:element>
+               </xsd:sequence>
+            </xsd:complexType>
+         </xsd:element>
+      </xsd:sequence>
+      <xsd:attribute name="BARCODE" type="xsd:string">
+         <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Copy.barcode";pureMM.maxOccurs="1";pureMM.minOccurs="1"</xsd:appinfo></xsd:annotation>
+      </xsd:attribute>
+   </xsd:complexType>
+
+   <!-- a reference to an instance: identified by its context and target -->
+   <xsd:complexType name="LOCATION-IREF">
+      <xsd:annotation><xsd:appinfo source="stereotypes">instanceRef</xsd:appinfo></xsd:annotation>
+      <xsd:sequence>
+         <xsd:element name="CONTEXT-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Location.context";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="TARGET-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Location.target";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <!-- an object with no single value of its own -->
+   <xsd:complexType name="BOX">
+      <xsd:sequence>
+         <xsd:element name="CONTENTS" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Box.content";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="ITEM" type="xsd:string"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
 
    <xsd:complexType name="SHELF">
       <xsd:sequence>

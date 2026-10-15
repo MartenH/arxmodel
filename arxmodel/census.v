@@ -24,6 +24,11 @@ pub mut:
 const role_tags = ['mmt.qualifiedName', 'atp.Splitkey', 'pureMM.maxOccurs', 'pureMM.minOccurs',
 	'pureMM.isOrdered', 'xml.roleElement', 'xml.typeElement']
 const role_stereotypes = ['atpSplitable']
+// What the reader applies to a role written as an attribute: its name, for split keys.
+const attribute_role_tags = ['mmt.qualifiedName']
+// A class's stereotype the reader applies: a reference to an instance is keyed by its children.
+const instance_ref_stereotype = 'instanceRef'
+const type_stereotypes = [instance_ref_stereotype]
 const checked_tags = ['xml.roleWrapperElement']
 
 // take_census counts every annotation by what was done with it.
@@ -44,7 +49,11 @@ fn (mut rs RuleSet) take_census() {
 			}
 			'stereotypes' {
 				for x in parse_stereotypes(a.text) {
-					if x in role_stereotypes {
+					if x in type_stereotypes && a.owner == .complex_type {
+						rs.census.used['stereotype ${x}']++
+					} else if x in type_stereotypes {
+						rs.census.not_read['stereotype ${x} on ${a.owner}']++
+					} else if x in role_stereotypes {
 						if role {
 							rs.census.used['stereotype ${x}']++
 						} else {
@@ -66,7 +75,7 @@ fn (mut c Census) count_tag(key string, owner xsd.OwnerKind, role bool, attr_rol
 	if key in checked_tags && role {
 		c.checked['tag ${key}']++
 	} else if key in role_tags || key in checked_tags {
-		if role || (attr_role && key == 'mmt.qualifiedName') {
+		if role || (attr_role && key in attribute_role_tags) {
 			c.used['tag ${key}']++
 		} else {
 			c.not_read['tag ${key} on ${owner}']++

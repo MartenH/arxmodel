@@ -34,6 +34,9 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      counted (README, *Rules from the schema*). Locally: 697 real files (184 MB) load in about
      95 ms; four of the thirteen declared schemas are at hand, and each compiles and gives its
      rules in 0.1–0.4 s.
+   - **Done: decisions.** A split key naming the item itself identifies an item with children by
+     its single-valued children; the newest release declared governs, falling back to the newest
+     at hand (README, *Releases*).
    - **Next: the merged view**, once flatxml's rules and merged view land: these rules turned
      into flatxml's, keyed by parent type and child element; the merge problems of the real files.
 2. Paths and references.

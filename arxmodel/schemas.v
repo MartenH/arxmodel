@@ -74,6 +74,7 @@ pub struct Schemas {
 pub mut:
 	uses       []&SchemaUse
 	undeclared map[int]string // document index -> why no schema could be read
+	governing  []Governing    // per namespace, the schema whose rules govern
 }
 
 // find_schema looks for a schema file named name in dir: dir/name, then dir/<stem>/name (one
@@ -146,6 +147,7 @@ pub fn compile_schemas(m &Model, dir string) Schemas {
 		}
 	}
 	threads.wait()
+	out.choose_governing()
 	return out
 }
 
