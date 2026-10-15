@@ -37,3 +37,5 @@ jobs:
           bin/arxmodel load testdata/model/a.arxml testdata/model/sub
           bin/arxmodel rules --problems --schema-dir testdata/schemas testdata/model/a.arxml testdata/model/sub/b.arxml
           bin/arxmodel check --schema-dir testdata/schemas testdata/model/a.arxml testdata/model/sub/b.arxml
+          bin/arxmodel rules --schema-dir testdata/schemas --emit "$RUNNER_TEMP/lib.rules.txt" testdata/model/a.arxml testdata/model/sub/b.arxml
+          bin/arxmodel check --rules "$RUNNER_TEMP/lib.rules.txt" testdata/model/a.arxml testdata/model/sub/b.arxml

@@ -47,7 +47,30 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      module definition), keys of every occurrence (`+`) and the empty key for keyless items
      from flatxml; no key computed here. The known differences from the AUTOSAR specification
      are in the README.
-
+   - **Done: rules files and policy.** The schema-derived rules as a generated file
+     (`rules --emit`, `check --rules`, never committed), arxmodel's choices in a committed
+     `policy.txt`, the code left with the mechanics.
+   - **Next, in this order:**
+     1. *Severity* in `policy.txt`: each merge problem kind (and attribute) is an error, a
+        warning or ignored; `check`'s exit code comes from errors only.
+     2. *Validation*, one `Finding` for every layer (layer, kind, severity, element path, every
+        fragment's file:line): (a) each file against its XML schema with flatxml.xsd (every
+        partial model must validate, [TPS_GST_00423]); (b) the meta-model's multiplicities on
+        the merged model, from pureMM.minOccurs/maxOccurs ([constr_2502]; the XSD makes lower
+        bounds 0 on purpose).
+     3. *References*: AUTOSAR paths, every `*-REF` resolved by its DEST; unresolved and
+        wrong-kind references reported.
+     4. *Export* of the merged model as one ARXML (needs flatxml to write a merged view):
+        `arxmodel merge -o model.arxml`, conflicts resolved by the policy, untouched subtrees
+        byte for byte.
+     5. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
+        definitions (multiplicity, range, enumeration literal); shortName uniqueness ignoring
+        case ([constr_2508]).
+     6. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
+        model, the elements one ECU needs with their reference closure, the software
+        composition flattened to one root composition with its connectors rerouted, and a
+        FlatMap (FlatInstanceDescriptor) recording the original instance paths. Checked against
+        the System Template before building (read locally, item ids only).
 2. Paths and references.
 3. `diff`, `merge`, `check` as commands.
 4. Edits and writing back.

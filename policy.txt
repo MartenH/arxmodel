@@ -1,0 +1,48 @@
+# arxmodel's merge policy: every choice that is arxmodel's and not read from the AUTOSAR schema.
+# Read at run time (`--policy FILE`; this file, built in, by default). One setting a line,
+# `name value...`; a comment says why, and which item of the AUTOSAR FO TPS Generic Structure
+# Template (R24-11) the choice differs from, where it does. Command-line flags override it.
+
+# An item whose split key parts are all absent: `empty` gives it the one empty key, shared by
+# every such item of the aggregation, so their fragments merge and differences are reported (as
+# automat does); `own` keeps each as an item of its own. Differs from [TPS_GST_00417].
+absent_keys empty
+
+# Keys compared ignoring ASCII case (`ignore`, as automat does) or as written (`exact`;
+# --case-sensitive). Differs from [TPS_GST_00021] and [constr_2508].
+key_case ignore
+
+# Attributes whose values may differ between the fragments of one element: a UUID is often
+# generated per file for one element (--check-attr UUID compares it; --ignore-attr adds more).
+ignore_attrs UUID
+
+# Namespace declarations and xsi: attributes (a schema location) say how a file is written, not
+# what it holds: `yes` lets them differ between fragments.
+ignore_declarations yes
+
+# The key of an item named by the role itself, when the item has children: `single_values`, its
+# single-valued element children (as automat does; the one value this build implements). Differs
+# from the specification, which copies such items rather than merging them.
+item_itself single_values
+
+# Which release governs a model whose files declare several: `newest_declared`, the newest the
+# files declare, or the newest at hand when that one is not.
+governing newest_declared
+
+# Splittability: `schema`, exactly where the schema says atpSplitable, nothing added.
+splittable schema
+
+# A class whose element-only content repeats its roles through a repeated choice is counted like
+# mixed content (`yes`, as automat does): there the XML schema's count is the role's most. `no`
+# leaves a repeated choice's repetition out of that count (mixed content still counts).
+repeated_choice_as_mixed yes
+
+# A FILE-INFO-COMMENT (atpStructuredComment): `compare`d like any content, so differing comments
+# are reported. Differs from [TPS_GST_00382], which allows it to be ignored when merging.
+file_info_comment compare
+
+# Multi-valued primitive values keyed by themselves merge when identical, and non-splittable
+# collections repeated across fragments are each kept (keyed ones report a collision): both
+# follow from the rules above, not settings. They differ from [TPS_GST_00449] and from
+# [constr_2524] / [TPS_GST_00447]. Items of an abstract type are keyed per item kind, not by the
+# union of the subclasses' identity contributors ([TPS_GST_00416]).

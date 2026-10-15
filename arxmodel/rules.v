@@ -81,6 +81,7 @@ pub mut:
 	// types_of: an XML element name -> the complex types it is declared with
 	types_of map[string][]u32
 	census   Census
+	policy   Policy
 mut:
 	schema     &xsd.Schema = unsafe { nil }
 	by_decl    map[u32]int
@@ -120,10 +121,16 @@ pub fn (rs &RuleSet) type_name(ct u32) string {
 
 // --- reading ----------------------------------------------------------------------------------
 
-// read_rules reads the rules of a compiled schema from its annotations.
+// read_rules reads the rules of a compiled schema from its annotations, by the built-in policy.
 pub fn read_rules(s &xsd.Schema) &RuleSet {
+	return read_rules_with(s, default_policy())
+}
+
+// read_rules_with reads the rules of a compiled schema from its annotations, by a policy.
+pub fn read_rules_with(s &xsd.Schema, policy Policy) &RuleSet {
 	mut rs := &RuleSet{
 		schema: s
+		policy: policy
 	}
 	rs.read_annotations()
 	rs.index_types()
@@ -266,15 +273,24 @@ fn (mut rs RuleSet) collect_type_decls() map[u32][]u32 {
 		}
 		mut occ := []Occ{}
 		rs.walk(t.particle, 1, mut occ)
+		// a class's own content (a named type, or anonymous mixed content; not the anonymous
+		// type of a role element, whose repetition belongs to that role) may repeat a role more
+		// often than the meta-model says: mixed content always counts; element-only content
+		// counts a repeated choice's repetition only where the policy says so
+		mut class_occ := []Occ{}
+		if t.content == .mixed || (t.name.local != 0 && rs.policy.repeated_choice_as_mixed) {
+			class_occ = occ.clone()
+		} else if t.name.local != 0 {
+			rs.walk_skipping_choices(t.particle, 1, mut class_occ)
+		}
+		for o in class_occ {
+			if o.max > (rs.repeat_max[o.decl] or { u32(0) }) {
+				rs.repeat_max[o.decl] = o.max
+			}
+		}
 		mut decls := []u32{}
 		for o in occ {
 			decls << o.decl
-			// a class's own content: a named type, or anonymous mixed content; not the
-			// anonymous type of a role element, whose repetition belongs to that role
-			class_content := t.name.local != 0 || t.content == .mixed
-			if class_content && o.max > (rs.repeat_max[o.decl] or { u32(0) }) {
-				rs.repeat_max[o.decl] = o.max
-			}
 		}
 		out[u32(ct)] = decls
 		for d0 in decls {
@@ -314,6 +330,26 @@ fn (rs &RuleSet) walk(p u32, mx u32, mut out []Occ) {
 	}
 	for c in rs.schema.particle_children(p) {
 		rs.walk(c, hi, mut out)
+	}
+}
+
+// walk_skipping_choices is walk with a choice's own maxOccurs left out: what a role's count is
+// without the repetition of the choices around it.
+fn (rs &RuleSet) walk_skipping_choices(p u32, mx u32, mut out []Occ) {
+	pt := rs.schema.particles[p]
+	hi := if pt.kind == .choice { mx } else { sat_mul(mx, pt.max) }
+	if pt.kind == .element {
+		for mut o in out {
+			if o.decl == pt.term {
+				o.max = sat_add(o.max, hi)
+				return
+			}
+		}
+		out << Occ{pt.term, hi}
+		return
+	}
+	for c in rs.schema.particle_children(p) {
+		rs.walk_skipping_choices(c, hi, mut out)
 	}
 }
 

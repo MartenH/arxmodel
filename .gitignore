@@ -3,3 +3,4 @@ bin/
 __pycache__/
 *_test
 !*_test.v
+*.rules.txt

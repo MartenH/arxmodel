@@ -75,6 +75,7 @@ pub mut:
 	uses       []&SchemaUse
 	undeclared map[int]string // document index -> why no schema could be read
 	governing  []Governing    // per namespace, the schema whose rules govern
+	policy     Policy         // the policy the schemas' rules were read with
 }
 
 // find_schema looks for a schema file named name in dir: dir/name, then dir/<stem>/name (one
@@ -112,7 +113,37 @@ pub fn find_schema(dir string, name string) (string, string) {
 
 // compile_schemas finds the schema each document of m declares in dir and compiles each distinct
 // one once, in parallel, and reads its rules.
-pub fn compile_schemas(m &Model, dir string) Schemas {
+pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
+	mut out := declare_schemas(m)
+	out.policy = opts.policy
+	for mut u in out.uses {
+		path, note := find_schema(dir, u.name)
+		if path == '' {
+			u.error = 'not found in ${dir}'
+		}
+		u.path = path
+		u.note = note
+	}
+	mut threads := []thread{}
+	for u in out.uses {
+		if u.path != '' {
+			threads << spawn compile_use(u, opts.policy)
+		}
+	}
+	threads.wait()
+	out.choose_governing()
+	return out
+}
+
+@[params]
+pub struct SchemaOptions {
+pub:
+	policy Policy = default_policy()
+}
+
+// declare_schemas lists the distinct schemas m's documents declare, and the documents that
+// declare none, without finding or compiling any.
+pub fn declare_schemas(m &Model) Schemas {
 	mut out := Schemas{}
 	mut by_name := map[string]int{}
 	for k, d in m.set.docs {
@@ -132,26 +163,10 @@ pub fn compile_schemas(m &Model, dir string) Schemas {
 		}
 		out.uses[by_name[key]].docs << k
 	}
-	for mut u in out.uses {
-		path, note := find_schema(dir, u.name)
-		if path == '' {
-			u.error = 'not found in ${dir}'
-		}
-		u.path = path
-		u.note = note
-	}
-	mut threads := []thread{}
-	for u in out.uses {
-		if u.path != '' {
-			threads << spawn compile_use(u)
-		}
-	}
-	threads.wait()
-	out.choose_governing()
 	return out
 }
 
-fn compile_use(u &SchemaUse) {
+fn compile_use(u &SchemaUse, policy Policy) {
 	mut w := unsafe { u }
 	sw := time.new_stopwatch()
 	s := xsd.load(u.path) or {
@@ -160,6 +175,6 @@ fn compile_use(u &SchemaUse) {
 		return
 	}
 	w.schema = s
-	w.rules = read_rules(s)
+	w.rules = read_rules_with(s, policy)
 	w.took = sw.elapsed()
 }

@@ -18,14 +18,50 @@ written here. Runs against real schemas and files happen locally, and record num
 
 See [docs/plan.md](docs/plan.md).
 
+## Three layers
+
+A merge is made of three things, kept apart:
+
+1. **Rules derived from the schema** (split keys, splittable, ordered, most, XML shape): read from
+   the AUTOSAR XSD the files declare, on the user's machine. `arxmodel rules --emit FILE` writes
+   them as flatxml rule text (`*.rules.txt`, ignored by git), and `check --rules FILE` merges by
+   that file instead of compiling the schema. Such a file is derived from the AUTOSAR schema, so it
+   is **never committed**.
+2. **Policy** ([policy.txt](policy.txt), committed): every choice that is arxmodel's and not the
+   schema's, one setting a line, each saying why and which item of the specification it departs
+   from: absent keys, the case of keys, attributes that may differ, the item-itself key, which
+   release governs, splittability, repeated-choice content, FILE-INFO-COMMENT. Read at run time
+   (`--policy FILE`; the committed one is built in); command-line flags (`--case-sensitive`,
+   `--check-attr`, `--ignore-attr`) override it.
+3. **Mechanics** (the code): reading annotations, resolving keys, scoping rules by parent path,
+   merging on flatxml's view. It holds no choice of its own.
+
 ## Use
 
 ```sh
 arxmodel load <file|dir>...                        # every .arxml below the paths, one set
 arxmodel rules --schema-dir DIR <file|dir>...      # and the merge rules of the schemas they declare
 arxmodel rules --schema-dir DIR --problems --dump rules.tsv <file|dir>...
+arxmodel rules --schema-dir DIR --emit autosar.rules.txt <file|dir>...           # the merge rules, as a file
 arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   # merge, and what the rules forbid
+arxmodel check --rules autosar.rules.txt <file|dir>...                         # the same, by the rules file
 ```
+
+A rules file starts with a header naming the schema it came from (name, namespace, path and
+SHA-256), the arxmodel and flatxml versions, the policy settings the rules were made by
+(`absent_keys`, `item_itself`, `governing`, `splittable`, `repeated_choice_as_mixed`), every pair
+in conflict with the rules that disagree, then the merge settings (`!fold`, `!ignore` with the
+policy's attribute names, and `# ignore-declarations`), then one rule a line in the order the merge
+uses them. Nothing in it depends on the documents it was made from: the same schema and policy give
+the same file from any of them, and two releases' files diff line by line. When merging from a
+file, its settings are the merge's (the flags still override; the documents' own declaration
+attributes are added then), and its conflicts are placed against the documents being checked, so
+the output and the exit code are those of `--schema-dir` on them. `check --rules` refuses a file
+for another namespace or another schema family than the documents declare, and warns when they
+declare a newer release than the file was made from, and for every policy setting that differs
+from the file's (the file's applies). `flatxml merge --rules` reads it, except that the item's own
+text as a key is written `.`, which only arxmodel's reader takes for it: flatxml's rule text has no
+spelling for it yet (queued on the flatxml side).
 
 `load` reads every file whose name ends in `.arxml` (any case) below the paths, in parallel, into
 one flatxml document set with namespaces resolved, and lists the files that fail to parse and
@@ -137,9 +173,10 @@ merged view (`flatxml/merge.v`), and lists what the rules forbid with every file
 twice where the role is not splittable, a key used in its scope already, an ordered role in two
 files, too many children, two fragments whose text or an attribute differ, one key under two
 names. It prints the first 20 of each kind (`--all` for every one) and exits 1 when there is any.
-Keys are compared ignoring ASCII case unless `--case-sensitive`; namespace declarations, `xsi:`
-attributes and `UUID` may differ between fragments (a UUID is often generated per file for one
-element; `--check-attr UUID` compares it), and so may any attribute named with `--ignore-attr`.
+How keys are compared and which attributes may differ between fragments are the policy's
+(`key_case`, `ignore_attrs`, `ignore_declarations`): by default keys ignore ASCII case, and
+namespace declarations, `xsi:` attributes and `UUID` may differ; `--case-sensitive`,
+`--check-attr UUID` and `--ignore-attr NAME` override that.
 
 flatxml names an aggregation by its parent (an element name, or a path of ancestor names) and its
 children's element names; the schema by the parent's type and the role. So each rule becomes
@@ -178,26 +215,28 @@ violations; `check` exits 1 when the documents use one.
 
 arxmodel's merge model follows automat where the user chose it, so it differs from the AUTOSAR FO
 TPS Generic Structure Template, R24-11, in these known ways. The behaviour is as
-described above; this list says where it departs from the specification.
+described above; this list says where it departs from the specification, and which line of
+[policy.txt](policy.txt) holds the choice where one does.
 
 1. **Items with every key part absent.** Here they share one empty key and merge, as automat
    does. The specification does not merge items whose split key has no value ([TPS_GST_00417]):
-   each stays an item of its own.
+   each stays an item of its own. Policy: `absent_keys`.
 2. **A split key naming only the role itself, on a multi-valued role.** The specification treats
    such items as copied, not merged. Here they are keyed by their single-valued element children
-   and merged by that key.
+   and merged by that key. Policy: `item_itself`.
 3. **Case of keys.** Keys are compared ignoring ASCII case here, as automat does. In the
    specification short names are compared case-sensitively, while their uniqueness within a
-   namespace is case-insensitive ([TPS_GST_00021], [constr_2508]).
+   namespace is case-insensitive ([TPS_GST_00021], [constr_2508]). Policy: `key_case`.
 4. **Multi-valued primitive values.** The specification copies all values of such a role from
-   every fragment ([TPS_GST_00449]). Here identical values of a value-keyed role merge into one.
+   every fragment ([TPS_GST_00449]). Here identical values of a value-keyed role merge into one,
+   a consequence of `item_itself` (a value is its own key) and splittability (`splittable`).
 5. **Non-splittable collections repeated across fragments.** The specification allows such a
    collection in several fragments only as an identical repetition ([constr_2524],
    [TPS_GST_00447]). Here an unkeyed one keeps each occurrence as a child of its own, and a keyed
    one reports a key met twice as a collision; nothing checks that repetitions are identical.
 6. **FILE-INFO-COMMENT.** The specification allows a structured comment (atpStructuredComment)
    to be ignored when fragments are merged ([TPS_GST_00382]). Here it is compared like any other
-   content, so differing comments are reported.
+   content, so differing comments are reported. Policy: `file_info_comment`.
 7. **Abstract item types.** For an aggregation whose items may be of several subclasses, the
    specification takes the identity contributors of all of them together ([TPS_GST_00416]).
    Here each item kind is keyed by its own type's key.

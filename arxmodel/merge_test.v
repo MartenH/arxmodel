@@ -62,7 +62,6 @@ fn test_rules_become_flatxml_rules() {
 	assert flat_rule(f, 'LABELS', 'LABEL').key == ['']
 	// no key computed by the caller
 	assert f.rules.rules.all(it.key_fn == none)
-	assert f.rules.fold
 }
 
 fn lib_schema_rules() &RuleSet {
@@ -74,7 +73,7 @@ fn test_each_holder_its_own_rule_by_parent_path() {
 	rs := lib_schema_rules()
 	f := rs.to_flat()
 	assert f.scoped == ['ITEMS MAGAZINE', 'NOTES NOTE', 'TAG-SET TAG']
-	assert f.conflicts.len == 0 && f.unused.len == 0
+	assert f.conflicts.len == 0
 	// a wrapper's items, by the holder above the wrapper
 	shelf := rule_at(f, 'NOTES', 'NOTE')
 	assert shelf.ordered && shelf.max == 3 && shelf.key.len == 0
@@ -109,9 +108,9 @@ fn test_a_holder_no_path_names_is_a_conflict() {
 	// the global ROOT's ITEM differs from the first (a ROOT inside PARENT), and nothing is
 	// above the global one
 	assert f.scoped == ['ROOT ITEM']
-	assert f.unused.len == 1
-	assert f.unused[0].parent == 'ROOT' && f.unused[0].child == 'ITEM'
-	assert f.unused[0].rules.len == 2
+	assert f.conflicts.len == 1 && f.unused().len == 1
+	assert f.conflicts[0].parent == '/ROOT' && f.conflicts[0].child == 'ITEM'
+	assert f.conflicts[0].rules.len == 2
 }
 
 fn test_flat_wrapper_content_is_scoped_by_its_holders() {

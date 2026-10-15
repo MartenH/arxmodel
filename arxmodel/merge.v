@@ -42,10 +42,9 @@ pub mut:
 	// element pairs roles of different holders give different rules, each holder given its own
 	// rule by a parent path where it differs from the pair's first
 	scoped []string
-	// paths that still name holders with different rules, or holders no path names: used by the
-	// documents, or not
+	// paths that still name holders with different rules, or holders no path names; whether the
+	// documents use each is `place`'s
 	conflicts []Conflict
-	unused    []Conflict
 	// rules whose items have no element of their own (flat wrappers)
 	flat_wrappers int
 	// item kinds whose split key lost a part, so they are one child each
@@ -59,16 +58,60 @@ pub:
 	parent string // a parent path, `HOLDER/WRAPPER`, or the parent's name where no path names it
 	child  string
 	rules  []string // `role: rule`, the one applied first
-	occurs int      // occurrences of the pair under that parent in the documents
+pub mut:
+	occurs int // occurrences of the pair under that parent in the documents placed
+}
+
+// pair is the conflict's element pair, `parent child`, and what is above the parent: the name its
+// path names, '' for the document's root (`/ROOT`), or none for a parent named alone.
+fn (c Conflict) pair() (string, ?string) {
+	if c.parent.contains('/') {
+		return '${c.parent.all_after_last('/')} ${c.child}', c.parent.all_before_last('/')
+	}
+	return '${c.parent} ${c.child}', none
+}
+
+// used is the conflicts the documents placed use.
+pub fn (f &Flat) used() []Conflict {
+	return f.conflicts.filter(it.occurs > 0)
+}
+
+// unused is the conflicts the documents placed do not use.
+pub fn (f &Flat) unused() []Conflict {
+	return f.conflicts.filter(it.occurs == 0)
+}
+
+// place counts, for each conflict, its occurrences in m's documents: under the name its path
+// names, or anywhere for one without a path.
+pub fn (mut f Flat) place(m &Model) {
+	mut pairs := []string{}
+	for c in f.conflicts {
+		pair, _ := c.pair()
+		if pair !in pairs {
+			pairs << pair
+		}
+	}
+	contexts := contexts_of(m, pairs)
+	for mut c in f.conflicts {
+		pair, above := c.pair()
+		seen := (contexts[pair] or { map[string]int{} }).clone()
+		if a := above {
+			c.occurs = seen[a] or { 0 }
+		} else {
+			mut n := 0
+			for _, k in seen {
+				n += k
+			}
+			c.occurs = n
+		}
+	}
 }
 
 @[params]
 pub struct FlatOptions {
 pub:
-	case_sensitive bool     // keys compared as written; by default ignoring ASCII case
-	ignore_attrs   []string // attributes whose values may differ between fragments
-	// the documents, if any: whether, and how often, they use a pair in conflict
-	model &Model = unsafe { nil }
+	// what a keyed rule makes of an item whose key parts are all absent (the policy's)
+	keyless flatxml.Keyless = default_policy().absent_keys
 }
 
 // Spec is one flatxml rule before it is made.
@@ -408,18 +451,12 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 		}
 	}
 	rs.fill_above(mut c, f.scoped, rs.names_of())
-	contexts := if opts.model == unsafe { nil } {
-		map[string]map[string]int{}
-	} else {
-		contexts_of(opts.model, f.scoped)
-	}
 	// per parent path, the rules (by their first candidate) to give it: `above parent rule`
 	mut scoped := map[string]bool{}
 	mut scoped_order := []string{}
 	for pair in f.scoped {
 		ks := c.by_pair[pair]
 		first := c.list[ks[0]]
-		seen := (contexts[pair] or { map[string]int{} }).clone()
 		// the names above, in the order the candidates give them
 		mut aboves := []string{}
 		for k in ks {
@@ -432,22 +469,22 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 		for k in ks {
 			if c.list[k].above.len == 0 && !c.list[k].spec.same(first.spec) {
 				// a holder nothing above names: no path can give it its rule
-				f.add_conflict(first.parent, first.child, rs.describe(c, [ks[0], k]), seen)
+				f.add_conflict(first.parent, first.child, rs.describe(c, [ks[0], k]))
 			}
 		}
 		for a in aboves {
 			under := ks.filter(a in c.list[it].above)
 			pick := c.list[under[0]]
 			if under.any(!c.list[it].spec.same(pick.spec)) {
-				f.add_conflict(if a == '' { first.parent } else { '${a}/${first.parent}' },
-					first.child, rs.describe(c, under), seen)
+				f.add_conflict('${a}/${first.parent}',
+					first.child, rs.describe(c, under))
 			}
 			if pick.spec.same(first.spec) {
 				continue
 			}
 			if a == '' {
-				f.add_conflict(first.parent, first.child, rs.describe(c, [ks[0], under[0]]),
-					seen)
+				// the document's root: no path names it but `/ROOT`, which flatxml cannot
+				f.add_conflict('/${first.parent}', first.child, rs.describe(c, [ks[0], under[0]]))
 				continue
 			}
 			key := '${a} ${first.parent} ${pick.rule}'
@@ -475,7 +512,7 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 				done[k] = true
 			}
 		}
-		f.emit(c, x.parent, group, mut rules)
+		f.emit(c, x.parent, group, opts.keyless, mut rules)
 		// the scoped rules of this parent whose rule's first pair this is
 		for key in scoped_order {
 			if key in done_scoped {
@@ -491,15 +528,14 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 			for left.len > 0 {
 				sp := c.list[left[0]].spec
 				same := left.filter(c.list[it].spec.same(sp))
-				f.emit(c, '${a}/${parent}', same, mut rules)
+				f.emit(c, '${a}/${parent}', same, opts.keyless, mut rules)
 				left = left.filter(!c.list[it].spec.same(sp))
 			}
 		}
 	}
+	// the settings (case, attributes) are the policy's, given by the caller that merges
 	f.rules = flatxml.RuleSet{
-		rules:        rules
-		fold:         !opts.case_sensitive
-		ignore_attrs: opts.ignore_attrs
+		rules: rules
 	}
 	return f
 }
@@ -519,14 +555,14 @@ fn (c &Cands) children_of(rule int, parent string) []string {
 }
 
 // emit appends one flatxml rule for the candidates ks (one rule, one spec) under parent.
-fn (mut f Flat) emit(c Cands, parent string, ks []int, mut rules []flatxml.Rule) {
+fn (mut f Flat) emit(c Cands, parent string, ks []int, keyless flatxml.Keyless, mut rules []flatxml.Rule) {
 	sp := c.list[ks[0]].spec
 	f.described << sp.str()
 	rules << flatxml.Rule{
 		parent:   parent
 		children: ks.map(c.list[it].child)
 		key:      sp.key
-		keyless:  if sp.keyed { flatxml.Keyless.empty } else { flatxml.Keyless.own }
+		keyless:  if sp.keyed { keyless } else { flatxml.Keyless.own }
 		single:   sp.single
 		merge:    sp.merge
 		ordered:  sp.ordered
@@ -535,24 +571,14 @@ fn (mut f Flat) emit(c Cands, parent string, ks []int, mut rules []flatxml.Rule)
 }
 
 // add_conflict records a pair in conflict under parent (a path, or a name), once.
-fn (mut f Flat) add_conflict(parent string, child string, rules []string, seen map[string]int) {
-	if f.conflicts.any(it.parent == parent && it.child == child)
-		|| f.unused.any(it.parent == parent && it.child == child) {
+fn (mut f Flat) add_conflict(parent string, child string, rules []string) {
+	if f.conflicts.any(it.parent == parent && it.child == child) {
 		return
 	}
-	mut count := 0
-	if parent.contains('/') {
-		count = seen[parent.all_before('/')] or { 0 }
-	} else {
-		for _, n in seen {
-			count += n
-		}
-	}
-	x := Conflict{parent, child, rules, count}
-	if count > 0 {
-		f.conflicts << x
-	} else {
-		f.unused << x
+	f.conflicts << Conflict{
+		parent: parent
+		child:  child
+		rules:  rules
 	}
 }
 
@@ -574,18 +600,48 @@ pub fn declaration_attrs(m &Model) []string {
 	return out
 }
 
-// CheckOptions are the choices of a merge.
+// CheckOptions are the command line's overrides of a merge's settings.
 @[params]
 pub struct CheckOptions {
 pub:
-	case_sensitive bool
-	ignore_attrs   []string // besides namespace declarations and xsi attributes
+	case_sensitive bool     // keys compared as written, whatever the settings say
+	ignore_attrs   []string // attributes that may differ, besides the settings'
+	compare_attrs  []string // attributes the settings let differ that are compared after all
+}
+
+// Settings are a merge's case and attribute settings: the policy's when the rules come from the
+// schema, the rules file's when they come from one.
+pub struct Settings {
+pub mut:
+	fold                bool
+	ignore_attrs        []string // by name
+	ignore_declarations bool     // and the documents' namespace declarations and xsi: attributes
+}
+
+// settings are the policy's merge settings.
+pub fn (p Policy) settings() Settings {
+	return Settings{
+		fold:                p.fold
+		ignore_attrs:        p.ignore_attrs.clone()
+		ignore_declarations: p.ignore_declarations
+	}
+}
+
+// apply gives the case setting and the attributes to ignore in m's documents, the overrides
+// applied.
+pub fn (st Settings) apply(m &Model, opts CheckOptions) (bool, []string) {
+	mut ignore := st.ignore_attrs.filter(it !in opts.compare_attrs)
+	ignore << opts.ignore_attrs
+	if st.ignore_declarations {
+		ignore << declaration_attrs(m).filter(it !in opts.compare_attrs)
+	}
+	return st.fold && !opts.case_sensitive, ignore
 }
 
 // Checked is a model merged by its governing schema's rules.
 pub struct Checked {
 pub mut:
-	governing string // the governing schema's name
+	governing string // the governing schema's name, or the rules file's
 	flat      Flat
 	view      &flatxml.Merged = unsafe { nil }
 	// per problem of the view: it lies on an element pair in conflict, so the rule that judged
@@ -597,9 +653,9 @@ pub mut:
 	within      int // of those, nodes two of whose elements are in one document
 }
 
-// check merges m's documents by the rules of the schema governing their namespace. One model
-// has one namespace; a namespace no schema governs is an error.
-pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
+// governing_use is the schema governing m's documents. One model has one namespace; a namespace
+// no schema governs is an error.
+pub fn governing_use(sc &Schemas) !&SchemaUse {
 	if sc.governing.len != 1 {
 		return error('${sc.governing.len} namespaces declared; one model has one')
 	}
@@ -607,14 +663,39 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	if g.use < 0 {
 		return error('no schema governs ${g.ns}: ${g.note}')
 	}
-	gov := sc.uses[g.use]
-	mut ignore := opts.ignore_attrs.clone()
-	ignore << declaration_attrs(m)
-	flat := gov.rules.to_flat(
-		case_sensitive: opts.case_sensitive
-		ignore_attrs:   ignore
-		model:          m
-	)
+	return sc.uses[g.use]
+}
+
+// governing_flat is the flatxml rules of the schema governing the documents, by the policy the
+// schemas were read with.
+pub fn governing_flat(sc &Schemas) !(Flat, string) {
+	gov := governing_use(sc)!
+	return gov.rules.to_flat(keyless: sc.policy.absent_keys), gov.name
+}
+
+// with_settings is a rule set with the merge's case and attribute settings.
+pub fn with_settings(rs flatxml.RuleSet, fold bool, ignore []string) flatxml.RuleSet {
+	return flatxml.RuleSet{
+		...rs
+		fold:         fold
+		ignore_attrs: ignore
+	}
+}
+
+// check merges m's documents by the rules of the schema governing their namespace, with the
+// policy's settings.
+pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
+	flat, name := governing_flat(sc)!
+	return check_with(m, flat, name, sc.policy.settings(), opts)
+}
+
+// check_with merges m's documents by the rules given (from the schema, or a rules file), with
+// the settings given and the overrides.
+pub fn check_with(m &Model, flat0 Flat, source string, st Settings, opts CheckOptions) !Checked {
+	fold, ignore := st.apply(m, opts)
+	mut flat := flat0
+	flat.rules = with_settings(flat0.rules, fold, ignore)
+	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
 	mut merged, mut within := 0, 0
 	for i in 0 .. view.len() {
@@ -652,7 +733,7 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 		}
 	}
 	return Checked{
-		governing:   gov.name
+		governing:   source
 		flat:        flat
 		view:        view
 		in_conflict: in_conflict

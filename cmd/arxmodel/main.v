@@ -4,9 +4,16 @@
 //   arxmodel rules --schema-dir DIR [--jobs N] [--problems] [--dump FILE] <file|dir>...
 //                                              read them, find and compile the schemas they
 //                                              declare, and print the merge rules each gives
-//   arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]... [--check-attr NAME]... <file|dir>...
+//   arxmodel rules --schema-dir DIR --emit FILE <file|dir>...
+//                                              write the merge rules of the governing schema
+//                                              as flatxml rule text
+//   arxmodel check (--schema-dir DIR | --rules FILE) [--all] [--case-sensitive]
+//                  [--ignore-attr NAME]... [--check-attr NAME]... <file|dir>...
 //                                              merge the files by the rules of the governing
-//                                              schema and list what the rules forbid
+//                                              schema (or a rules file) and list what the
+//                                              rules forbid
+//
+// Every command takes --policy FILE, the merge policy (policy.txt, built in, by default).
 //
 // Each exits 1 when a file could not be read, or (rules) a schema was not declared, not found
 // or did not compile; what could be done is still printed.
@@ -30,7 +37,14 @@ const usage = 'usage:
       at hand), and list what the rules forbid with every file and line: the first 20 of each
       kind, or --all; keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
       attribute whose values may differ between fragments (namespace declarations, xsi
-      attributes and UUID may; --check-attr UUID compares it after all)'
+      attributes and UUID may; --check-attr UUID compares it after all)
+  arxmodel rules --schema-dir DIR --emit FILE <file|dir>...
+      write the merge rules the governing schema gives, as flatxml rule text with a header
+      naming the schema; generated from the schema on this machine, never to be committed
+  arxmodel check --rules FILE ... <file|dir>...
+      merge by a rules file instead of compiling the schema; warns when the files declare a
+      newer release than the file was made from
+  --policy FILE (any command): the merge policy, in place of the built-in policy.txt'
 
 struct Opts {
 mut:
@@ -42,6 +56,10 @@ mut:
 	exact      bool     // check: keys compared as written
 	ignore     []string // check: attributes whose values may differ between fragments
 	compare    []string // check: attributes ignored by default that are compared after all
+	emit       string   // rules: write the merge rules here
+	rules_file string   // check: merge by these rules
+	policy     string   // the policy file; '' for the built-in one
+	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
 
@@ -56,13 +74,32 @@ fn main() {
 		eprintln(usage)
 		exit(2)
 	}
+	allowed := match args[0] {
+		'load' { ['--jobs'] }
+		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
+		'check' {
+			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
+				'--ignore-attr', '--check-attr', '--policy']
+		}
+		else { []string{} }
+	}
+	for a in opts.given {
+		if a !in allowed {
+			eprintln('${args[0]} does not take ${a}')
+			exit(2)
+		}
+	}
+	if args[0] == 'check' && opts.schema_dir != '' && opts.rules_file != '' {
+		eprintln('check takes --schema-dir or --rules, not both')
+		exit(2)
+	}
 	match args[0] {
 		'load' {
 			cmd_load(opts)
 		}
 		'check' {
-			if opts.schema_dir == '' {
-				eprintln('check needs --schema-dir')
+			if opts.schema_dir == '' && opts.rules_file == '' {
+				eprintln('check needs --schema-dir or --rules')
 				exit(2)
 			}
 			cmd_check(opts)
@@ -86,6 +123,9 @@ fn parse_opts(args []string) !Opts {
 	mut k := 0
 	for k < args.len {
 		a := args[k]
+		if a.starts_with('--') && a !in o.given {
+			o.given << a
+		}
 		match a {
 			'--ignore-attr', '--check-attr' {
 				if k + 1 >= args.len {
@@ -105,7 +145,7 @@ fn parse_opts(args []string) !Opts {
 			'--case-sensitive' {
 				o.exact = true
 			}
-			'--jobs', '--schema-dir', '--dump' {
+			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -113,6 +153,9 @@ fn parse_opts(args []string) !Opts {
 				match a {
 					'--jobs' { o.jobs = v.int() }
 					'--schema-dir' { o.schema_dir = v }
+					'--emit' { o.emit = v }
+					'--rules' { o.rules_file = v }
+					'--policy' { o.policy = v }
 					else { o.dump = v }
 				}
 				k += 2
@@ -166,8 +209,9 @@ fn cmd_rules(o Opts) {
 		err: o.dump == '-'
 	}
 	m := load_or_exit(o, out)
+	policy := load_policy(o)
 	sw := time.new_stopwatch()
-	sc := arxmodel.compile_schemas(m, o.schema_dir)
+	sc := arxmodel.compile_schemas(m, o.schema_dir, policy: policy)
 	out.line('${sc.uses.len} schemas declared, found and compiled in ${ms(sw.elapsed())}:')
 	for u in sc.uses {
 		status := if u.error != '' {
@@ -201,6 +245,9 @@ fn cmd_rules(o Opts) {
 		if o.dump != '' {
 			dump_rules(mut dumped, u.name, u.rules)
 		}
+	}
+	if o.emit != '' {
+		emit_rules(out, sc, o.emit)
 	}
 	defer {
 		if m.failed.len > 0 || sc.undeclared.len > 0 || sc.uses.any(it.error != '')
@@ -376,44 +423,101 @@ fn plural(n int, word string) string {
 	return if n == 1 { '1 ${word}' } else { '${n} ${word}s' }
 }
 
-// default_ignored are the attributes check lets differ between fragments unless asked to compare
-// them (--check-attr): a UUID is often generated per file for one element.
-const default_ignored = ['UUID']
+// load_policy is the policy file named, or the built-in one.
+fn load_policy(o Opts) arxmodel.Policy {
+	if o.policy == '' {
+		return arxmodel.default_policy()
+	}
+	text := os.read_file(o.policy) or {
+		eprintln('${o.policy}: ${err.msg()}')
+		exit(2)
+	}
+	return arxmodel.parse_policy(text) or {
+		eprintln('${o.policy}: ${err.msg()}')
+		exit(2)
+	}
+}
+
+// emit_rules writes the governing schema's merge rules to path.
+fn emit_rules(out Out, sc &arxmodel.Schemas, path string) {
+	flat, name := arxmodel.governing_flat(sc) or {
+		eprintln('--emit: ${err.msg()}')
+		exit(1)
+	}
+	u := sc.uses.filter(it.name == name)[0]
+	text := arxmodel.format_rules(flat, arxmodel.provenance(u, sc.policy), sc.policy.settings())
+	os.write_file(path, text) or {
+		eprintln('${path}: ${err.msg()}')
+		exit(1)
+	}
+	out.line('wrote ${flat.rules.rules.len} rules of ${name} to ${path}')
+}
 
 fn cmd_check(o Opts) {
 	out := Out{}
 	m := load_or_exit(o, out)
-	sc := arxmodel.compile_schemas(m, o.schema_dir)
-	print_undeclared(out, m, sc)
-	for g in sc.governing {
-		if g.use >= 0 {
-			out.line('governed by ${sc.uses[g.use].name}${if g.note != '' {
-				' (' + g.note + ')'
-			} else {
-				''
-			}}')
-		}
+	policy := load_policy(o)
+	opts := arxmodel.CheckOptions{
+		case_sensitive: o.exact
+		ignore_attrs:   o.ignore
+		compare_attrs:  o.compare
 	}
-	sw := time.new_stopwatch()
-	mut ignore := o.ignore.clone()
-	for a in default_ignored {
-		if a !in o.compare {
-			ignore << a
+	mut sw := time.new_stopwatch()
+	mut c := arxmodel.Checked{}
+	mut sc := arxmodel.Schemas{}
+	if o.rules_file != '' {
+		// the rules made earlier from the schema: nothing to find or compile
+		sc = arxmodel.declare_schemas(m)
+		print_undeclared(out, m, sc)
+		text := os.read_file(o.rules_file) or {
+			eprintln('${o.rules_file}: ${err.msg()}')
+			exit(1)
 		}
-	}
-	mut c := arxmodel.check(m, sc, case_sensitive: o.exact, ignore_attrs: ignore) or {
-		out.line(err.msg())
-		exit(1)
+		flat, pv, st := arxmodel.parse_rules_file(text) or {
+			eprintln('${o.rules_file}: ${err.msg()}')
+			exit(1)
+		}
+		warnings := arxmodel.rules_file_check(sc, pv, st, policy) or {
+			eprintln('${o.rules_file}: ${err.msg()}')
+			exit(1)
+		}
+		out.line('rules from ${o.rules_file}, made from ${pv.schema} (arxmodel ${pv.arxmodel}, flatxml ${pv.flatxml})')
+		for w in warnings {
+			out.line('warning: ${w}')
+		}
+		sw = time.new_stopwatch()
+		c = arxmodel.check_with(m, flat, pv.schema, st, opts) or {
+			out.line(err.msg())
+			exit(1)
+		}
+	} else {
+		sc = arxmodel.compile_schemas(m, o.schema_dir, policy: policy)
+		print_undeclared(out, m, sc)
+		for g in sc.governing {
+			if g.use >= 0 {
+				out.line('governed by ${sc.uses[g.use].name}${if g.note != '' {
+					' (' + g.note + ')'
+				} else {
+					''
+				}}')
+			}
+		}
+		sw = time.new_stopwatch()
+		c = arxmodel.check(m, sc, opts) or {
+			out.line(err.msg())
+			exit(1)
+		}
 	}
 	took := sw.elapsed()
 	f := c.flat
-	out.line('${f.rules.rules.len} flatxml rules; ${f.scoped.len} element pairs that roles of different holders give different rules, each holder whose rule differs given its own by a parent path: ${f.conflicts.len} paths still in conflict where the documents use them, ${f.unused.len} in conflict and unused')
-	out.line('  ${f.lost_keys} item kinds one child each for a key part that did not resolve, ${f.flat_wrappers} wrappers of item content whose items are not told apart')
-	for x in f.conflicts {
+	used := f.used()
+	unused := f.unused()
+	out.line('${f.rules.rules.len} flatxml rules; ${f.conflicts.len} element pairs in conflict (holders with different rules no parent path tells apart): ${used.len} used by the documents, ${unused.len} not')
+	for x in used {
 		out.line('  conflict: ${x.parent} ${x.child} (${x.occurs} in the documents): ${x.rules.join('; ')}')
 	}
 	if o.problems {
-		for x in f.unused {
+		for x in unused {
 			out.line('  unused conflict: ${x.parent} ${x.child}: ${x.rules.join('; ')}')
 		}
 	}
@@ -448,7 +552,7 @@ fn cmd_check(o Opts) {
 		shown[key]++
 		out.line((if c.in_conflict[k] { 'in conflict: ' } else { '' }) + v.describe(p))
 	}
-	if m.failed.len > 0 || sc.undeclared.len > 0 || c.violations > 0 || f.conflicts.len > 0 {
+	if m.failed.len > 0 || sc.undeclared.len > 0 || c.violations > 0 || used.len > 0 {
 		exit(1)
 	}
 }
