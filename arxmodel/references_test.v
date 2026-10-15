@@ -99,7 +99,7 @@ fn test_paths_compared_as_the_merge_compares_keys() {
 fn test_external_by_the_nearest_existing_ancestor() {
 	// with SHELF the package element, a book missing from a shelf is a definition not loaded
 	mut m := load([fdata('refs')])!
-	p := parse_policy(default_policy_text.replace('package_element AR-PACKAGE', 'package_element SHELF'))!
+	p := parse_policy(default_policy_text.replace('package_element = "AR-PACKAGE"', 'package_element = "SHELF"'))!
 	c := check(m, compile_schemas(m, fdata('schemas'), policy: p))!
 	assert 'external 14' in ref_kinds_at(c)
 	// files loaded only to resolve against: /Elsewhere/Atlas is there, and nothing of them is
@@ -109,11 +109,14 @@ fn test_external_by_the_nearest_existing_ancestor() {
 	assert !e.findings.any(it.at.any(it.contains('refs_extra')))
 }
 
-fn test_a_policy_line_sets_a_reference_severity() {
-	p := parse_policy(default_policy_text.replace('severity reference.relative warning',
-		'severity reference.relative ignore'))!
+fn test_a_policy_key_sets_a_reference_severity() {
+	p := parse_policy(default_policy_text.replace('"reference.relative" = "warning"',
+		'"reference.relative" = "ignore"'))!
 	assert p.severity(.reference, 'relative', 'X') == .ignore
-	if _ := parse_policy(default_policy_text + '\nseverity reference.dangling error') {
-		assert false
+	bad := default_policy_text.replace('\n[severity]\n', '\n[severity]\n"reference.dangling" = "error"\n')
+	parse_policy(bad) or {
+		assert err.msg().contains('no kind `dangling` in layer reference'), err.msg()
+		return
 	}
+	assert false
 }

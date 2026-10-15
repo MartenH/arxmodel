@@ -27,11 +27,13 @@ A merge is made of three things, kept apart:
    them as flatxml rule text (`*.rules.txt`, ignored by git), and `check --rules FILE` merges by
    that file instead of compiling the schema. Such a file is derived from the AUTOSAR schema, so it
    is **never committed**.
-2. **Policy** ([policy.txt](policy.txt), committed): every choice that is arxmodel's and not the
-   schema's, one setting a line, each saying why and which item of the specification it departs
-   from: absent keys, the case of keys, attributes that may differ, the item-itself key, which
-   release governs, splittability, repeated-choice content, FILE-INFO-COMMENT, and each finding's
-   severity. Read at run time
+2. **Policy** ([policy.toml](policy.toml), committed): every choice that is arxmodel's and not the
+   schema's, in TOML, each setting with a comment saying why and which item of the specification
+   it departs from: `[merge]` absent keys, the case of keys, attributes that may differ, the
+   item-itself key, repeated-choice content, FILE-INFO-COMMENT; `[schema]` which release governs,
+   splittability; `[references]` the package element; `[severity]` each finding's severity. Every
+   setting must be given, with a value of its type this build supports; an unknown table, key or
+   value is refused by name. Read at run time
    (`--policy FILE`; the committed one is built in); command-line flags (`--case-sensitive`,
    `--check-attr`, `--ignore-attr`) override it.
 3. **Mechanics** (the code): reading annotations, resolving keys, scoping rules by parent path,
@@ -217,11 +219,12 @@ keeps every one, in document order.
   vendor definitions) only to resolve references against: merged on their own, never reported.
   A path held by several elements is itself a finding, `duplicate_path`. `check` prints the
   external and unresolved references by the top-level package they point into.
-Each finding's severity comes from the policy's `severity` lines (error, warning, ignore; by layer,
-by kind, or by kind and element or `@attribute`, the most specific winning; a line naming an
-unknown kind is refused). The defaults for references: `unresolved`, `wrong_kind`, `empty` and
-`duplicate_path` are errors; `external`, `case_mismatch` and `relative` warnings. A merge problem on an element pair in conflict keeps its kind, marked
-`(in conflict)`: a line for its kind applies to it, else `merge.in_conflict`. No XML schema
+Each finding's severity comes from the policy's `[severity]` table (`"error"`, `"warning"`,
+`"ignore"`; keyed by layer, `"layer.kind"` or `"layer.kind:element"` / `"layer.kind:@attribute"`,
+the most specific winning; a key naming an unknown layer or kind is refused). The defaults for
+references: `unresolved`, `wrong_kind`, `empty` and `duplicate_path` are errors; `external`,
+`case_mismatch` and `relative` warnings. A merge problem on an element pair in conflict keeps its
+kind, marked `(in conflict)`: a key for its kind applies to it, else `merge.in_conflict`. No XML schema
 finding is dropped past a count; `--jobs` sets that layer's threads. `check` prints the
 counts by severity, layer and kind, then the errors and warnings (the first 20 of each kind,
 `--all` for every one), and exits 1 on errors only. `--skip-xml`, `--skip-multiplicity` and
@@ -294,7 +297,7 @@ inside an input directory, is refused. Nothing is written where `check` would ex
 arxmodel's merge model follows automat where the user chose it, so it differs from the AUTOSAR FO
 TPS Generic Structure Template, R24-11, in these known ways. The behaviour is as
 described above; this list says where it departs from the specification, and which line of
-[policy.txt](policy.txt) holds the choice where one does.
+[policy.toml](policy.toml) holds the choice where one does.
 
 1. **Items with every key part absent.** Here they share one empty key and merge, as automat
    does. The specification does not merge items whose split key has no value ([TPS_GST_00417]):

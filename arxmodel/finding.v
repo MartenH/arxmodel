@@ -75,7 +75,8 @@ pub fn (p Policy) merge_severity(kind string, what string, in_conflict bool) Sev
 	return p.severities['merge'] or { Severity.error }
 }
 
-// known_kinds are the kinds of finding each layer has, which a severity line may name.
+// known_kinds are the kinds of finding each layer has, which a key of the policy's [severity]
+// table may name.
 pub const known_kinds = {
 	'merge':        ['collision', 'key_reused', 'ordered_split', 'too_many', 'value_differs',
 		'name_differs', 'missing_key', 'conflict', 'in_conflict']

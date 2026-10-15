@@ -1,0 +1,92 @@
+# arxmodel's merge policy: every choice that is arxmodel's and not read from the AUTOSAR schema.
+# Read at run time (`--policy FILE`; this file, built in, by default). TOML: every setting below
+# must be given, with a value this build supports; an unknown table or key is refused. A comment
+# says why, and which item of the AUTOSAR FO TPS Generic Structure Template (R24-11) the choice
+# differs from, where it does. Command-line flags override it.
+
+[merge]
+# An item whose split key parts are all absent: "empty" gives it the one empty key, shared by
+# every such item of the aggregation, so their fragments merge and differences are reported (as
+# automat does); "own" keeps each as an item of its own. Differs from [TPS_GST_00417].
+absent_keys = "empty"
+
+# Keys compared ignoring ASCII case ("ignore", as automat does) or as written ("exact";
+# --case-sensitive). Differs from [TPS_GST_00021] and [constr_2508].
+key_case = "ignore"
+
+# Attributes whose values may differ between the fragments of one element: a UUID is often
+# generated per file for one element (--check-attr UUID compares it; --ignore-attr adds more).
+ignore_attrs = ["UUID"]
+
+# Namespace declarations and xsi: attributes (a schema location) say how a file is written, not
+# what it holds: true lets them differ between fragments.
+ignore_declarations = true
+
+# The key of an item named by the role itself, when the item has children: "single_values", its
+# single-valued element children (as automat does; the one value this build implements). Differs
+# from the specification, which copies such items rather than merging them.
+item_itself = "single_values"
+
+# A class whose element-only content repeats its roles through a repeated choice is counted like
+# mixed content (true, as automat does): there the XML schema's count is the role's most. false
+# leaves a repeated choice's repetition out of that count (mixed content still counts).
+repeated_choice_as_mixed = true
+
+# A FILE-INFO-COMMENT (atpStructuredComment): "compare"d like any content, so differing comments
+# are reported. Differs from [TPS_GST_00382], which allows it to be ignored when merging.
+file_info_comment = "compare"
+
+# Multi-valued primitive values keyed by themselves merge when identical, and non-splittable
+# collections repeated across fragments are each kept (keyed ones report a collision): both
+# follow from the rules above, not settings. They differ from [TPS_GST_00449] and from
+# [constr_2524] / [TPS_GST_00447]. Items of an abstract type are keyed per item kind, not by the
+# union of the subclasses' identity contributors ([TPS_GST_00416]).
+
+[schema]
+# Which release governs a model whose files declare several: "newest_declared", the newest the
+# files declare, or the newest at hand when that one is not.
+governing = "newest_declared"
+
+# Splittability: "schema", exactly where the schema says atpSplitable, nothing added.
+splittable = "schema"
+
+[references]
+# The element that is a package. A reference whose target is missing and whose nearest existing
+# ancestor is a package (or which has none) points at definitions not loaded: `external`; one
+# whose nearest existing ancestor is any other element points into content that is loaded:
+# `unresolved`.
+package_element = "AR-PACKAGE"
+
+# Severities: what each finding means for `check`, which fails (exit 1) on errors only. A key is
+# a layer, "layer.kind" or "layer.kind:element" ("layer.kind:@attribute"), quoted where it has a
+# dot; its value "error", "warning" or "ignore". The most specific one applies, and a finding no
+# key names is an error. Layers: merge (the merge rules), xml_schema (each file against its XML
+# schema), multiplicity (each role's count in the merged model against the meta-model),
+# reference (each reference against the merged model's AUTOSAR paths).
+[severity]
+merge = "error"
+# A problem on an element pair whose holders' rules no parent path tells apart was judged by a
+# rule that may not be the pair's.
+"merge.in_conflict" = "warning"
+xml_schema = "error"
+# What the XML schema validator does not support (xsi:type) is not a fault of the file.
+"xml_schema.unsupported" = "warning"
+# The XML schema makes every lower bound 0 so a model may be split; the merged model may still be
+# unfinished in a process phase, so a role below its fewest is a warning ([constr_2502]).
+"multiplicity.below_min" = "warning"
+"multiplicity.above_max" = "error"
+# References. Nothing at the path where its nearest existing ancestor is an element whose content
+# is loaded, a target of another kind than its DEST (or a DEST the reference may not give), or no
+# path at all: errors. Nothing at the path where its nearest existing ancestor is a package, or
+# nothing of it exists (standard or vendor definitions not at hand, which --refs-from can
+# supply): a warning. A path found only ignoring case, as the merge compares keys: a warning. A
+# reference relative to a base (BASE, or a path not from the root) is not resolved here, as the
+# files declare no REFERENCE-BASE to resolve it by: a warning. One path held by two elements the
+# merge keeps apart: an error, short names being unique in their namespace ([constr_2508]).
+"reference.unresolved" = "error"
+"reference.wrong_kind" = "error"
+"reference.empty" = "error"
+"reference.external" = "warning"
+"reference.case_mismatch" = "warning"
+"reference.relative" = "warning"
+"reference.duplicate_path" = "error"

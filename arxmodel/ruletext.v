@@ -187,7 +187,8 @@ pub fn rules_file_check(sc &Schemas, pv Provenance, st Settings, p Policy) ![]st
 		name := line.all_before(' ')
 		was := pv.policy.filter(it.all_before(' ') == name)
 		if was.len == 0 || was[0] != line {
-			out << "the rules were made with `${if was.len > 0 { was[0] } else { name + ' (unset)' }}`; the policy says `${line}`; the rules file's applies"
+			made_with := if was.len > 0 { toml_setting(was[0]) } else { '${name} (unset)' }
+			out << "the rules were made with `${made_with}`; the policy says `${toml_setting(line)}`; the rules file's applies"
 		}
 	}
 	file_merge := Policy{
@@ -197,7 +198,7 @@ pub fn rules_file_check(sc &Schemas, pv Provenance, st Settings, p Policy) ![]st
 	}.merge_settings()
 	for k, line in p.merge_settings() {
 		if file_merge[k] != line {
-			out << "the rules file says `${file_merge[k]}`; the policy says `${line}`; the rules file's applies"
+			out << "the rules file says `${toml_setting(file_merge[k])}`; the policy says `${toml_setting(line)}`; the rules file's applies"
 		}
 	}
 	return out

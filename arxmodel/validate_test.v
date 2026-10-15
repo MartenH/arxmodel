@@ -9,12 +9,15 @@ fn vdata(p ...string) string {
 	return os.join_path(@VMODROOT, ...parts)
 }
 
+// vpolicy is the built-in policy with keys added to its [severity] table.
 fn vpolicy(extra string) Policy {
-	return parse_policy(default_policy_text + '\n' + extra) or { panic(err) }
+	return parse_policy(default_policy_text.replace('\n[severity]\n', '\n[severity]\n${extra}\n')) or {
+		panic(err)
+	}
 }
 
 fn test_severity_by_layer_kind_and_what() {
-	p := vpolicy('severity merge.value_differs:@DEST warning\nseverity xml_schema.missing_element ignore')
+	p := vpolicy('"merge.value_differs:@DEST" = "warning"\n"xml_schema.missing_element" = "ignore"')
 	assert p.severity(.merge, 'value_differs', '@DEST') == .warning
 	assert p.severity(.merge, 'value_differs', 'VT') == .error
 	assert p.severity(.merge, 'in_conflict', '') == .warning
@@ -22,15 +25,7 @@ fn test_severity_by_layer_kind_and_what() {
 	assert p.severity(.xml_schema, 'unsupported', '') == .warning
 	assert p.severity(.multiplicity, 'below_min', '') == .warning
 	assert p.severity(.multiplicity, 'above_max', '') == .error
-	if _ := parse_policy(default_policy_text + '\nseverity nolayer error') {
-		assert false
-	}
-	if _ := parse_policy(default_policy_text + '\nseverity merge maybe') {
-		assert false
-	}
-	if _ := parse_policy(default_policy_text + '\nseverity merge error') {
-		assert false
-	}
+	// what a policy refuses, and the messages: policy_test.v
 }
 
 fn test_findings_of_every_layer() {
@@ -64,7 +59,7 @@ fn test_severity_decides_what_fails() {
 	}
 	c := check(m, compile_schemas(m, vdata('schemas')))!
 	assert c.count(.error) == 2
-	p := vpolicy('severity merge.value_differs:SHORT-NAME warning\nseverity merge.ordered_split ignore')
+	p := vpolicy('"merge.value_differs:SHORT-NAME" = "warning"\n"merge.ordered_split" = "ignore"')
 	d := check(m, compile_schemas(m, vdata('schemas'), policy: p))!
 	assert d.count(.error) == 0 && d.count(.warning) == 1 && d.count(.ignore) == 1
 }
@@ -101,7 +96,7 @@ fn test_no_xml_finding_is_lost_past_a_cap() {
 }
 
 fn test_merge_severity_reaches_problems_in_conflict() {
-	p := vpolicy('severity merge.too_many:NOTE ignore')
+	p := vpolicy('"merge.too_many:NOTE" = "ignore"')
 	// a kind's line applies in conflict or not; else in_conflict; else the layer
 	assert p.merge_severity('too_many', 'NOTE', true) == .ignore
 	assert p.merge_severity('collision', 'X', true) == .warning
@@ -109,15 +104,6 @@ fn test_merge_severity_reaches_problems_in_conflict() {
 }
 
 fn test_unknown_severity_kinds_and_attributes_are_refused() {
-	if _ := parse_policy(default_policy_text + '\nseverity merge.colision error') {
-		assert false
-	}
-	if _ := parse_policy(default_policy_text + '\nseverity merge.value_differs: error') {
-		assert false
-	}
-	if _ := parse_policy(default_policy_text.replace('ignore_attrs UUID', 'ignore_attrs UUID,T')) {
-		assert false
-	}
 	// what flatxml cannot write is an error, not a crash
 	f := Flat{}
 	if _ := format_rules(f, Provenance{}, Settings{

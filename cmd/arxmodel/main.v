@@ -26,7 +26,7 @@
 //                                              as one document: not where check finds errors,
 //                                              unless --force
 //
-// rules, check and merge take --policy FILE, the merge policy (policy.txt, built in, by default).
+// rules, check and merge take --policy FILE, the merge policy (policy.toml, built in, by default).
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
 // found or did not compile; check exits 1 on findings the policy calls errors (and on files that
@@ -55,7 +55,7 @@ const usage = 'usage:
       meta-model (--skip-multiplicity), every reference against the AUTOSAR paths of the model
       (--skip-references; --refs-from loads more files only to resolve references against, such
       as standard or vendor definitions). Each finding is an error, a warning or ignored, as the
-      severity lines of the policy say; the counts by severity and kind are printed, then the errors
+      [severity] table of the policy says; the counts by severity and kind are printed, then the errors
       and warnings with every file and line (the first 20 of each kind, or --all); exit 1 on
       errors only. Keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
       attribute whose values may differ between fragments (namespace declarations, xsi
@@ -79,7 +79,7 @@ const usage = 'usage:
       file, and the root carries the schema location of the first file that declares the
       governing release. Nothing is written where check would exit 1 (errors, files not read or
       declaring no schema), unless --force
-  --policy FILE (rules, check, merge, get, list): the merge policy, in place of the built-in policy.txt
+  --policy FILE (rules, check, merge, get, list): the merge policy, in place of the built-in policy.toml
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU'
 
 struct Opts {

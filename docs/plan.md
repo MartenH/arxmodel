@@ -49,8 +49,8 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      are in the README.
    - **Done: rules files and policy.** The schema-derived rules as a generated file
      (`rules --emit`, `check --rules`, never committed), arxmodel's choices in a committed
-     `policy.txt`, the code left with the mechanics.
-   - **Done: severity and validation.** `severity` lines in policy.txt (error, warning, ignore;
+     policy (`policy.toml`), the code left with the mechanics.
+   - **Done: severity and validation.** Severities in the policy (error, warning, ignore;
      `check` fails on errors only); one `Finding` (layer, kind, severity, element path, every
      file:line) for the merge, the XML schema of each file ([TPS_GST_00423]) and the merged
      model's multiplicities ([constr_2502]; below the fewest its own kind).
@@ -76,11 +76,42 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      declaring a later release, are in its order now), has nothing to merge, the same 110
      multiplicity warnings and the same 1,151 reference errors, and its 1,709,633 elements have,
      one for one and in order, the merged paths of the inputs' merged view.
-   - **Next, in this order:**
-     1. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
+   - **Done: the policy in TOML.** `policy.toml` (tables `[merge]`, `[schema]`, `[references]`,
+     `[severity]`), read by vlib's `toml`; every setting required and typed, anything unknown
+     refused by name.
+   - **Next, in this order** (arxmodel is used in ordinary flows elsewhere too: merging .arxml
+     files in CI and in git merges):
+     1. *CI and git:*
+        - (a) `arxmodel diff A B`: a semantic diff by AUTOSAR path on flatxml's diff with the
+          AUTOSAR rules; file boundaries and the order of unordered roles are not changes.
+        - (b) `arxmodel merge3 BASE OURS THEIRS [-o OUT]` on flatxml's merge3 with the AUTOSAR
+          rules, conflicts reported by AUTOSAR path; on single files (git merges per file) and on
+          sets of files.
+        - (c) git integration: a merge driver and a diff driver (`.gitattributes`:
+          `*.arxml merge=arxml diff=arxml`), set up by `arxmodel git-setup`.
+        - (d) machine-readable output: JSON for check, diff and merge3; SARIF (code-scanning
+          annotations); JUnit; stable exit codes.
+        - (e) release binaries (Linux, Windows) on GitHub releases.
+        - (f) the schema in CI: none needed. Built-in identity rules, hand-written conventions
+          committed here (a SHORT-NAME names an element, ECUC values are named by their
+          DEFINITION-REF, a list of named elements is one list, anything else by place), are the
+          default for `diff`, `merge3` and the git drivers, so CI and git merges never need the
+          AUTOSAR XSD. Locally the schema may be used: `ARXMODEL_SCHEMA_DIR` or `schema_dir` in
+          the user's configuration, `--schema-dir` over both, `--no-schema` forcing the built-in
+          rules; every command says which rules it read by. A user's own XSD, or a rules file
+          generated in their infrastructure, is never shipped by us.
+     2. *Verification of a complete model* (g): a `--profile complete` severity profile in
+        policy.toml (a missing required role an error instead of a warning, and the like), and
+        semantic checks (hand-written [constr_xxxx], ECUC first): values against their
         definitions (multiplicity, range, enumeration literal); shortName uniqueness ignoring
-        case ([constr_2508]).
-     2. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
+        case ([constr_2508]). All reported through the same `Finding` and CI outputs.
+     3. *Editing by AUTOSAR path* (h), on flatxml's merged-view edits (each change lands in its
+        source file, untouched bytes kept): `arxmodel set <path>#ELEM value`, `add` and `remove`
+        (a new element goes to a named file or beside its siblings), `rename <path> <new>`
+        rewriting every reference to it across all files, and edit scripts (a TOML or JSON list
+        of operations) for CI. The model is checked after editing, and nothing is written if the
+        edit introduces errors (unless `--force`).
+     4. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
         model, the elements one ECU needs with their reference closure, the software
         composition flattened to one root composition with its connectors rerouted, and a
         FlatMap (FlatInstanceDescriptor) recording the original instance paths. Checked against
@@ -89,6 +120,22 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
 3. `diff`, `merge`, `check` as commands.
 4. Edits and writing back.
 5. Used by blobly_net's ARXML import, which today reads one file through a reader of its own.
+
+## End goal: blobly_net's ARXML import on the merged model
+
+blobly_net's ARXML importer moves onto arxmodel's merged model: a system is scattered over many
+files (network management in a file of its own, for one), which a one-file reader cannot see
+whole. The steps come after the roadmap above, or between its steps as each becomes ready:
+
+1. *A mode with no XSD.* A single file needs no merge rules; several files fall back to keying
+   every element that has a SHORT-NAME by it, a general convention rather than one read from the
+   schema.
+2. *A communication extraction layer:* clusters, frames, PDUs, I-signals, compu methods, E2E and
+   SecOC, senders and receivers, producing what blobly_net's candb needs, with blobly_net's
+   existing extraction rules ported onto arxmodel's handles.
+3. *A parity test* against blobly_net's current importer and cantools.
+4. *arxmodel public* (the user confirms then).
+5. *The switch:* blobly_net imports through arxmodel.
 
 ## Verification
 

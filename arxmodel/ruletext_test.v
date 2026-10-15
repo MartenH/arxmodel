@@ -132,11 +132,13 @@ fn test_newer_releases_and_another_policy_are_said() {
 		...pv
 		schema: 'LIB_3.xsd'
 	}
-	mut p := parse_policy(default_policy_text.replace('absent_keys empty', 'absent_keys own').replace('key_case ignore',
-		'key_case exact'))!
+	mut p := parse_policy(default_policy_text.replace('absent_keys = "empty"', 'absent_keys = "own"').replace('key_case = "ignore"',
+		'key_case = "exact"'))!
 	diff := rules_file_check(declare_schemas(m), newest, st, p)!
 	assert diff.len == 2
-	assert diff.any(it.contains('absent_keys')) && diff.any(it.contains('key_case'))
+	// named as the policy file spells them
+	assert diff.any(it.contains('`[merge] absent_keys = "empty"`; the policy says `[merge] absent_keys = "own"`'))
+	assert diff.any(it.contains('`[merge] key_case = "ignore"`; the policy says `[merge] key_case = "exact"`'))
 	// comments and line endings are not settings
 	p = parse_policy(default_policy_text.replace('\n', '\r\n') + '# another comment\n')!
 	assert rules_file_check(declare_schemas(m), newest, st, p)!.len == 0
