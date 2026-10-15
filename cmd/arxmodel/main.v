@@ -9,11 +9,17 @@
 //                                              as flatxml rule text
 //   arxmodel check (--schema-dir DIR | --rules FILE) [--all] [--case-sensitive]
 //                  [--ignore-attr NAME]... [--check-attr NAME]... [--skip-xml]
-//                  [--skip-multiplicity] [--jobs N] <file|dir>...
+//                  [--skip-multiplicity] [--skip-references] [--refs-from <file|dir>]...
+//                  [--jobs N] <file|dir>...
 //                                              merge the files by the rules of the governing
-//                                              schema (or a rules file) and check them in three
+//                                              schema (or a rules file) and check them in four
 //                                              layers: the merge, each file against its XML
-//                                              schema, the merged model's multiplicities
+//                                              schema, the merged model's multiplicities, its
+//                                              references
+//   arxmodel get (--schema-dir DIR | --rules FILE) <path> <file|dir>...
+//   arxmodel list (--schema-dir DIR | --rules FILE) <ELEMENT> <file|dir>...
+//                                              the merged element at an AUTOSAR path; the paths
+//                                              of every referrable element of a name
 //
 // rules and check take --policy FILE, the merge policy (policy.txt, built in, by default).
 //
@@ -36,11 +42,14 @@ const usage = 'usage:
       as tab-separated lines (FILE, or - for standard output, the summary then going to
       standard error)
   arxmodel check --schema-dir DIR [--all] [--case-sensitive] [--ignore-attr NAME]...
-                 [--check-attr NAME]... [--skip-xml] [--skip-multiplicity] [--jobs N] <file|dir>...
+                 [--check-attr NAME]... [--skip-xml] [--skip-multiplicity] [--skip-references]
+                 [--refs-from <file|dir>]... [--jobs N] <file|dir>...
       merge the files into one model by the rules of the newest declared release (or the newest
-      at hand) and check it in three layers: what the merge rules forbid, each file against its
+      at hand) and check it in four layers: what the merge rules forbid, each file against its
       XML schema (--skip-xml; --jobs threads), the count of each role in the merged model against the
-      meta-model (--skip-multiplicity). Each finding is an error, a warning or ignored, as the
+      meta-model (--skip-multiplicity), every reference against the AUTOSAR paths of the model
+      (--skip-references; --refs-from loads more files only to resolve references against, such
+      as standard or vendor definitions). Each finding is an error, a warning or ignored, as the
       severity lines of the policy say; the counts by severity and kind are printed, then the errors
       and warnings with every file and line (the first 20 of each kind, or --all); exit 1 on
       errors only. Keys ignore ASCII case unless --case-sensitive; --ignore-attr names an
@@ -52,7 +61,13 @@ const usage = 'usage:
   arxmodel check --rules FILE ... <file|dir>...
       merge by a rules file instead of compiling the schema (the merge layer only); warns when
       the files declare a newer release than the file was made from
-  --policy FILE (rules, check): the merge policy, in place of the built-in policy.txt'
+  arxmodel get (--schema-dir DIR | --rules FILE) [--jobs N] <path> <file|dir>...
+      the merged element at an AUTOSAR path (/Pkg/Name): its element and every file and line;
+      every element holding it, where the merge keeps two apart
+  arxmodel list (--schema-dir DIR | --rules FILE) [--jobs N] <ELEMENT-NAME> <file|dir>...
+      the AUTOSAR path of every referrable element of that name
+  --policy FILE (rules, check, get, list): the merge policy, in place of the built-in policy.txt
+  --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU'
 
 struct Opts {
 mut:
@@ -69,6 +84,8 @@ mut:
 	policy     string   // the policy file; '' for the built-in one
 	skip_xml   bool     // check: no XML schema layer
 	skip_mult  bool     // check: no multiplicity layer
+	skip_refs  bool     // check: no reference layer
+	refs_from  []string // check: files loaded only to resolve references against
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -89,8 +106,10 @@ fn main() {
 		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
 			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
-				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity']
+				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity',
+				'--skip-references', '--refs-from']
 		}
+		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--policy'] }
 		else { []string{} }
 	}
 	for a in opts.given {
@@ -99,13 +118,27 @@ fn main() {
 			exit(2)
 		}
 	}
-	if args[0] == 'check' && opts.schema_dir != '' && opts.rules_file != '' {
-		eprintln('check takes --schema-dir or --rules, not both')
+	if args[0] in ['check', 'get', 'list'] && opts.schema_dir != '' && opts.rules_file != '' {
+		eprintln('${args[0]} takes --schema-dir or --rules, not both')
 		exit(2)
 	}
 	match args[0] {
 		'load' {
 			cmd_load(opts)
+		}
+		'get' {
+			if opts.schema_dir == '' && opts.rules_file == '' {
+				eprintln('get needs --schema-dir or --rules')
+				exit(2)
+			}
+			cmd_get(opts)
+		}
+		'list' {
+			if opts.schema_dir == '' && opts.rules_file == '' {
+				eprintln('list needs --schema-dir or --rules')
+				exit(2)
+			}
+			cmd_list(opts)
 		}
 		'check' {
 			if opts.schema_dir == '' && opts.rules_file == '' {
@@ -161,7 +194,10 @@ fn parse_opts(args []string) !Opts {
 			'--skip-multiplicity' {
 				o.skip_mult = true
 			}
-			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy' {
+			'--skip-references' {
+				o.skip_refs = true
+			}
+			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -172,6 +208,7 @@ fn parse_opts(args []string) !Opts {
 					'--emit' { o.emit = v }
 					'--rules' { o.rules_file = v }
 					'--policy' { o.policy = v }
+					'--refs-from' { o.refs_from << v }
 					else { o.dump = v }
 				}
 				k += 2
@@ -472,18 +509,11 @@ fn emit_rules(out Out, sc &arxmodel.Schemas, path string) {
 	out.line('wrote ${flat.rules.rules.len} rules of ${name} to ${path}')
 }
 
-fn cmd_check(o Opts) {
-	out := Out{}
+// merged loads the files and merges them, by the schema or a rules file, running the layers
+// the options leave in; it says what it read on out.
+fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmodel.Schemas, arxmodel.Checked, time.Duration) {
 	m := load_or_exit(o, out)
 	policy := load_policy(o)
-	opts := arxmodel.CheckOptions{
-		jobs:              o.jobs
-		skip_xml:          o.skip_xml
-		skip_multiplicity: o.skip_mult
-		case_sensitive:    o.exact
-		ignore_attrs:      o.ignore
-		compare_attrs:     o.compare
-	}
 	mut sw := time.new_stopwatch()
 	mut c := arxmodel.Checked{}
 	mut sc := arxmodel.Schemas{}
@@ -507,7 +537,9 @@ fn cmd_check(o Opts) {
 		for w in warnings {
 			out.line('warning: ${w}')
 		}
-		out.line('the XML schema and multiplicity layers need the schema (--schema-dir); not checked')
+		if !(opts.skip_xml && opts.skip_multiplicity && opts.skip_references) {
+			out.line('the XML schema, multiplicity and reference layers need the schema (--schema-dir); not checked')
+		}
 		sw = time.new_stopwatch()
 		c = arxmodel.check_with(m, flat, pv.schema, st, policy, opts) or {
 			out.line(err.msg())
@@ -531,7 +563,90 @@ fn cmd_check(o Opts) {
 			exit(1)
 		}
 	}
-	took := sw.elapsed()
+	return m, sc, c, sw.elapsed()
+}
+
+// cmd_get prints the merged element at an AUTOSAR path: its element, and each file and line it
+// is made of.
+fn cmd_get(o Opts) {
+	out := Out{}
+	if o.paths.len < 2 {
+		eprintln('get needs a path and the files')
+		exit(2)
+	}
+	path := o.paths[0]
+	mut rest := o
+	rest.paths = o.paths[1..]
+	_, _, c, _ := merged(rest, Out{
+		err: true
+	}, all_skipped())
+	hs := c.index.holders(path)
+	if hs.len == 0 {
+		eprintln('nothing at ${path}')
+		exit(1)
+	}
+	if hs.len > 1 {
+		out.line('${path}: held by ${hs.len} elements, which the merge keeps apart')
+	}
+	mut v := c.view
+	for k in hs {
+		n := v.node(k)
+		out.line('${c.index.path_of[k]}: ${n.name()}, ${plural(n.fragment_count(), 'element')}, ${n.child_count()} below it')
+		for f in n.fragments() {
+			out.line('  ${v.pos(f)}')
+		}
+	}
+}
+
+// cmd_list prints the AUTOSAR path of every referrable element of one element name, a path held
+// by two such elements once for each.
+fn cmd_list(o Opts) {
+	out := Out{}
+	if o.paths.len < 2 {
+		eprintln('list needs an element name and the files')
+		exit(2)
+	}
+	kind := o.paths[0]
+	mut rest := o
+	rest.paths = o.paths[1..]
+	_, _, c, _ := merged(rest, Out{
+		err: true
+	}, all_skipped())
+	mut paths := []string{}
+	for k, p in c.index.path_of {
+		if c.view.node(k).name() == kind {
+			paths << p
+		}
+	}
+	paths.sort()
+	for p in paths {
+		out.line(p)
+	}
+	eprintln('${plural(paths.len, kind)}')
+}
+
+fn all_skipped() arxmodel.CheckOptions {
+	return arxmodel.CheckOptions{
+		skip_xml:          true
+		skip_multiplicity: true
+		skip_references:   true
+	}
+}
+
+fn cmd_check(o Opts) {
+	out := Out{}
+	opts := arxmodel.CheckOptions{
+		jobs:              o.jobs
+		skip_xml:          o.skip_xml
+		skip_multiplicity: o.skip_mult
+		skip_references:   o.skip_refs
+		refs_from:         o.refs_from
+		case_sensitive:    o.exact
+		ignore_attrs:      o.ignore
+		compare_attrs:     o.compare
+	}
+	m, sc, c, took := merged(o, out, opts)
+
 	f := c.flat
 	used := f.used()
 	unused := f.unused()
@@ -543,12 +658,33 @@ fn cmd_check(o Opts) {
 	}
 	out.line('${c.elements} elements merged into ${c.view.len()} nodes; ${c.merged} nodes made of more than one element, ${c.within} of them of two or more in one document')
 	mut layers := []string{}
-	for l in ['merge', 'xml_schema', 'multiplicity'] {
+	for l in ['merge', 'paths', 'xml_schema', 'multiplicity', 'reference'] {
 		if t := c.times[l] {
 			layers << '${l} ${ms(t)}'
 		}
 	}
 	out.line('checked in ${ms(took)}: ${layers.join(', ')}')
+	out.line('${c.index.path_of.len} referrable elements indexed by ${c.index.by_path.len} AUTOSAR paths (${c.index.dup.len} held by more than one); ${c.refs.checked} references checked${if c.refs_from_files > 0 {
+		', against ' + plural(c.refs_from_files, 'file') + ' loaded only to resolve them as well'
+	} else {
+		''
+	}}')
+	// the unresolved and external references by the top-level package they point into
+	for kind in ['external', 'unresolved'] {
+		mut tops := []string{}
+		for k, _ in c.refs.by_top {
+			if k.starts_with(kind + ' ') {
+				tops << k
+			}
+		}
+		if tops.len == 0 {
+			continue
+		}
+		tops.sort_with_compare(fn [c] (a &string, b &string) int {
+			return c.refs.by_top[*b] - c.refs.by_top[*a]
+		})
+		out.line('${kind} references by top-level package: ${tops.map('${it.all_after(' ')} ${c.refs.by_top[it]}').join(', ')}')
+	}
 	if c.unchecked_roles > 0 {
 		out.line("${c.unchecked_roles} occurrences of roles whose wrapper holds its items' content with no element per item: their counts not checked")
 	}

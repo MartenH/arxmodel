@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd">
+  <SHELVES>
+    <SHELF>
+      <SHORT-NAME>Fiction</SHORT-NAME>
+      <ITEMS>
+        <BOOK><SHORT-NAME>Dune</SHORT-NAME><PICK-REF>not a reference</PICK-REF></BOOK>
+        <MAGAZINE><SHORT-NAME>Analog</SHORT-NAME></MAGAZINE>
+      </ITEMS><LOANS><LOAN><BORROWER-REF>Ann</BORROWER-REF></LOAN></LOANS>
+      <PICK-REF DEST="BOOK">/Fiction/Dune</PICK-REF>
+      <PICK-REF DEST="BOOK">/Fiction/Analog</PICK-REF>
+      <PICK-REF DEST="SHELF">/Fiction</PICK-REF>
+      <PICK-REF DEST="BOOK">/Fiction/Missing</PICK-REF>
+      <PICK-REF DEST="BOOK" BASE="Library">Dune</PICK-REF>
+      <PICK-REF DEST="BOOK">Dune</PICK-REF>
+      <PICK-REF DEST="NAMED">/Fiction/Dune</PICK-REF>
+      <PICK-REF DEST="VARIABLE">/Fiction/Dune</PICK-REF>
+      <PICK-REF DEST="BOOK">/FICTION/DUNE</PICK-REF>
+      <PICK-REF DEST="BOOK"></PICK-REF>
+      <PICK-REF DEST="BOOK">/Elsewhere/Atlas</PICK-REF>
+      <PICK-REF DEST="MAGAZINE">/Poetry/Odes</PICK-REF>
+    </SHELF>
+    <SHELF>
+      <SHORT-NAME>Poetry</SHORT-NAME>
+      <ITEMS>
+        <BOOK><SHORT-NAME>Odes</SHORT-NAME></BOOK>
+      </ITEMS>
+      <VARIATION-POINT><SHORT-LABEL>A</SHORT-LABEL></VARIATION-POINT>
+    </SHELF>
+    <SHELF>
+      <SHORT-NAME>Poetry</SHORT-NAME>
+      <ITEMS>
+        <MAGAZINE><SHORT-NAME>Odes</SHORT-NAME></MAGAZINE>
+      </ITEMS>
+      <VARIATION-POINT><SHORT-LABEL>B</SHORT-LABEL></VARIATION-POINT>
+    </SHELF>
+  </SHELVES>
+</LIBRARY>

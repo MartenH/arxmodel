@@ -9,8 +9,10 @@ import runtime
 // xml_findings checks each document against the XML schema it declares, or the governing one
 // where its own is not at hand: every partial model must be valid on its own ([TPS_GST_00423]).
 // Documents are checked in parallel; a schema is only read. Also returns how many documents were
-// checked against the governing schema because their own is not at hand.
-pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]Finding, int) {
+// checked against the governing schema because their own is not at hand. Each finding comes with
+// the document and element it is on (doc -1 when it is on no element); its path is the element's
+// names from the root, which check replaces by the merged node's AUTOSAR path.
+pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]XmlFound, int) {
 	mut gov := &xsd.Schema(unsafe { nil })
 	if u := governing_use(sc) {
 		gov = u.schema
@@ -33,19 +35,27 @@ pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]Finding, int) {
 	} else {
 		jobs
 	}
-	mut threads := []thread []Finding{}
+	mut threads := []thread []XmlFound{}
 	for w in 0 .. jobs {
 		threads << spawn validate_every(m, schema_of, w, jobs, sc.policy)
 	}
-	mut out := []Finding{}
+	mut out := []XmlFound{}
 	for t in threads {
 		out << t.wait()
 	}
 	return out, fallback
 }
 
-fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Policy) []Finding {
-	mut out := []Finding{}
+// XmlFound is an XML schema finding and the element it is on.
+pub struct XmlFound {
+pub:
+	finding Finding
+	doc     int = -1
+	node    u32
+}
+
+fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Policy) []XmlFound {
+	mut out := []XmlFound{}
 	for k := first; k < m.set.docs.len; k += step {
 		s := schema_of[k]
 		if s == unsafe { nil } {
@@ -54,12 +64,14 @@ fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Poli
 		mut d := m.set.docs[k]
 		// every finding kept: one past a cap would be an error lost
 		v := xsd.validate(mut d, s, max_findings: max_i32) or {
-			out << Finding{
-				layer:    .xml_schema
-				kind:     'not_checked'
-				severity: p.severity(.xml_schema, 'not_checked', '')
-				path:     d.path
-				message:  err.msg()
+			out << XmlFound{
+				finding: Finding{
+					layer:    .xml_schema
+					kind:     'not_checked'
+					severity: p.severity(.xml_schema, 'not_checked', '')
+					path:     d.path
+					message:  err.msg()
+				}
 			}
 			continue
 		}
@@ -68,14 +80,18 @@ fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Poli
 			kind := '${f.kind}'
 			line, col := lines.line_col(d.src_off[f.node])
 			what := d.name(f.node)
-			out << Finding{
-				layer:    .xml_schema
-				kind:     kind
-				what:     what
-				severity: p.severity(.xml_schema, kind, what)
-				path:     doc_path(d, f.node)
-				message:  f.msg
-				at:       ['${d.path}:${line}:${col}']
+			out << XmlFound{
+				finding: Finding{
+					layer:    .xml_schema
+					kind:     kind
+					what:     what
+					severity: p.severity(.xml_schema, kind, what)
+					path:     '#' + doc_names(d, f.node)
+					message:  f.msg
+					at:       ['${d.path}:${line}:${col}']
+				}
+				doc:     k
+				node:    f.node
 			}
 		}
 	}
@@ -92,7 +108,7 @@ fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Poli
 // What the merge already reported on a role (too many, a collision) is not said again. A wrapper
 // holding its items' content has no element per item to count: such roles are not checked, and
 // counted as such.
-pub fn (rs &RuleSet) multiplicity_findings(mut v flatxml.Merged, p Policy) ([]Finding, int) {
+pub fn (rs &RuleSet) multiplicity_findings(mut v flatxml.Merged, ix &PathIndex, p Policy) ([]Finding, int) {
 	s := rs.schema
 	tab := v.set.tab
 	// per complex type: the roles held; per complex type and child name id: the child's type
@@ -193,10 +209,10 @@ pub fn (rs &RuleSet) multiplicity_findings(mut v flatxml.Merged, p Policy) ([]Fi
 			}
 			decl := rs.outer_of[r.decl] or { r.decl }
 			if count < r.min && (u64(ct) << 32 | decl) !in alternative {
-				out << rs.count_finding(mut v, n, r, 'below_min', 'fewer than the fewest, ${r.min}: ${count}', p)
+				out << rs.count_finding(mut v, ix, n, r, 'below_min', 'fewer than the fewest, ${r.min}: ${count}', p)
 			} else if r.max != unbounded && count > r.max
 				&& !rs.merge_said(kids, wrapper_id[k], n, r, reported) {
-				out << rs.count_finding(mut v, n, r, 'above_max', 'more than the most, ${r.max}: ${count}', p)
+				out << rs.count_finding(mut v, ix, n, r, 'above_max', 'more than the most, ${r.max}: ${count}', p)
 			}
 		}
 		for c in kids {
@@ -210,13 +226,13 @@ pub fn (rs &RuleSet) multiplicity_findings(mut v flatxml.Merged, p Policy) ([]Fi
 	return out, unchecked
 }
 
-fn (rs &RuleSet) count_finding(mut v flatxml.Merged, n flatxml.MNode, r Rule, kind string, msg string, p Policy) Finding {
+fn (rs &RuleSet) count_finding(mut v flatxml.Merged, ix &PathIndex, n flatxml.MNode, r Rule, kind string, msg string, p Policy) Finding {
 	return Finding{
 		layer:    .multiplicity
 		kind:     kind
 		what:     r.element
 		severity: p.severity(.multiplicity, kind, r.element)
-		path:     merged_path(n)
+		path:     merged_path(n, ix)
 		message:  '${r.name} (${r.element}): ${msg}'
 		at:       n.fragments().map(v.pos(it))
 	}
@@ -251,4 +267,15 @@ fn (rs &RuleSet) merge_said(kids []flatxml.MNode, wrapper u32, n flatxml.MNode, 
 		}
 	}
 	return false
+}
+
+// doc_names is an element's names from its document's root, `A/B/C`.
+fn doc_names(d &flatxml.Doc, i u32) string {
+	mut names := []string{}
+	mut cur := d.node(i)
+	for cur.ok() {
+		names << cur.name()
+		cur = cur.parent()
+	}
+	return names.reverse().join('/')
 }

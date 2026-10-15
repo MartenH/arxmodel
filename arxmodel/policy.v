@@ -30,6 +30,7 @@ pub mut:
 	ignore_declarations      bool = true
 	item_itself              ItemItself
 	repeated_choice_as_mixed bool = true
+	package_element          string = 'AR-PACKAGE'
 	// a finding's severity by `layer`, `layer.kind` or `layer.kind:what`; error where unset
 	severities map[string]Severity
 	text       string // the text it was read from
@@ -152,13 +153,19 @@ pub fn parse_policy(text string) !Policy {
 			'file_info_comment' {
 				one(['compare'])!
 			}
+			'package_element' {
+				if args.len != 1 {
+					return error('policy line ${n + 1}: `${name}` takes one element name')
+				}
+				p.package_element = args[0]
+			}
 			else {
 				return error('policy line ${n + 1}: unknown setting `${name}`')
 			}
 		}
 	}
 	for need in ['absent_keys', 'key_case', 'ignore_attrs', 'ignore_declarations', 'item_itself',
-		'governing', 'splittable', 'repeated_choice_as_mixed', 'file_info_comment'] {
+		'governing', 'splittable', 'repeated_choice_as_mixed', 'file_info_comment', 'package_element'] {
 		if need !in seen {
 			return error('policy: `${need}` is not set')
 		}

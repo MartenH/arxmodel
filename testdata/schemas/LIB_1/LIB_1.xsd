@@ -178,6 +178,10 @@
                </xsd:choice>
             </xsd:complexType>
          </xsd:element>
+         <!-- a reference: what it points at is named by DEST, of the kinds its type allows -->
+         <xsd:element name="PICK-REF" type="L:ITEM-REF" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Shelf.pick";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
          <xsd:element name="BROKEN-KEYS" minOccurs="0">
             <xsd:annotation>
                <xsd:appinfo source="tags">atp.Splitkey="broken.variatioPoint.shortLabel, broken.variationPoint.ShortLabel, broken.context.shortName";mmt.qualifiedName="Shelf.broken";pureMM.maxOccurs="-1";pureMM.minOccurs="0";foo.bar="1"</xsd:appinfo>
@@ -226,6 +230,23 @@
             </xsd:annotation>
          </xsd:element>
       </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:simpleType name="ITEM-KIND">
+      <xsd:restriction base="xsd:string">
+         <xsd:enumeration value="BOOK"/>
+         <xsd:enumeration value="MAGAZINE"/>
+         <xsd:enumeration value="NAMED"/>
+         <xsd:enumeration value="VARIABLE"/>
+      </xsd:restriction>
+   </xsd:simpleType>
+   <xsd:complexType name="ITEM-REF">
+      <xsd:simpleContent>
+         <xsd:extension base="xsd:string">
+            <xsd:attribute name="DEST" type="L:ITEM-KIND" use="required"/>
+            <xsd:attribute name="BASE" type="xsd:string"/>
+         </xsd:extension>
+      </xsd:simpleContent>
    </xsd:complexType>
 
    <xsd:complexType name="COPY">
@@ -310,6 +331,10 @@
    <xsd:complexType name="BOOK">
       <xsd:sequence>
          <xsd:group ref="L:NAMED"/>
+         <!-- named like the shelf's reference role, plain text here -->
+         <xsd:element name="PICK-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Book.pick";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
          <!-- ITEMS again: MAGAZINE by another rule than on a shelf, and LEAFLET only here -->
          <xsd:element name="ITEMS" minOccurs="0">
             <xsd:annotation>

@@ -1,12 +1,11 @@
 module arxmodel
 
-import flatxml
-
 // Layer is what a finding comes from.
 pub enum Layer {
 	merge        // putting the files together by the merge rules
 	xml_schema   // one file against its XML schema
 	multiplicity // a role's count in the merged model against the meta-model's
+	reference    // a reference against the element at its path
 }
 
 // Severity is what a finding means for a check: an error fails it, a warning is said, an
@@ -85,34 +84,6 @@ pub const known_kinds = {
 		'duplicate_id', 'unknown_idref', 'unbound_prefix', 'unexpected_element', 'missing_element',
 		'unsupported', 'not_checked']
 	'multiplicity': ['below_min', 'above_max']
-}
-
-// merged_path is a merged node's path: its ancestors' and its own names, each with its key where
-// it has one (`AR-PACKAGE[Pkg]`).
-pub fn merged_path(n flatxml.MNode) string {
-	mut parts := []string{}
-	mut cur := n
-	for cur.ok() {
-		k := cur.key()
-		parts << if flatxml.empty_key(k) {
-			cur.name()
-		} else {
-			'${cur.name()}[${flatxml.show_key(k)}]'
-		}
-		cur = cur.parent()
-	}
-	return '/' + parts.reverse().join('/')
-}
-
-// doc_path is an element's path in its document: its ancestors' and its own names, with the
-// SHORT-NAME where an element has one, which is how a reader finds it again.
-pub fn doc_path(d &flatxml.Doc, i u32) string {
-	mut parts := []string{}
-	mut cur := d.node(i)
-	for cur.ok() {
-		sn := cur.child('SHORT-NAME').text()
-		parts << if sn == '' { cur.name() } else { '${cur.name()}[${sn}]' }
-		cur = cur.parent()
-	}
-	return '/' + parts.reverse().join('/')
+	'reference':    ['unresolved', 'external', 'wrong_kind', 'case_mismatch', 'empty', 'relative',
+		'duplicate_path']
 }

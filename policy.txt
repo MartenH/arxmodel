@@ -41,6 +41,12 @@ repeated_choice_as_mixed yes
 # are reported. Differs from [TPS_GST_00382], which allows it to be ignored when merging.
 file_info_comment compare
 
+# The element that is a package. A reference whose target is missing and whose nearest existing
+# ancestor is a package (or which has none) points at definitions not loaded: `external`; one
+# whose nearest existing ancestor is any other element points into content that is loaded:
+# `unresolved`.
+package_element AR-PACKAGE
+
 # Multi-valued primitive values keyed by themselves merge when identical, and non-splittable
 # collections repeated across fragments are each kept (keyed ones report a collision): both
 # follow from the rules above, not settings. They differ from [TPS_GST_00449] and from
@@ -51,7 +57,7 @@ file_info_comment compare
 # `severity <layer>[.<kind>[:<element or @attribute>]] error|warning|ignore`; the most specific one
 # applies, and a finding no line names is an error. Layers: merge (the merge rules), xml_schema
 # (each file against its XML schema), multiplicity (each role's count in the merged model against
-# the meta-model).
+# the meta-model), reference (each reference against the merged model's AUTOSAR paths).
 severity merge error
 # A problem on an element pair whose holders' rules no parent path tells apart was judged by a
 # rule that may not be the pair's.
@@ -63,3 +69,18 @@ severity xml_schema.unsupported warning
 # unfinished in a process phase, so a role below its fewest is a warning ([constr_2502]).
 severity multiplicity.below_min warning
 severity multiplicity.above_max error
+# References. Nothing at the path where its top-level package is loaded, a target of another
+# kind than its DEST (or a DEST the reference may not give), or no path at all: errors. A target
+# in a top-level package no file loaded has (standard or vendor definitions not at hand, which
+# --refs-from can supply): a warning. A path found only ignoring case, as the merge compares
+# keys: a warning. A reference relative to a base (BASE, or a path not from the root) is not
+# resolved here, as the files declare no REFERENCE-BASE to resolve it by: a warning. One path
+# held by two elements the merge keeps apart: an error, short names being unique in their
+# namespace ([constr_2508]).
+severity reference.unresolved error
+severity reference.wrong_kind error
+severity reference.empty error
+severity reference.external warning
+severity reference.case_mismatch warning
+severity reference.relative warning
+severity reference.duplicate_path error

@@ -39,3 +39,5 @@ jobs:
           bin/arxmodel check --schema-dir testdata/schemas testdata/model/a.arxml testdata/model/sub/b.arxml
           bin/arxmodel rules --schema-dir testdata/schemas --emit "$RUNNER_TEMP/lib.rules.txt" testdata/model/a.arxml testdata/model/sub/b.arxml
           bin/arxmodel check --rules "$RUNNER_TEMP/lib.rules.txt" testdata/model/a.arxml testdata/model/sub/b.arxml
+          bin/arxmodel get --schema-dir testdata/schemas /Fiction/Dune testdata/refs
+          bin/arxmodel list --schema-dir testdata/schemas BOOK testdata/refs

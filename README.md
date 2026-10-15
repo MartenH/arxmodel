@@ -46,6 +46,8 @@ arxmodel rules --schema-dir DIR --problems --dump rules.tsv <file|dir>...
 arxmodel rules --schema-dir DIR --emit autosar.rules.txt <file|dir>...           # the merge rules, as a file
 arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   # merge, and what the rules forbid
 arxmodel check --rules autosar.rules.txt <file|dir>...                         # the same, by the rules file
+arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
+arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
 ```
 
 A rules file starts with a header naming the schema it came from (name, namespace, path and
@@ -170,8 +172,19 @@ the documents use that it does not declare, with counts, files and the first pos
 ## Checking (`check`)
 
 `check` merges every file into one model by the rules of the governing schema, on flatxml's
-merged view (`flatxml/merge.v`), and checks it in three layers, each finding with one shape
-(`Finding`: layer, kind, severity, element path, every file:line it involves):
+merged view (`flatxml/merge.v`), and checks it in four layers, each finding with one shape
+(`Finding`: layer, kind, severity, element path, every file:line it involves). The element path
+is an AUTOSAR path: the SHORT-NAMEs of the referrable elements above it (`/Pkg/Sub/Name`; a
+variation point is not referrable and adds nothing), then `#` and the elements below the nearest
+referrable one, each with its merge key where it has one
+(`/Pkg/C#PARAMETER-VALUES/ECUC-NUMERICAL-PARAM-VALUE[<key>]/DEFINITION-REF`), or `#` and the
+elements from the root where none is referrable. An element is referrable when its type, in the
+governing schema, is a kind of the class whose own content declares SHORT-NAME (a class being a
+named model group the type's content uses); merging from a rules file, with no schema, when it
+has a SHORT-NAME. Every referrable element is indexed by its path, compared ignoring ASCII case
+when the merge compares keys so (`key_case`); a path held by several elements the merge keeps
+apart (two variants told apart by their variation points, or two definitions whose keys differ)
+keeps every one, in document order.
 
 - **merge**: what the merge rules forbid: one key twice where the role is not splittable, a key
   used in its scope already, an ordered role in two files, too many children, two fragments whose
@@ -186,15 +199,35 @@ merged view (`flatxml/merge.v`), and checks it in three layers, each finding wit
   own there. What the merge already reported on a role (too many, a collision) is not said again.
   A wrapper holding its items' content has no element per item to count: such roles are not
   checked, and `check` says how many occurrences that left out.
-
+- **reference**: every reference resolved against the path index. An element is a reference when
+  its declaration, under its holder's type, has a type carrying a `DEST` attribute; the values
+  that attribute's type enumerates are the DESTs it may give (an element of the same name declared
+  elsewhere as plain text is not a reference). A reference resolves when any element at its path
+  is the DEST element or a kind of it (an element is a kind of every class whose group its type's
+  content uses, so a DEST naming an abstract class accepts its concrete subclasses). Otherwise:
+  `empty` (no path); `relative` (a `BASE` attribute, or a path not starting at `/`: resolving it
+  needs the REFERENCE-BASEs of its package, which this does not read, so it is reported, not
+  guessed); `wrong_kind` (a DEST the reference may not give, or no element at the path of that
+  kind); `case_mismatch` (the path found only by ignoring case); and, nothing being at the path,
+  `external` when its nearest existing ancestor is a package (the policy's `package_element`) or
+  nothing of it exists, which is a definition not loaded, else `unresolved`, a target missing from
+  an element whose content is loaded. `--refs-from <file|dir>` loads more files (standard or
+  vendor definitions) only to resolve references against: merged on their own, never reported.
+  A path held by several elements is itself a finding, `duplicate_path`. `check` prints the
+  external and unresolved references by the top-level package they point into.
 Each finding's severity comes from the policy's `severity` lines (error, warning, ignore; by layer,
 by kind, or by kind and element or `@attribute`, the most specific winning; a line naming an
-unknown kind is refused). A merge problem on an element pair in conflict keeps its kind, marked
+unknown kind is refused). The defaults for references: `unresolved`, `wrong_kind`, `empty` and
+`duplicate_path` are errors; `external`, `case_mismatch` and `relative` warnings. A merge problem on an element pair in conflict keeps its kind, marked
 `(in conflict)`: a line for its kind applies to it, else `merge.in_conflict`. No XML schema
 finding is dropped past a count; `--jobs` sets that layer's threads. `check` prints the
 counts by severity, layer and kind, then the errors and warnings (the first 20 of each kind,
-`--all` for every one), and exits 1 on errors only. `--skip-xml` and `--skip-multiplicity` leave
-a layer out; merging from a rules file has no schema, so it checks the merge layer only.
+`--all` for every one), and exits 1 on errors only. `--skip-xml`, `--skip-multiplicity` and
+`--skip-references` leave a layer out; merging from a rules file has no schema, so it checks the
+merge layer only (the path index is still built). `get` and `list` merge the same way and read
+the index: `get` prints the element's name, how many elements it is merged from and where each
+is (every one, for a path several hold), `list` the path of every referrable element of a name.
+`--jobs` sets their loading threads.
 
 flatxml names an aggregation by its parent (an element name, or a path of ancestor names) and its
 children's element names; the schema by the parent's type and the role. So each rule becomes

@@ -42,11 +42,11 @@ fn test_findings_of_every_layer() {
 	xml := c.findings.filter(it.layer == .xml_schema)
 	assert xml.len > 0
 	assert xml.any(it.kind == 'undeclared_element' && it.what == 'NOPE' && it.severity == .error
-		&& it.path == '/LIBRARY/SHELVES/SHELF/NOPE' && it.at[0].ends_with('bad.arxml:6:7'))
+		&& it.path == '#LIBRARY/SHELVES/SHELF/NOPE' && it.at[0].ends_with('bad.arxml:6:7'))
 	mult := c.findings.filter(it.layer == .multiplicity)
 	// a shelf with no SHORT-NAME: below its fewest, a warning
 	assert mult.any(it.kind == 'below_min' && it.what == 'SHORT-NAME' && it.severity == .warning
-		&& it.path == '/LIBRARY/SHELVES/SHELF')
+		&& it.path == '#LIBRARY/SHELVES/SHELF')
 	// four notes where three are the most: the merge says too_many and keeps three, so the
 	// merged model's count is within its most and nothing is said twice
 	assert c.findings.any(it.layer == .merge && it.kind == 'too_many' && it.severity == .error)
@@ -78,7 +78,7 @@ fn test_choice_alternatives_have_no_fewest_in_that_holder_only() {
 	c := check(m, compile_schemas(m, vdata('schemas')), skip_xml: true)!
 	below := c.findings.filter(it.kind == 'below_min')
 	assert below.len == 1
-	assert below[0].path == '/TOP/PLAIN' && below[0].what == 'X'
+	assert below[0].path == '#TOP/PLAIN' && below[0].what == 'X'
 }
 
 fn test_no_xml_finding_is_lost_past_a_cap() {
@@ -97,7 +97,7 @@ fn test_no_xml_finding_is_lost_past_a_cap() {
 	one, _ := xml_findings(m, sc, 1)
 	three, _ := xml_findings(m, sc, 3)
 	assert one.len >= 1500 && one.len == three.len
-	assert one.all(it.severity == .error)
+	assert one.all(it.finding.severity == .error)
 }
 
 fn test_merge_severity_reaches_problems_in_conflict() {

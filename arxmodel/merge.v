@@ -608,6 +608,8 @@ pub:
 	jobs              int      // threads for the XML schema layer; 0 for one per CPU, at most 16
 	skip_xml          bool     // no XML schema layer
 	skip_multiplicity bool     // no multiplicity layer
+	skip_references   bool     // no reference layer
+	refs_from         []string // files loaded only to resolve references against
 	case_sensitive    bool     // keys compared as written, whatever the settings say
 	ignore_attrs      []string // attributes that may differ, besides the settings'
 	compare_attrs     []string // attributes the settings let differ that are compared after all
@@ -661,6 +663,12 @@ pub mut:
 	xml_fallback int
 	// occurrences of roles the multiplicity layer could not count (wrappers of item content)
 	unchecked_roles int
+	// the referrable elements by AUTOSAR path, and what the reference layer counted
+	index  &PathIndex = unsafe { nil }
+	typing &Typing = unsafe { nil }
+	refs   RefStats
+	// files loaded only to resolve references against
+	refs_from_files int
 	// how long each layer took
 	times map[string]time.Duration
 }
@@ -704,22 +712,59 @@ pub fn with_settings(rs flatxml.RuleSet, fold bool, ignore []string) flatxml.Rul
 // model's multiplicities against the meta-model (each layer unless skipped).
 pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	flat, name := governing_flat(sc)!
-	mut c := check_with(m, flat, name, sc.policy.settings(), sc.policy, opts)!
+	gov := governing_use(sc)!
+	mut ty := new_typing(gov.schema)
+	mut c := check_typed(m, flat, name, sc.policy.settings(), sc.policy, opts, ty)!
 	if !opts.skip_xml {
 		sw := time.new_stopwatch()
 		found, fallback := xml_findings(m, sc, opts.jobs)
-		c.findings << found
+		// a finding's path: the merged node its element went into, else the element's names
+		for f in found {
+			mut path := f.finding.path
+			if f.doc >= 0 {
+				d := m.set.docs[f.doc]
+				path = if mn := merged_of(c.view, d, f.node) {
+					merged_path(mn, c.index)
+				} else {
+					'#' + doc_names(d, f.node)
+				}
+			}
+			c.findings << Finding{
+				...f.finding
+				path: path
+			}
+		}
 		c.xml_fallback = fallback
 		c.times['xml_schema'] = sw.elapsed()
 	}
 	if !opts.skip_multiplicity {
 		sw := time.new_stopwatch()
-		gov := governing_use(sc)!
 		mut v := c.view
-		found, unchecked := gov.rules.multiplicity_findings(mut v, sc.policy)
+		found, unchecked := gov.rules.multiplicity_findings(mut v, c.index, sc.policy)
 		c.findings << found
 		c.unchecked_roles = unchecked
 		c.times['multiplicity'] = sw.elapsed()
+	}
+	if !opts.skip_references {
+		sw := time.new_stopwatch()
+		mut extra := []RefView{}
+		if opts.refs_from.len > 0 {
+			mx := load(opts.refs_from)!
+			c.refs_from_files = mx.set.docs.len
+			cx := check_typed(mx, flat, name, sc.policy.settings(), sc.policy, CheckOptions{
+				...opts
+				refs_from: []
+			}, ty)!
+			extra << RefView{
+				view: cx.view
+				ix:   cx.index
+			}
+		}
+		mut v := c.view
+		found, stats := reference_findings(mut v, c.index, mut ty, extra, sc.policy)
+		c.findings << found
+		c.refs = stats
+		c.times['reference'] = sw.elapsed()
 	}
 	return c
 }
@@ -727,12 +772,23 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 // check_with merges m's documents by the rules given (from the schema, or a rules file), with
 // the settings given and the overrides; the policy gives the findings their severities.
 pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, opts CheckOptions) !Checked {
+	return check_typed(m, flat0, source, st, p, opts, unsafe { nil })
+}
+
+// check_typed is check_with, the referrable elements and references known from the schema's
+// types where ty is given.
+fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts CheckOptions, ty &Typing) !Checked {
 	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
 	flat.rules = with_settings(flat0.rules, fold, ignore)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
+	msw := time.new_stopwatch()
+	typed := ty != unsafe { nil }
+	mut typing := if typed { ty } else { &Typing{} }
+	index := index_paths(view, mut typing, typed, fold)
+	paths_took := msw.elapsed()
 	mut merged, mut within := 0, 0
 	for i in 0 .. view.len() {
 		n := view.node(u32(i))
@@ -785,13 +841,14 @@ pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, op
 			what:        pr.what
 			in_conflict: in_conflict[k]
 			severity:    p.merge_severity(kind, pr.what, in_conflict[k])
-			path:        merged_path(view.node(pr.node))
+			path:        merged_path(view.node(pr.node), index)
 			message:     problem_message(mut view, pr)
 			at:          pr.at.map(view.pos(it))
 		}
 	}
 	mut times := map[string]time.Duration{}
-	times['merge'] = sw.elapsed()
+	times['merge'] = sw.elapsed() - paths_took
+	times['paths'] = paths_took
 	return Checked{
 		governing:   source
 		flat:        flat
@@ -803,6 +860,8 @@ pub fn check_with(m &Model, flat0 Flat, source string, st Settings, p Policy, op
 		within:      within
 		findings:    findings
 		times:       times
+		index:       index
+		typing:      if typed { ty } else { unsafe { nil } }
 	}
 }
 

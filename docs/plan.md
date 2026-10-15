@@ -54,16 +54,20 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      `check` fails on errors only); one `Finding` (layer, kind, severity, element path, every
      file:line) for the merge, the XML schema of each file ([TPS_GST_00423]) and the merged
      model's multiplicities ([constr_2502]; below the fewest its own kind).
+   - **Done: references.** AUTOSAR paths for every referrable element (by the schema's
+     classes) and an index from path to every merged node holding it (finding paths are
+     AUTOSAR paths with merge keys below); every reference (a declaration whose type has a DEST
+     attribute) resolved: `unresolved`, `external` (definitions not loaded; `--refs-from` loads
+     them only to resolve against), `wrong_kind`, `case_mismatch`, `empty`, `relative` (BASE,
+     not resolved), `duplicate_path`; `get`, `list`.
    - **Next, in this order:**
-     1. *References*: AUTOSAR paths, every `*-REF` resolved by its DEST; unresolved and
-        wrong-kind references reported.
-     2. *Export* of the merged model as one ARXML (needs flatxml to write a merged view):
+     1. *Export* of the merged model as one ARXML (needs flatxml to write a merged view):
         `arxmodel merge -o model.arxml`, conflicts resolved by the policy, untouched subtrees
         byte for byte.
-     3. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
+     2. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
         definitions (multiplicity, range, enumeration literal); shortName uniqueness ignoring
         case ([constr_2508]).
-     4. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
+     3. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
         model, the elements one ECU needs with their reference closure, the software
         composition flattened to one root composition with its connectors rerouted, and a
         FlatMap (FlatInstanceDescriptor) recording the original instance paths. Checked against
