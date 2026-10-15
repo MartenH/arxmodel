@@ -9,6 +9,10 @@ import os
 // header that says where they came from. The file is derived from an AUTOSAR schema, so it is
 // made on the user's machine and never committed.
 
+// rules_format is the version of the rules file's format this arxmodel writes and reads. A file
+// of another format is refused: its rules are not in the order this one merges and writes by.
+pub const rules_format = 2
+
 // version is arxmodel's version, from v.mod.
 pub const version = vmod_version(@VMOD_FILE)
 
@@ -66,6 +70,7 @@ pub fn provenance(u &SchemaUse, p Policy) Provenance {
 pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	mut out := []string{}
 	out << '# arxmodel merge rules, generated on this machine from an AUTOSAR schema: do not commit.'
+	out << '# format: ${rules_format}'
 	out << '# schema: ${pv.schema}'
 	out << '# namespace: ${pv.namespace}'
 	out << '# schema-path: ${pv.schema_path}'
@@ -93,6 +98,7 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	mut pv := Provenance{}
 	mut f := Flat{}
 	mut st := Settings{}
+	mut format := ''
 	for line in text.split_into_lines() {
 		if !line.starts_with('# ') {
 			continue
@@ -101,6 +107,7 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 		name := body.all_before(':')
 		value := body.all_after(':').trim_space()
 		match name {
+			'format' { format = value }
 			'schema' { pv.schema = value }
 			'namespace' { pv.namespace = value }
 			'schema-path' { pv.schema_path = value }
@@ -122,6 +129,14 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	}
 	if pv.schema == '' {
 		return error('not an arxmodel rules file: no `# schema:` line')
+	}
+	if format != '${rules_format}' {
+		was := if format == '' {
+			'an older format (no `# format:` line)'
+		} else {
+			'format ${format}'
+		}
+		return error('the rules file is in ${was}; this arxmodel reads format ${rules_format}: make it again with `arxmodel rules --emit`')
 	}
 	rs := flatxml.parse_rules(text)!
 	st.fold = rs.fold

@@ -534,11 +534,102 @@ pub fn (rs &RuleSet) to_flat(opts FlatOptions) Flat {
 			}
 		}
 	}
+	// the rules of one parent in the order its type's content gives their children, which is the
+	// order flatxml gives a node's aggregations: the order the schema requires
+	order := rs.content_order()
+	// a child element no rule names comes after those rules name, so where a parent has rules,
+	// its other children get one too, of the kind no rule gives (each its own), for their place
+	mut named := map[string]bool{} // `parent child` a rule names
+	mut parents := []string{}
+	for r in rules {
+		tail := r.parent.all_after_last('/')
+		if tail !in parents {
+			parents << tail
+		}
+		for kid in r.children {
+			named['${tail} ${kid}'] = true
+		}
+	}
+	parents.sort()
+	for parent in parents {
+		if parent !in order {
+			continue
+		}
+		places := order[parent].clone()
+		mut others := places.keys().filter('${parent} ${it}' !in named)
+		others.sort_with_compare(fn [places] (a &string, b &string) int {
+			return places[*a] - places[*b]
+		})
+		for kid in others {
+			f.described << 'each (for its place)'
+			rules << flatxml.Rule{
+				parent:   parent
+				children: [kid]
+			}
+		}
+	}
+	// sorted by parent name, then place in its content, then as made
+	tails := rules.map(it.parent.all_after_last('/'))
+	mut place := []int{cap: rules.len}
+	for k, r in rules {
+		place << order[tails[k]][r.children[0]] or { max_int }
+	}
+	mut at := []int{len: rules.len, init: index}
+	at.sort_with_compare(fn [tails, place] (a &int, b &int) int {
+		if tails[*a] != tails[*b] {
+			return if tails[*a] < tails[*b] { -1 } else { 1 }
+		}
+		if place[*a] != place[*b] {
+			return if place[*a] < place[*b] { -1 } else { 1 }
+		}
+		return *a - *b
+	})
+	descs := f.described.clone()
+	f.described = at.map(descs[it])
 	// the settings (case, attributes) are the policy's, given by the caller that merges
 	f.rules = flatxml.RuleSet{
-		rules: rules
+		rules: at.map(rules[it])
 	}
 	return f
+}
+
+// content_order is, per element name, the place of each child element name in the content
+// models of the types it is declared with: one order all of them keep where they can, a name one
+// type adds going before the next name that type shares with the others.
+fn (rs &RuleSet) content_order() map[string]map[string]int {
+	mut out := map[string]map[string]int{}
+	for name, types in rs.types_of {
+		mut all := []string{}
+		for t in types {
+			p := rs.schema.complex_types[t].particle
+			if p == xsd.no_particle {
+				continue
+			}
+			mut occ := []Occ{}
+			rs.walk(p, 1, mut occ)
+			seq := occ.map(rs.schema.names[rs.schema.elements[it.decl].name.local])
+			for k, child in seq {
+				if child in all {
+					continue
+				}
+				mut at := all.len
+				for next in seq[k + 1..] {
+					i := all.index(next)
+					if i >= 0 {
+						at = i
+						break
+					}
+				}
+				all.insert(at, child)
+			}
+		}
+		mut places := map[string]int{}
+		for k, child in all {
+			places[child] = k
+		}
+		out[name] = places
+	}
+	return out
 }
 
 // by_pair_parent is the candidates whose pair's parent is parent, in order.

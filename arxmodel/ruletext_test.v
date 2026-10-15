@@ -142,6 +142,20 @@ fn test_newer_releases_and_another_policy_are_said() {
 	assert rules_file_check(declare_schemas(m), newest, st, p)!.len == 0
 }
 
+fn test_a_file_of_another_format_is_refused() {
+	text := emit('model/a.arxml', 'schemas', default_policy())
+	assert text.contains('\n# format: ${rules_format}\n')
+	for other in [text.replace('# format: ${rules_format}\n', ''),
+		text.replace('# format: ${rules_format}', '# format: 1'),
+		text.replace('# format: ${rules_format}', '# format: ${rules_format + 1}')] {
+		parse_rules_file(other) or {
+			assert err.msg().contains('format')
+			continue
+		}
+		assert false
+	}
+}
+
 fn test_not_a_rules_file() {
 	if _, _, _ := parse_rules_file('SHELF SHORT-NAME single merge\n') {
 		assert false

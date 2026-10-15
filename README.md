@@ -48,9 +48,11 @@ arxmodel check --schema-dir DIR [--all] [--ignore-attr NAME]... <file|dir>...   
 arxmodel check --rules autosar.rules.txt <file|dir>...                         # the same, by the rules file
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
+arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
 ```
 
-A rules file starts with a header naming the schema it came from (name, namespace, path and
+A rules file starts with a header giving its format's version (`# format:`; a file of another
+format, or one made before the line existed, is refused: make it again), naming the schema it came from (name, namespace, path and
 SHA-256), the arxmodel and flatxml versions, the policy settings the rules were made by
 (`absent_keys`, `item_itself`, `governing`, `splittable`, `repeated_choice_as_mixed`), every pair
 in conflict with the rules that disagree, then the merge settings (`!fold`, `!ignore` with the
@@ -256,11 +258,36 @@ under one class and not under another), the pair's first rule stays the rule by 
 holder whose rule differs gets its role's rules, every item kind of it together, under a parent
 path: `ECUC-MODULE-DEF/CONTAINERS` for a wrapper's items (the holder above the wrapper), and for a
 role written directly in its holder, `PARENT/HOLDER`, PARENT being an element that holds an
-element of the holder's type. Each scoped rule is listed beside its unscoped counterpart, so a
-node's aggregations keep the schema's order. A path that still names holders with different
-rules, or a holder no path names (the root), is a conflict: it is reported with its occurrences,
-one rule is applied, and the problems on it are marked as the conflict's rather than counted as
-violations; `check` exits 1 when the documents use one.
+element of the holder's type. A path that still names holders with different rules, or a holder no
+path names (the root), is a conflict: it is reported with its occurrences, one rule is applied, and
+the problems on it are marked as the conflict's rather than counted as violations; `check` exits 1
+when the documents use one.
+
+flatxml puts a node's children in the order of the rules that name them, and those no rule names
+after them. So the rules of one parent are listed in the order its type's content model gives their
+children (where an element name is declared with several types, one order all of them keep), each
+scoped rule beside its unscoped counterpart, and a child element no role names, under a parent that
+has rules, gets a rule of the kind no rule gives (each its own) for its place. A merged model is
+then written in the order its schema requires.
+
+## Export (`merge`)
+
+`merge` merges and checks the files as `check` does, with the same options, the summary going to
+standard error, and writes the merged model as one ARXML (`-o OUT`, `-o -` for standard output), by
+flatxml's writer of a merged view: each element once; what came from one file and was not merged
+into is copied byte for byte, comments and indentation included; an element made of several
+fragments is written from its first, with the attributes only the others have, its merged children
+in the schema's order, each with the indentation and comments it had; values that differ are the
+first fragment's, as the merged view has them (the policy's severities say whether that is an
+error). An element read where other namespace bindings were in scope is given the declarations that
+restore them. The prolog and root are the first file's; in the root's `xsi:schemaLocation`, the
+pair for the model's namespace is replaced by the location the first file declaring the governing
+release gives (the schema's release, or with `--rules` the release the rules were made from), the
+other pairs kept. A relative location that names a file beside that file is written relative to
+the output; one that does not is kept as written, and said. An output that is one of the inputs, or
+inside an input directory, is refused. Nothing is written where `check` would exit 1
+(findings the policy calls errors, files that could not be read or declare no schema), unless
+`--force`; `merge` says so.
 
 ### Differences from the AUTOSAR specification
 

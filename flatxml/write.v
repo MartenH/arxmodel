@@ -50,17 +50,21 @@ pub fn (d &Doc) write_file(path string, opts WriteOptions) ! {
 
 // write_file_with writes d to path as plan says, as write_file describes.
 fn write_file_with(d &Doc, path string, plan Plan) ! {
+	write_through_temp(path, fn [d, plan] (mut f FileOut) ! {
+		mut e := emitter_to(d, mut f, plan)
+		e.walk(0)!
+		e.flush()!
+	})!
+}
+
+// write_through_temp has emit write a file that replaces path once it is complete and on disk,
+// as write_file describes.
+fn write_through_temp(path string, emit fn (mut f FileOut) !) ! {
 	target := if os.is_link(path) { os.real_path(path) } else { path }
 	keep := if st := os.stat(target) { ?u32(st.mode) } else { ?u32(none) }
 	tmp := '${target}.${os.getpid()}.tmp'
 	mut f := create_file(tmp, keep)!
-	mut e := emitter_to(d, mut f, plan)
-	e.walk(0) or {
-		f.close() or {}
-		os.rm(tmp) or {}
-		return err
-	}
-	e.flush() or {
+	emit(mut f) or {
 		f.close() or {}
 		os.rm(tmp) or {}
 		return err

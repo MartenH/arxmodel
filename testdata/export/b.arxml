@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="urn:arxmodel:test:lib LIB_2.xsd">
+  <SHELVES>
+    <SHELF>
+      <SHORT-NAME>Fiction</SHORT-NAME>
+      <ITEMS>
+        <BOOK><SHORT-NAME>Dune</SHORT-NAME></BOOK>
+        <MAGAZINE><SHORT-NAME>Analog</SHORT-NAME></MAGAZINE>
+      </ITEMS>
+      <THEME>space</THEME>
+    </SHELF>
+    <SHELF>
+      <SHORT-NAME>Poetry</SHORT-NAME>
+    </SHELF>
+  </SHELVES>
+</LIBRARY>

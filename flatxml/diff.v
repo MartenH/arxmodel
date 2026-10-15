@@ -33,10 +33,15 @@ pub:
 	new    MNode     // the node in the new view; empty for removed
 	parent MNode     // added and moved: the node of the old view it goes under (empty for a root)
 	index  int       // added and moved: its place among the children of new's parent
-	name   string    // attr: the attribute's name
+	name   string    // attr: the attribute's name, as the new node writes it
 	before ?string   // text: the old text (`show_runs`); attr: the old value, none when absent
 	after  ?string   // text: the new text (`show_runs`); attr: the new value, none when gone
 	runs   []TextRun // text: the new own text, run by run, each in its slot among the children
+	// attr: the name as the old node writes it, where it has one (by namespace, the prefix may
+	// differ)
+	old_name string
+mut:
+	akey u64 // attr: the attribute's name, hashed as the diff compared it (`attr_key`)
 }
 
 // Diff is the changes from one view to another.
@@ -49,9 +54,14 @@ pub mut:
 mut:
 	ohash    []u64 // each node's subtree, hashed
 	nhash    []u64
-	tag_map  []u32 // a name id of the new view's table -> the same name's id in the old one
-	compared int   // pairs of nodes entered
-	max_d    int   // the most differences an alignment searches for before it pairs greedily
+	oname    []u64 // each node's name, hashed: as written, or by namespace and local name
+	nname    []u64
+	by_ns    bool // names compared by namespace and local name: both views resolved them
+	compared int  // pairs of nodes entered
+	max_d    int  // the most differences an alignment searches for before it pairs greedily
+	// a node of the new view -> the node of the old one it was matched with, for the children of
+	// every pair compared
+	matched map[u32]u32
 	// for describing: each file's lines, each parent's children's places among their names
 	lines      map[u64]LineIndex
 	old_places map[u32][]int
@@ -74,21 +84,16 @@ pub fn diff(old &Merged, new &Merged, opts DiffOptions) Diff {
 		new:   new
 		max_d: opts.max_d
 	}
+	d.by_ns = names_resolved(old) && names_resolved(new)
 	// the two views hashed at once, one of them on a thread of its own
-	t := spawn subtree_hashes(new)
-	d.ohash = subtree_hashes(old)
-	d.nhash = t.wait()
-	d.tag_map = []u32{len: new.set.tab.len(), init: if voidptr(new.set.tab) == voidptr(old.set.tab) {
-		u32(index)
-	} else {
-		old.set.tab.id(new.set.tab.name(u32(index))) or { no_name }
-	}}
-	d.tag_map[0] = 0
+	t := spawn view_hashes(new, d.by_ns)
+	d.ohash, d.oname = view_hashes(old, d.by_ns)
+	d.nhash, d.nname = t.wait()
 	o, n := old.root(), new.root()
 	if !o.ok() && !n.ok() {
 		return d
 	}
-	if !o.ok() || !n.ok() || d.tag_map[n.tag()] != o.tag() {
+	if !o.ok() || !n.ok() || d.nname[n.i] != d.oname[o.i] {
 		if o.ok() {
 			d.changes << Change{
 				kind: .removed
@@ -103,6 +108,7 @@ pub fn diff(old &Merged, new &Merged, opts DiffOptions) Diff {
 		}
 		return d
 	}
+	d.matched[n.i] = o.i
 	d.pair(o.i, n.i)
 	d.moves()
 	return d
@@ -165,24 +171,52 @@ fn text_hash(s string) u64 {
 	return hash.wyhash_c(s.str, u64(s.len), name_seed)
 }
 
-// subtree_hashes hashes every node of m with what is below it: its name, its own text run by
-// run with each run's slot, its attributes (each name with its value, in any order) and its
-// children (in order). Children come after their parent, so one pass from the end finds every
-// child hashed before its parent.
-fn subtree_hashes(m &Merged) []u64 {
-	mut h := []u64{len: m.len()}
+// names_resolved reports whether every document of the view has its namespaces resolved.
+fn names_resolved(m &Merged) bool {
+	return m.set.docs.len > 0 && m.set.docs.all(it.ns.len == it.tag.len)
+}
+
+// name_key is node i's name, hashed: as written, or, by_ns, its namespace and local name.
+fn name_key(m &Merged, i u32, by_ns bool) u64 {
 	t := m.set.tab
+	if !by_ns {
+		return t.hash[m.name[i]]
+	}
+	f := m.frags[m.frag_lo[i]]
+	d := m.set.docs[f.doc]
+	return mix(text_hash(d.ns_uri(d.ns[f.i])), t.hash[d.local_id(f.i)])
+}
+
+// attr_key is attribute a of d's name, hashed as name_key hashes an element's.
+@[inline]
+fn attr_key(d &Doc, a u32, by_ns bool) u64 {
+	if !by_ns {
+		return d.tab.hash[d.attr_tag[a]]
+	}
+	return mix(text_hash(d.ns_uri(d.attr_ns[a])), d.tab.hash[d.attr_local_id(a)])
+}
+
+// view_hashes hashes every node of m with what is below it, and its name alone (`name_key`).
+// A subtree's hash is of its name, its own text run by run with each run's slot, its
+// attributes (each name with its value, in any order; by_ns, namespace declarations left out)
+// and its children (in order). Children come after their parent, so one pass from the end finds
+// every child hashed before its parent.
+fn view_hashes(m &Merged, by_ns bool) ([]u64, []u64) {
+	mut h := []u64{len: m.len()}
+	mut names := []u64{len: m.len()}
 	for i := m.len() - 1; i >= 0; i-- {
 		n := MNode{m, u32(i)}
-		mut x := mix(seed_node, t.hash[m.name[i]])
+		nk := name_key(m, u32(i), by_ns)
+		put(names, i, nk)
+		mut x := mix(seed_node, nk)
 		x = mix(x, runs_hash(n))
-		x = mix(x, attrs_hash(n))
+		x = mix(x, attrs_hash(n, by_ns))
 		for c := m.kid_lo[i]; c < m.kid_lo[i + 1]; c++ {
 			x = mix(mix(x, seed_child), h[c])
 		}
 		put(h, i, x)
 	}
-	return h
+	return h, names
 }
 
 // runs_hash hashes the node's own text as `text_runs` has it, without making the list where it
@@ -202,28 +236,52 @@ fn runs_hash(n MNode) u64 {
 	return h
 }
 
-@[inline]
-fn attr_hash(t &Names, tag u32, value string) u64 {
-	return mix(mix(seed_attr, t.hash[tag]), text_hash(value))
-}
-
-// attrs_hash hashes the node's attributes as `attrs` has them, in any order: without making the
-// list where there is one contribution.
-fn attrs_hash(n MNode) u64 {
-	t := n.m.set.tab
+// attrs_hash hashes the node's attributes as `attr_list` has them, in any order: without making
+// the list where there is one contribution.
+fn attrs_hash(n MNode, by_ns bool) u64 {
 	mut h := u64(0)
 	if n.fragment_count() == 1 {
 		f := n.fragment(0)
 		lo, hi := f.doc.attr_range(f.i)
 		for a := lo; a < hi; a++ {
-			h += attr_hash(t, f.doc.attr_tag[a], f.doc.attr_value(a))
+			if by_ns && f.doc.is_ns_decl(a) {
+				continue
+			}
+			h += mix(mix(seed_attr, attr_key(f.doc, a, by_ns)), text_hash(f.doc.attr_value(a)))
 		}
 		return h
 	}
-	for a in n.attrs() {
-		h += attr_hash(t, a.tag, a.value)
+	for a in attr_list(n, by_ns) {
+		h += mix(mix(seed_attr, a.key), text_hash(a.value))
 	}
 	return h
+}
+
+// KAttr is an attribute of a merged node as a diff compares it: its name hashed (`attr_key`).
+struct KAttr {
+	key   u64
+	name  string
+	value string
+}
+
+// attr_list is the node's attributes as a diff compares them: each name once, from the first
+// contribution that has it; by_ns, namespace declarations left out.
+fn attr_list(n MNode, by_ns bool) []KAttr {
+	mut out := []KAttr{}
+	for k in 0 .. n.fragment_count() {
+		f := n.fragment(k)
+		lo, hi := f.doc.attr_range(f.i)
+		for a := lo; a < hi; a++ {
+			if by_ns && f.doc.is_ns_decl(a) {
+				continue
+			}
+			key := attr_key(f.doc, a, by_ns)
+			if k == 0 || !out.any(it.key == key) {
+				out << KAttr{key, f.doc.attr_name(a), f.doc.attr_value(a)}
+			}
+		}
+	}
+	return out
 }
 
 // MAttr is an attribute of a merged node.
@@ -275,21 +333,22 @@ fn (mut d Diff) pair(o u32, n u32) {
 
 // attrs reports the attributes changed, added and removed from om to nm.
 fn (mut d Diff) attrs(om MNode, nm MNode) {
-	oa, na := om.attrs(), nm.attrs()
+	oa, na := attr_list(om, d.by_ns), attr_list(nm, d.by_ns)
 	for a in na {
-		t := d.tag_map[a.tag]
 		mut found := false
 		for b in oa {
-			if b.tag == t {
+			if b.key == a.key {
 				found = true
 				if b.value != a.value {
 					d.changes << Change{
-						kind:   .attr
-						old:    om
-						new:    nm
-						name:   d.new.set.tab.name(a.tag)
-						before: b.value
-						after:  a.value
+						kind:     .attr
+						old:      om
+						new:      nm
+						name:     a.name
+						old_name: b.name
+						before:   b.value
+						after:    a.value
+						akey:     a.key
 					}
 				}
 				break
@@ -300,21 +359,24 @@ fn (mut d Diff) attrs(om MNode, nm MNode) {
 				kind:   .attr
 				old:    om
 				new:    nm
-				name:   d.new.set.tab.name(a.tag)
+				name:   a.name
 				before: none
 				after:  a.value
+				akey:   a.key
 			}
 		}
 	}
 	for b in oa {
-		if !na.any(d.tag_map[it.tag] == b.tag) {
+		if !na.any(it.key == b.key) {
 			d.changes << Change{
-				kind:   .attr
-				old:    om
-				new:    nm
-				name:   d.old.set.tab.name(b.tag)
-				before: b.value
-				after:  none
+				kind:     .attr
+				old:      om
+				new:      nm
+				name:     b.name
+				old_name: b.name
+				before:   b.value
+				after:    none
+				akey:     b.key
 			}
 		}
 	}
@@ -334,20 +396,27 @@ fn (mut d Diff) children(o u32, n u32) {
 	// for each new child, its match among the old ones (no_mnode: none), and the other way
 	mut to_old := []u32{len: int(nhi - nlo), init: no_mnode}
 	mut to_new := []u32{len: int(ohi - olo), init: no_mnode}
-	// identified children by identity
+	// identified children by identity: name and key
 	on := d.old.node(o)
+	fold := d.old.rules.fold
+	mut ids := map[u64][]u32{} // the old identified children, by name and key
+	for c := olo; c < ohi; c++ {
+		if identified(d.old, c) {
+			ids[mix(d.oname[c], key_hash(0, 0, d.old.key_of(c), fold))] << c
+		}
+	}
 	for c := nlo; c < nhi; c++ {
 		if !identified(d.new, c) {
 			continue
 		}
-		t := d.tag_map[d.new.name[c]]
-		if t == no_name {
-			continue
-		}
-		m := on.child_id(t, d.new.key_of(c))
-		if m.ok() && d.old.kind[m.i] == d.new.kind[c] && to_new[m.i - olo] == no_mnode {
-			to_old[c - nlo] = m.i
-			to_new[m.i - olo] = c
+		key := d.new.key_of(c)
+		for m in ids[mix(d.nname[c], key_hash(0, 0, key, fold))] or { continue } {
+			if d.old.kind[m] == d.new.kind[c] && to_new[m - olo] == no_mnode
+				&& compare_keys(d.old.key_of(m), key, fold) == 0 {
+				to_old[c - nlo] = m
+				to_new[m - olo] = c
+				break
+			}
 		}
 	}
 	// the others aligned in order: equal subtrees first, then by name between them
@@ -401,6 +470,9 @@ fn (mut d Diff) children(o u32, n u32) {
 	for k in 0 .. to_old.len {
 		c := nlo + u32(k)
 		m := to_old[k]
+		if m != no_mnode {
+			d.matched[c] = m
+		}
 		if m == no_mnode {
 			d.changes << Change{
 				kind:   .added
@@ -430,14 +502,14 @@ fn (mut d Diff) pair_by_name(xs []u32, ys []u32, olo u32, nlo u32, mut to_old []
 	if xs.len == 0 || ys.len == 0 {
 		return
 	}
-	mut places := map[u32][]int{}
+	mut places := map[u64][]int{}
 	for k, x in xs {
-		places[d.old.name[x]] << k
+		places[d.oname[x]] << k
 	}
-	mut next := map[u32]int{}
+	mut next := map[u64]int{}
 	mut from := 0
 	for y in ys {
-		t := d.tag_map[d.new.name[y]]
+		t := d.nname[y]
 		at := places[t] or { continue }
 		mut k := next[t]
 		for k < at.len && at[k] < from {

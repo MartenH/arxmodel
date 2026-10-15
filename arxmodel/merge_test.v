@@ -193,3 +193,50 @@ fn test_check_merges_and_reports_with_positions() {
 		assert d.contains('x.arxml:') && d.contains('y.arxml:')
 	}
 }
+
+fn test_a_parents_rules_follow_its_content_order() {
+	f := lib_schema_rules().to_flat()
+	mut kids := map[string][]string{} // parent -> the first child of each of its rules, in order
+	for r in f.rules.rules {
+		kids[r.parent] << r.children[0]
+	}
+	// the content models of LIB_1.xsd as written there, groups expanded
+	assert kids['SHELF'] == ['SHORT-NAME', 'ITEMS', 'NOTES', 'LABELS', 'FAVOURITES', 'LOANS', 'TAG-SET',
+		'MARKS', 'PAIR', 'MOTTO', 'OPENING-HOURS', 'COPIES', 'BOX', 'CRATES', 'PICK-REF', 'BROKEN-KEYS',
+		'VARIATION-POINT']
+	assert kids['BOOK'] == ['SHORT-NAME', 'PICK-REF', 'ITEMS', 'PALLETS', 'TAG-SET', 'NOTES', 'BLURB']
+	assert kids['COPY'] == ['EDITION', 'STAMPS', 'YEAR', 'PRICE', 'BINDING', 'LOCATION-IREF', 'CODES']
+	assert kids['LOAN'] == ['BORROWER-REF', 'CONTEXT-REF', 'VARIATION-POINT']
+	// ITEMS is declared with two types: one order both keep
+	assert kids['ITEMS'] == ['BOOK', 'LEAFLET']
+	assert rule_at(f, 'ITEMS', 'BOOK').children == ['BOOK', 'MAGAZINE']
+	// OPENING-HOURS, which no role names, has a rule for its place, and only it
+	assert described(f, 'SHELF', 'OPENING-HOURS') == 'each (for its place)'
+	assert f.described.filter(it == 'each (for its place)').len == 1
+}
+
+fn test_a_child_no_role_names_keeps_its_place() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_place_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	head := '<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd"><SHELVES><SHELF><SHORT-NAME>S</SHORT-NAME>'
+	tail := '</SHELF></SHELVES></LIBRARY>'
+	// OPENING-HOURS in the schema's place; EXTRA, which the schema does not declare, before it
+	os.write_file(os.join_path(dir, 'a.arxml'), head +
+		'<EXTRA/><OPENING-HOURS>9-5</OPENING-HOURS><COPIES/>' + tail)!
+	os.write_file(os.join_path(dir, 'b.arxml'), head + '<NOTES/><VARIATION-POINT/>' + tail)!
+	mut m := load([dir])!
+	defer {
+		m.free()
+	}
+	c := check(m, compile_schemas(m, mdata('schemas')), skip_xml: true, skip_multiplicity: true)!
+	shelf := c.view.root().child('SHELVES', '').child('SHELF', 'S' + flatxml.key_sep)
+	mut names := []string{}
+	for k in shelf.children() {
+		names << k.name()
+	}
+	// by the content model, a child it does not name after those it does, as written
+	assert names == ['SHORT-NAME', 'NOTES', 'OPENING-HOURS', 'COPIES', 'VARIATION-POINT', 'EXTRA']
+}

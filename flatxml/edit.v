@@ -71,6 +71,7 @@ pub:
 mut:
 	pieces []Piece
 	nodes  map[u64]NodeEdit
+	number int = -1 // its document's number in a set, when it is one of a merged view's (`MEdit`)
 }
 
 // edit starts an empty edit set over the document, which must outlive it.
@@ -777,13 +778,7 @@ fn (mut em Emitter) write_element(p EditPlan, k u64, decls []string) ! {
 // tag is the first one after it.
 fn (d &Doc) content_end(i u32, ste u32) u32 {
 	if i + 1 < d.end[i] {
-		mut c := i + 1
-		mut last := c
-		for c < d.end[i] {
-			last = c
-			c = d.end[c]
-		}
-		return d.span_end(last)
+		return d.span_end(d.last_child_node(i))
 	}
 	if d.text_len[i] != 0 {
 		return d.text_end(i)
@@ -791,10 +786,25 @@ fn (d &Doc) content_end(i u32, ste u32) u32 {
 	return ste
 }
 
+// last_child_node is element i's last child node, text or element; i has one.
+fn (d &Doc) last_child_node(i u32) u32 {
+	mut c := i + 1
+	mut last := c
+	for c < d.end[i] {
+		last = c
+		c = d.end[c]
+	}
+	return last
+}
+
 // start_tag writes element i's start tag with the attribute changes, decls after its name, and
 // `/>` or `>` as closed says. What no change touched is copied.
 fn (mut em Emitter) start_tag(d &Doc, i u32, changes []AttrChange, decls []string, ste u32, closed bool) ! {
 	after_name := d.src_off[i] + 1 + u32(d.name(i).len)
+	if changes.len == 0 && decls.len == 0 && (closed || !d.self_closing(ste)) {
+		em.copy_in(d, d.src_off[i], ste)!
+		return
+	}
 	final := final_attrs(d, i, changes)
 	em.copy_in(d, d.src_off[i], after_name)!
 	if decls.len > 0 {
@@ -1026,33 +1036,7 @@ fn (e &Edit) carried_decls(k u64) []string {
 	if !ne.placed {
 		return []
 	}
-	src := e.source_scope(k)
-	dst := e.scope_in(ne.parent)
-	own := e.own_decls(k)
-	mut prefixes := src.keys()
-	for p in dst.keys() {
-		if p !in src {
-			prefixes << p
-		}
-	}
-	prefixes.sort()
-	mut out := []string{}
-	for p in prefixes {
-		if p in own {
-			continue
-		}
-		have := src[p] or { '' }
-		there := dst[p] or { '' }
-		if have == there {
-			continue
-		}
-		if p == '' {
-			out << ' xmlns="${escape_attr(have, `"`)}"'
-		} else if have != '' {
-			out << ' xmlns:${p}="${escape_attr(have, `"`)}"'
-		}
-	}
-	return out
+	return scope_decls(e.source_scope(k), e.scope_in(ne.parent), e.own_decls(k))
 }
 
 // own_decls are the namespace declarations element k makes itself, as edited: prefix ('' for
@@ -1072,8 +1056,8 @@ fn (e &Edit) own_decls(k u64) map[string]string {
 fn (e &Edit) source_scope(k u64) map[string]string {
 	d := e.doc_of(k)
 	mut out := e.pieces[kpiece(k)].scope.clone()
-	for x in d.inherited_ns_decls(kindex(k)) {
-		out[decl_prefix(d.attr_name(x))] = d.attr_value(x)
+	for p, u in d.bindings_above(kindex(k)) {
+		out[p] = u
 	}
 	return out
 }

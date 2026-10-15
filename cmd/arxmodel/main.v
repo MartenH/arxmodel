@@ -20,8 +20,13 @@
 //   arxmodel list (--schema-dir DIR | --rules FILE) <ELEMENT> <file|dir>...
 //                                              the merged element at an AUTOSAR path; the paths
 //                                              of every referrable element of a name
+//   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
+//                  -o OUT|- <file|dir>...      merge and check them as check does (the summary
+//                                              on standard error), and write the merged model
+//                                              as one document: not where check finds errors,
+//                                              unless --force
 //
-// rules and check take --policy FILE, the merge policy (policy.txt, built in, by default).
+// rules, check and merge take --policy FILE, the merge policy (policy.txt, built in, by default).
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
 // found or did not compile; check exits 1 on findings the policy calls errors (and on files that
@@ -66,7 +71,15 @@ const usage = 'usage:
       every element holding it, where the merge keeps two apart
   arxmodel list (--schema-dir DIR | --rules FILE) [--jobs N] <ELEMENT-NAME> <file|dir>...
       the AUTOSAR path of every referrable element of that name
-  --policy FILE (rules, check, get, list): the merge policy, in place of the built-in policy.txt
+  arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
+                 -o OUT|- <file|dir>...
+      merge and check the files as check does, the summary going to standard error, and write
+      the merged model as one ARXML to OUT (- for standard output): what came from one file and
+      was not merged into is copied byte for byte, values that differ are those of the first
+      file, and the root carries the schema location of the first file that declares the
+      governing release. Nothing is written where check would exit 1 (errors, files not read or
+      declaring no schema), unless --force
+  --policy FILE (rules, check, merge, get, list): the merge policy, in place of the built-in policy.txt
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU'
 
 struct Opts {
@@ -86,6 +99,8 @@ mut:
 	skip_mult  bool     // check: no multiplicity layer
 	skip_refs  bool     // check: no reference layer
 	refs_from  []string // check: files loaded only to resolve references against
+	out        string   // merge: where the merged model is written ('-' for standard output)
+	force      bool     // merge: write it whatever the findings
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -110,6 +125,11 @@ fn main() {
 				'--skip-references', '--refs-from']
 		}
 		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--policy'] }
+		'merge' {
+			['--jobs', '--schema-dir', '--rules', '--all', '--problems', '--case-sensitive',
+				'--ignore-attr', '--check-attr', '--policy', '--skip-xml', '--skip-multiplicity',
+				'--skip-references', '--refs-from', '--out', '--force']
+		}
 		else { []string{} }
 	}
 	for a in opts.given {
@@ -118,7 +138,7 @@ fn main() {
 			exit(2)
 		}
 	}
-	if args[0] in ['check', 'get', 'list'] && opts.schema_dir != '' && opts.rules_file != '' {
+	if args[0] in ['check', 'merge', 'get', 'list'] && opts.schema_dir != '' && opts.rules_file != '' {
 		eprintln('${args[0]} takes --schema-dir or --rules, not both')
 		exit(2)
 	}
@@ -146,6 +166,23 @@ fn main() {
 				exit(2)
 			}
 			cmd_check(opts)
+		}
+		'merge' {
+			if opts.schema_dir == '' && opts.rules_file == '' {
+				eprintln('merge needs --schema-dir or --rules')
+				exit(2)
+			}
+			if opts.out == '' {
+				eprintln('merge needs -o OUT (or -o - for standard output)')
+				exit(2)
+			}
+			mut inputs := opts.paths.clone()
+			inputs << opts.refs_from
+			if why := arxmodel.output_clash(opts.out, inputs) {
+				eprintln('merge: ${why}')
+				exit(2)
+			}
+			cmd_merge(opts)
 		}
 		'rules' {
 			if opts.schema_dir == '' {
@@ -196,6 +233,20 @@ fn parse_opts(args []string) !Opts {
 			}
 			'--skip-references' {
 				o.skip_refs = true
+			}
+			'--force' {
+				o.force = true
+			}
+			'-o', '--out' {
+				if k + 1 >= args.len {
+					return error('${a} needs a value')
+				}
+				o.out = args[k + 1]
+				if '--out' !in o.given {
+					o.given << '--out'
+				}
+				k += 2
+				continue
 			}
 			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from' {
 				if k + 1 >= args.len {
@@ -633,9 +684,9 @@ fn all_skipped() arxmodel.CheckOptions {
 	}
 }
 
-fn cmd_check(o Opts) {
-	out := Out{}
-	opts := arxmodel.CheckOptions{
+// check_options are the options given to check and merge, as the merge's.
+fn check_options(o Opts) arxmodel.CheckOptions {
+	return arxmodel.CheckOptions{
 		jobs:              o.jobs
 		skip_xml:          o.skip_xml
 		skip_multiplicity: o.skip_mult
@@ -645,8 +696,46 @@ fn cmd_check(o Opts) {
 		ignore_attrs:      o.ignore
 		compare_attrs:     o.compare
 	}
-	m, sc, c, took := merged(o, out, opts)
+}
 
+fn cmd_check(o Opts) {
+	out := Out{}
+	m, sc, c, took := merged(o, out, check_options(o))
+	errors := report(out, o, c, took)
+	if m.failed.len > 0 || sc.undeclared.len > 0 || errors > 0 {
+		exit(1)
+	}
+}
+
+// cmd_merge merges and checks as check does, the summary on standard error, and writes the
+// merged model as one document, unless there is a finding the policy calls an error, a file that
+// could not be read or one that declares no schema (--force writes it anyway).
+fn cmd_merge(o Opts) {
+	out := Out{
+		err: true
+	}
+	m, sc, c, took := merged(o, out, check_options(o))
+	errors := report(out, o, c, took)
+	if (m.failed.len > 0 || sc.undeclared.len > 0 || errors > 0) && !o.force {
+		out.line('not written: ${plural(errors, 'error')}, ${plural(m.failed.len, 'file')} not read, ' +
+			'${sc.undeclared.len} declaring no schema (--force writes it anyway)')
+		exit(1)
+	}
+	sw := time.new_stopwatch()
+	notes := arxmodel.export(c, m, sc, o.out) or {
+		eprintln('${o.out}: ${err.msg()}')
+		exit(1)
+	}
+	for n in notes {
+		out.line('note: ${n}')
+	}
+	if o.out != '-' {
+		out.line('wrote ${o.out} in ${ms(sw.elapsed())}: ${f64(os.file_size(o.out)) / 1e6:.1f} MB')
+	}
+}
+
+// report prints what check found, and returns how many errors.
+fn report(out Out, o Opts, c &arxmodel.Checked, took time.Duration) int {
 	f := c.flat
 	used := f.used()
 	unused := f.unused()
@@ -725,9 +814,7 @@ fn cmd_check(o Opts) {
 			out.line(x.str())
 		}
 	}
-	if m.failed.len > 0 || sc.undeclared.len > 0 || errors > 0 {
-		exit(1)
-	}
+	return errors
 }
 
 // print_undeclared lists the files that declare no schema.

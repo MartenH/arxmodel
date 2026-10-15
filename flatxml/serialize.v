@@ -256,3 +256,69 @@ pub fn (d &Doc) inner_xml(i u32) string {
 	e.settle() or {}
 	return e.buf.str()
 }
+
+// scope_decls are the namespace declarations an element read where the bindings src are in scope
+// needs where dst are, so its names keep their namespaces: for each prefix bound differently,
+// its binding in src (` xmlns:p="uri"`, or ` xmlns=""` for a default namespace src does not
+// have), but for the prefixes in own, which the element declares itself.
+fn scope_decls(src map[string]string, dst map[string]string, own map[string]string) []string {
+	mut prefixes := src.keys()
+	for p in dst.keys() {
+		if p !in src {
+			prefixes << p
+		}
+	}
+	prefixes.sort()
+	mut out := []string{}
+	for p in prefixes {
+		// `xml` is bound everywhere, and declaring it again changes nothing
+		if p in own || p == 'xml' {
+			continue
+		}
+		have := src[p] or { '' }
+		there := dst[p] or { '' }
+		if have == there {
+			continue
+		}
+		if p == '' {
+			out << ' xmlns="${escape_attr(have, `"`)}"'
+		} else if have != '' {
+			out << ' xmlns:${p}="${escape_attr(have, `"`)}"'
+		}
+	}
+	return out
+}
+
+// bindings_above are the namespace bindings the elements above element i declare, in scope at i
+// but for the prefixes i declares itself: prefix ('' for the default) -> URI.
+fn (d &Doc) bindings_above(i u32) map[string]string {
+	mut out := map[string]string{}
+	for x in d.inherited_ns_decls(i) {
+		out[decl_prefix(d.attr_name(x))] = d.attr_value(x)
+	}
+	return out
+}
+
+// own_bindings are the namespace declarations element i makes: prefix ('' for the default) ->
+// URI.
+fn (d &Doc) own_bindings(i u32) map[string]string {
+	mut out := map[string]string{}
+	lo, hi := d.attr_range(i)
+	for a := lo; a < hi; a++ {
+		if is_ns_decl_name(d.attr_name(a)) {
+			out[decl_prefix(d.attr_name(a))] = d.attr_value(a)
+		}
+	}
+	return out
+}
+
+// declares reports whether element i declares a namespace.
+fn (d &Doc) declares(i u32) bool {
+	lo, hi := d.attr_range(i)
+	for a := lo; a < hi; a++ {
+		if is_ns_decl_name(d.attr_name(a)) {
+			return true
+		}
+	}
+	return false
+}

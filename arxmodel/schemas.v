@@ -20,36 +20,43 @@ pub:
 pub fn declared_schema(d &flatxml.Doc) Declared {
 	root := d.root()
 	ns := d.ns_uri(d.ns_of(root))
-	lo, hi := d.attr_range(root)
-	for a := lo; a < hi; a++ {
-		if d.attr_ns_of(a) == flatxml.no_ns || d.ns_uri(d.attr_ns_of(a)) != xsi_ns_uri
-			|| d.attr_local_name(a) != 'schemaLocation' {
-			continue
-		}
-		words := d.attr_value(a).fields()
-		if words.len % 2 != 0 {
-			return Declared{
-				ns:      ns
-				problem: 'xsi:schemaLocation is not namespace and location pairs'
-			}
-		}
-		for k := 0; k < words.len; k += 2 {
-			if words[k] == ns {
-				return Declared{
-					ns:       ns
-					location: words[k + 1]
-				}
-			}
-		}
+	a := schema_location_attr(d, root) or {
 		return Declared{
 			ns:      ns
-			problem: 'xsi:schemaLocation names no schema for ${ns}'
+			problem: 'no xsi:schemaLocation'
+		}
+	}
+	words := d.attr_value(a).fields()
+	if words.len % 2 != 0 {
+		return Declared{
+			ns:      ns
+			problem: 'xsi:schemaLocation is not namespace and location pairs'
+		}
+	}
+	for k := 0; k < words.len; k += 2 {
+		if words[k] == ns {
+			return Declared{
+				ns:       ns
+				location: words[k + 1]
+			}
 		}
 	}
 	return Declared{
 		ns:      ns
-		problem: 'no xsi:schemaLocation'
+		problem: 'xsi:schemaLocation names no schema for ${ns}'
 	}
+}
+
+// schema_location_attr is element i's `xsi:schemaLocation` attribute (namespaces resolved).
+fn schema_location_attr(d &flatxml.Doc, i u32) ?u32 {
+	lo, hi := d.attr_range(i)
+	for a := lo; a < hi; a++ {
+		if d.attr_ns_of(a) != flatxml.no_ns && d.ns_uri(d.attr_ns_of(a)) == xsi_ns_uri
+			&& d.attr_local_name(a) == 'schemaLocation' {
+			return a
+		}
+	}
+	return none
 }
 
 // SchemaUse is one distinct declared schema: where it was found, what it compiled to, and the

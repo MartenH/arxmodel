@@ -60,14 +60,27 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      attribute) resolved: `unresolved`, `external` (definitions not loaded; `--refs-from` loads
      them only to resolve against), `wrong_kind`, `case_mismatch`, `empty`, `relative` (BASE,
      not resolved), `duplicate_path`; `get`, `list`.
+   - **Done: export** (`arxmodel merge -o model.arxml`): the merged view written as one ARXML by
+     flatxml's writer (vendored at 57da97a, which sets the root's attributes as it writes), what was
+     not merged into byte for byte, values that differ the first fragment's, the root's schema
+     location for the model's namespace that of the release whose rules merged it;
+     nothing written on errors unless `--force`. A parent's rules now follow its content model, and
+     a child no role names gets a rule for its place, so the merged model is written in the
+     schema's order (before this, children went in the order of the roles across the whole schema:
+     173,610 elements out of place in the real model). Locally, the 697 files (184 MB, 1,853,442
+     elements, 1,475 errors as `check` finds them: 324 of the merge and XML schema layers, 1,151
+     unresolved or ambiguous references; so written with `--force`) write as one 171 MB ARXML in
+     0.8–0.9 s (4.3–4.4 s with loading, merging and all four layers, 0.77 GB at most; by the rules
+     file made from the schema, 1.5 s and 0.59 GB, the same bytes); read alone it is valid against
+     AUTOSAR_00052 (no XML schema finding; the inputs' 2, an element out of 00052's order in a file
+     declaring a later release, are in its order now), has nothing to merge, the same 110
+     multiplicity warnings and the same 1,151 reference errors, and its 1,709,633 elements have,
+     one for one and in order, the merged paths of the inputs' merged view.
    - **Next, in this order:**
-     1. *Export* of the merged model as one ARXML (needs flatxml to write a merged view):
-        `arxmodel merge -o model.arxml`, conflicts resolved by the policy, untouched subtrees
-        byte for byte.
-     2. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
+     1. *Semantic checks* (hand-written [constr_xxxx], ECUC first): values against their
         definitions (multiplicity, range, enumeration literal); shortName uniqueness ignoring
         case ([constr_2508]).
-     3. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
+     2. *ECU flat extract* (System Template, ECU flat view): from the merged, validated system
         model, the elements one ECU needs with their reference closure, the software
         composition flattened to one root composition with its connectors rerouted, and a
         FlatMap (FlatInstanceDescriptor) recording the original instance paths. Checked against
