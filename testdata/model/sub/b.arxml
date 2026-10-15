@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:x="http://www.w3.org/2001/XMLSchema-instance"
+         x:schemaLocation="urn:other other.xsd urn:arxmodel:test:lib LIB_1.xsd">
+  <SHELVES>
+    <SHELF>
+      <SHORT-NAME>Fiction</SHORT-NAME>
+      <ITEMS>
+        <MAGAZINE><SHORT-NAME>Analog</SHORT-NAME></MAGAZINE>
+      </ITEMS>
+    </SHELF>
+  </SHELVES>
+</LIBRARY>

@@ -28,6 +28,14 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
 
 1. Load and merge model (flatxml document sets, rules, merged view): the merge problems and the
    element counts of real-world files.
+   - **Done: load and rules.** `arxmodel load` reads every `.arxml` into one document set;
+     `arxmodel rules` finds and compiles each declared schema once and reads its annotations into
+     a rule per aggregation (key paths in XML, splittable, ordered, most), with every annotation
+     counted (README, *Rules from the schema*). Locally: 697 real files (184 MB) load in about
+     95 ms; four of the thirteen declared schemas are at hand, and each compiles and gives its
+     rules in 0.1–0.4 s.
+   - **Next: the merged view**, once flatxml's rules and merged view land: these rules turned
+     into flatxml's, keyed by parent type and child element; the merge problems of the real files.
 2. Paths and references.
 3. `diff`, `merge`, `check` as commands.
 4. Edits and writing back.

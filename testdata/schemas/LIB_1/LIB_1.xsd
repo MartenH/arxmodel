@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A synthetic schema for arxmodel's tests: a library of shelves, books and magazines. It is
+     written here and carries the same kinds of annotations an AUTOSAR schema does. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:L="urn:arxmodel:test:lib"
+            targetNamespace="urn:arxmodel:test:lib" elementFormDefault="qualified">
+   <xsd:element name="LIBRARY" type="L:LIBRARY"/>
+
+   <!-- classes as groups, the way the schema shares them between types -->
+   <xsd:group name="NAMED">
+      <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Named"</xsd:appinfo></xsd:annotation>
+      <xsd:sequence>
+         <xsd:element name="SHORT-NAME" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Named.shortName";pureMM.maxOccurs="1";pureMM.minOccurs="1";atp.Status="draft"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpIdentityContributor</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:group>
+
+   <xsd:group name="VARIABLE">
+      <xsd:sequence>
+         <xsd:element name="VARIATION-POINT" type="L:VARIATION-POINT" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Variable.variationPoint";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:group>
+
+   <xsd:complexType name="VARIATION-POINT">
+      <xsd:sequence>
+         <xsd:element name="SHORT-LABEL" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="VariationPoint.shortLabel";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="LIBRARY">
+      <xsd:sequence>
+         <xsd:element name="SHELVES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="shelf.shortName, shelf.variationPoint.shortLabel";mmt.qualifiedName="Library.shelf";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="SHELF" type="L:SHELF"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:group name="SHELF">
+      <xsd:sequence>
+         <xsd:element name="ITEMS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="item.shortName";mmt.qualifiedName="Shelf.item";pureMM.maxOccurs="-1";pureMM.minOccurs="0";xml.roleWrapperElement="true";xml.typeElement="true"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="BOOK" type="L:BOOK"/>
+                  <xsd:element name="MAGAZINE" type="L:MAGAZINE"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="NOTES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Shelf.note";pureMM.isOrdered="true";pureMM.maxOccurs="3";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:sequence>
+                  <xsd:element name="NOTE" type="xsd:string" minOccurs="0" maxOccurs="3"/>
+               </xsd:sequence>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="LABELS" minOccurs="0">
+            <xsd:complexType>
+               <xsd:sequence>
+                  <xsd:element name="LABEL" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+                     <xsd:annotation>
+                        <xsd:appinfo source="tags">atp.Splitkey="label";mmt.qualifiedName="Shelf.label";pureMM.maxOccurs="-1";pureMM.minOccurs="0";xml.roleWrapperElement="true";xml.roleElement="true"</xsd:appinfo>
+                        <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+                     </xsd:annotation>
+                  </xsd:element>
+               </xsd:sequence>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="FAVOURITES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="favourite.book, favourite.variationPoint.shortLabel";mmt.qualifiedName="Shelf.favourite";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="BOOK-REF-CONDITIONAL" type="L:BOOK-REF-CONDITIONAL"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="LOANS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="loan.borrower, loan.context, loan.uuid";mmt.qualifiedName="Shelf.loan";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="LOAN" type="L:LOAN"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <xsd:element name="MARKS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="mark.row, mark.nothing";mmt.qualifiedName="Shelf.mark";pureMM.isOrdered="true";pureMM.maxOccurs="-1";pureMM.minOccurs="0";xml.roleElement="false";xml.roleWrapperElement="true";xml.typeElement="false"</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:group ref="L:MARK"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+         <!-- a wrapper of a sequence: two items, and no pureMM.maxOccurs to say otherwise -->
+         <xsd:element name="PAIR" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Shelf.pair";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:sequence>
+                  <xsd:element name="LEFT" type="xsd:string"/>
+                  <xsd:element name="RIGHT" type="xsd:string"/>
+               </xsd:sequence>
+            </xsd:complexType>
+         </xsd:element>
+         <!-- declared a wrapper of item content, but it holds a value -->
+         <xsd:element name="MOTTO" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Shelf.motto";pureMM.maxOccurs="1";pureMM.minOccurs="0";xml.roleElement="false";xml.roleWrapperElement="true";xml.typeElement="false"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <!-- counts on an element that is not a role -->
+         <xsd:element name="OPENING-HOURS" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">pureMM.maxOccurs="1"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:element name="BROKEN-KEYS" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="broken.variatioPoint.shortLabel, broken.variationPoint.ShortLabel, broken.context.shortName";mmt.qualifiedName="Shelf.broken";pureMM.maxOccurs="-1";pureMM.minOccurs="0";foo.bar="1"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable, atpWeird</xsd:appinfo>
+               <xsd:appinfo source="elsewhere">anything</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="LOAN" type="L:LOAN"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:group>
+
+   <!-- a class written without an element of its own inside the wrapper that holds it -->
+   <xsd:group name="MARK">
+      <xsd:choice>
+         <xsd:element name="ROW" type="xsd:string">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Mark.row";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:element name="COLUMN" type="xsd:string">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Mark.column";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:choice>
+   </xsd:group>
+
+   <xsd:complexType name="SHELF">
+      <xsd:sequence>
+         <xsd:group ref="L:NAMED"/>
+         <xsd:group ref="L:SHELF"/>
+         <xsd:group ref="L:VARIABLE"/>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="BOOK">
+      <xsd:sequence>
+         <xsd:group ref="L:NAMED"/>
+         <xsd:element name="BLURB" type="L:PARAGRAPH" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Book.blurb";pureMM.maxOccurs="1";pureMM.minOccurs="0";nonsense</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="MAGAZINE">
+      <xsd:sequence>
+         <xsd:group ref="L:NAMED"/>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <!-- mixed content: each role once in the meta-model, any number of times in a file -->
+   <xsd:complexType name="PARAGRAPH" mixed="true">
+      <xsd:choice minOccurs="0" maxOccurs="unbounded">
+         <xsd:element name="B" type="xsd:string">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Paragraph.bold";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:choice>
+   </xsd:complexType>
+
+   <!-- element-only content that repeats its roles in any order: the same as mixed content -->
+   <xsd:complexType name="VALUES">
+      <xsd:choice minOccurs="0" maxOccurs="unbounded">
+         <xsd:element name="V" type="xsd:string">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Values.v";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:choice>
+   </xsd:complexType>
+
+   <!-- a reference made conditional: the reference is named by the class it refers to -->
+   <xsd:complexType name="BOOK-REF-CONDITIONAL">
+      <xsd:sequence>
+         <xsd:element name="BOOK-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Book";pureMM.maxOccurs="1";pureMM.minOccurs="1"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:group ref="L:VARIABLE"/>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="LOAN">
+      <xsd:sequence>
+         <xsd:element name="BORROWER-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Loan.borrower";pureMM.maxOccurs="1";pureMM.minOccurs="1"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:element name="CONTEXT-REF" type="xsd:string" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Loan.context";pureMM.isOrdered="true";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <xsd:group ref="L:VARIABLE"/>
+      </xsd:sequence>
+      <xsd:attribute name="UUID" type="xsd:string">
+         <xsd:annotation>
+            <xsd:appinfo source="tags">mmt.qualifiedName="Loan.uuid";pureMM.maxOccurs="1";pureMM.minOccurs="0";xml.attribute="true"</xsd:appinfo>
+         </xsd:annotation>
+      </xsd:attribute>
+   </xsd:complexType>
+</xsd:schema>
