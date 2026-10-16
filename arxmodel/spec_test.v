@@ -186,6 +186,30 @@ fn test_content_hashes_name_elements_as_the_merge_does() {
 	assert hash('<A xmlns="urn:m" xmlns:p="urn:x" p:id="1"/>') == hash('<A xmlns="urn:m" xmlns:q="urn:x" q:id="1"/>')
 }
 
+fn test_an_attribute_ignored_by_one_spelling_is_left_out_of_every_hash() {
+	// p:id is ignored; q:id, bound to the same URI, is that attribute too
+	mk := fn (xml string) &flatxml.Doc {
+		mut d := flatxml.parse_string(xml) or { panic(err) }
+		d.resolve_namespaces() or { panic(err) }
+		return d
+	}
+	a := mk('<A xmlns="urn:m" xmlns:p="urn:x" p:id="1"/>')
+	b := mk('<A xmlns="urn:m" xmlns:q="urn:x" q:id="2"/>')
+	mut set := flatxml.DocSet.new()
+	mut da := a
+	mut db := b
+	set.add(mut da)
+	set.add(mut db)
+	m := &Model{
+		set: set
+	}
+	mut ch := new_content_hashes(['p:id'], Naming{
+		ns: 'urn:m'
+	})
+	ch.observe_ignored([m])
+	assert ch.hash(set.docs[0].root_node()) == ch.hash(set.docs[1].root_node())
+}
+
 fn test_an_item_keyed_by_content_is_shown_by_its_place() {
 	pallets := '<ITEMS><BOOK><SHORT-NAME>Dune</SHORT-NAME><PALLETS><PALLET><CONTENTS><ITEM>a</ITEM></CONTENTS></PALLET><PALLET><CONTENTS><ITEM>b</ITEM></CONTENTS></PALLET></PALLETS></BOOK></ITEMS>'
 	c := checked_by(lib_files('places', ['', pallets]), default_policy())

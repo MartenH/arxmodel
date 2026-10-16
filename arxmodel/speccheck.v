@@ -19,6 +19,9 @@ pub struct ContentHashes {
 	ignore []string
 	nm     Naming // how the merge names the documents' elements
 mut:
+	// the identities (expanded names) of attributes any document spells by an ignored name, so
+	// one ignored is ignored however another document spells it, as the merge ignores it
+	ignored map[string]bool
 	doc_of map[voidptr]int   // a document -> its number here
 	hashes [][]u64           // per document number, per node: the hash, 0 until computed
 	keys   [][]string        // per document number, per node: its repeat key, '' until made
@@ -29,6 +32,23 @@ pub fn new_content_hashes(ignore []string, nm Naming) &ContentHashes {
 	return &ContentHashes{
 		ignore: ignore.clone()
 		nm:     nm
+	}
+}
+
+// observe_ignored records, in every document of the models, the identity of each attribute
+// spelled by an ignored name: what the merge ignores in every contribution.
+pub fn (mut ch ContentHashes) observe_ignored(models []&Model) {
+	if ch.ignore.len == 0 {
+		return
+	}
+	for m in models {
+		for d in m.set.docs {
+			for a in 0 .. d.attr_tag.len {
+				if d.attr_name(u32(a)) in ch.ignore {
+					ch.ignored[d.tab.name(d.attr_id(u32(a)))] = true
+				}
+			}
+		}
 	}
 }
 
@@ -63,9 +83,10 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 		mut attrs := []string{}
 		for a := lo; a < hi; a++ {
 			name := d.attr_name(a)
-			if name !in ch.ignore && !d.is_ns_decl(a) {
+			id := d.tab.name(d.attr_id(a))
+			if name !in ch.ignore && id !in ch.ignore && id !in ch.ignored && !d.is_ns_decl(a) {
 				// by its identity (an expanded name in a namespace), as the merge compares it
-				attrs << '${d.tab.name(d.attr_id(a))}=${d.attr_value(a)}'
+				attrs << '${id}=${d.attr_value(a)}'
 			}
 		}
 		attrs.sort()

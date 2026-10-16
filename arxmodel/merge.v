@@ -948,6 +948,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	mut flat := flat0
 	flat.rules = with_settings(flat0.rules, fold, ignore)
 	mut ch := new_content_hashes(ignore, naming(flat.rules.local_ns, [m]))
+	ch.observe_ignored([m])
 	flat.rules = flat.merge_rules([m], mut ch)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
