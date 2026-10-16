@@ -28,6 +28,10 @@ pub mut:
 	nm    Naming // how the merge names the documents' elements
 	// `definition sep label` given more than once under one parent: a set
 	multi map[string]bool
+mut:
+	// per depth of observe_node, the keys of one parent's children: kept between parents, so
+	// the walk makes no list or map per node
+	keys_at [][]string
 }
 
 // role_of is the identity role an element is an item of, by its name and its parent's, each as
@@ -59,22 +63,35 @@ pub fn (mut vk ValueKeys) observe(models []&Model) {
 	}
 	for m in models {
 		for d in m.set.docs {
-			vk.observe_node(d.root_node())
+			vk.observe_node(d.root_node(), 0)
 		}
 	}
 }
 
-fn (mut vk ValueKeys) observe_node(n flatxml.Node) {
-	mut seen := map[string]bool{}
+fn (mut vk ValueKeys) observe_node(n flatxml.Node, depth int) {
+	for vk.keys_at.len <= depth {
+		vk.keys_at << []string{}
+	}
+	vk.keys_at[depth].clear()
 	for c in n.children() {
 		if r := vk.role_of(c) {
-			k := ident_of(c, r, vk.nm)
-			if k in seen {
-				vk.multi[k] = true
-			}
-			seen[k] = true
+			vk.keys_at[depth] << ident_of(c, r, vk.nm)
 		}
-		vk.observe_node(c)
+		vk.observe_node(c, depth + 1)
+	}
+	note_repeats(mut vk.keys_at[depth], mut vk.multi)
+}
+
+// note_repeats adds to multi each key keys holds more than once (sorting keys).
+fn note_repeats(mut keys []string, mut multi map[string]bool) {
+	if keys.len < 2 {
+		return
+	}
+	keys.sort()
+	for i in 1 .. keys.len {
+		if keys[i] == keys[i - 1] {
+			multi[keys[i]] = true
+		}
 	}
 }
 

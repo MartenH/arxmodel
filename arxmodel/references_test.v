@@ -44,8 +44,8 @@ fn test_referrable_from_the_schema() {
 	c := check(m, sc)!
 	// BOOK's PICK-REF has the reference's name but is plain text: not a reference
 	assert c.refs.checked == 12
-	for j, p in c.index.paths {
-		assert ty.referrable_type(c.index.typ_of(c.index.nodes[j])), p
+	for j, n in c.index.nodes {
+		assert ty.referrable_type(c.index.typ_of(n)), c.index.path_at(j)
 	}
 	// a node below a keyed item: the item with its key, after the referrable element's path
 	mut borrower := ''
@@ -84,7 +84,7 @@ fn test_references_resolved_by_path_and_kind() {
 fn test_a_path_held_twice_keeps_both_in_document_order() {
 	c := ref_check(skip_references: true)!
 	ix := c.index
-	assert ix.dup == ['/Poetry', '/Poetry/Odes']
+	assert ix.dup() == ['/Poetry', '/Poetry/Odes']
 	assert ix.holders('/Poetry/Odes').map(c.view.node(it).name()) == ['BOOK', 'MAGAZINE']
 	assert ix.holders('/POETRY/odes').len == 2
 }

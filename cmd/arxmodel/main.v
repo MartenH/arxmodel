@@ -823,9 +823,9 @@ fn cmd_list(o Opts) {
 		err: true
 	}, all_skipped())
 	mut paths := []string{}
-	for j, p in c.index.paths {
-		if c.view.node(c.index.nodes[j]).name() == kind {
-			paths << p
+	for j, n in c.index.nodes {
+		if c.view.node(n).name() == kind {
+			paths << c.index.path_at(j)
 		}
 	}
 	paths.sort()
@@ -934,7 +934,7 @@ fn report(out Out, o Opts, c &arxmodel.Checked, took time.Duration) int {
 		}
 	}
 	out.line('checked in ${ms(took)}: ${layers.join(', ')}')
-	out.line('${c.index.paths.len} referrable elements indexed by ${c.index.path_count()} AUTOSAR paths (${c.index.dup.len} held by more than one); ${c.refs.checked} references checked${if c.refs_from_files > 0 {
+	out.line('${c.index.nodes.len} referrable elements indexed by ${c.index.path_count()} AUTOSAR paths (${c.index.dup_count()} held by more than one); ${c.refs.checked} references checked${if c.refs_from_files > 0 {
 		', against ' + plural(c.refs_from_files, 'file') + ' loaded only to resolve them as well'
 	} else {
 		''
