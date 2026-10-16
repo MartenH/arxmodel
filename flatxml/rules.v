@@ -105,11 +105,12 @@ pub:
 	fold         bool     // keys compared ignoring ASCII case
 	ignore_attrs []string // attributes whose values may differ between contributions to a node
 	classify     ?ClassFn // the class of a parent, for rules that name one (`%class`)
-	// element names compared without their prefix: `p:x` and `x` are one name, and a rule, a key
-	// path and a merged node name the local name. That is for an element in its document's own
-	// namespace (the root's); one in another namespace keeps its name as written. The set's
-	// namespaces must be resolved.
-	local_names bool
+	// a namespace URI whose elements are named by their local name, whatever prefix a document
+	// spells it with: `<p:x xmlns:p="U">` and `<x xmlns="U">` are both `x`, to the merge, a rule,
+	// a key path and `MNode.child` alike. Every other element is named as written, as without it,
+	// and a document whose root is in another namespace is not merged with the others. Namespace
+	// declarations are not compared. '' for none; else the set's namespaces must be resolved.
+	local_ns string
 	// the identities of an aggregation in the order first written, as an ordered rule has them,
 	// without requiring an ordered rule's children to come from one document
 	written_order bool
@@ -144,7 +145,7 @@ struct CRule {
 struct CompiledRules {
 	rules    []CRule
 	fold     bool
-	local    bool // element names compared without their prefix
+	local    u32  // the namespace id of local_ns: no_local for none
 	written  bool // identities in the order first written
 	ignore   []u32 // ids of the attributes not compared
 	classify ?ClassFn
@@ -189,7 +190,7 @@ fn any_name(s string) bool {
 fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 	mut out := CompiledRules{
 		fold:    rs.fold
-		local:   rs.local_names
+		local:   local_ns_id(t, rs.local_ns)
 		written: rs.written_order
 	}
 	mut seen := map[string]int{}
@@ -232,9 +233,7 @@ fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 			path := if at < 0 { p } else { p[..at] }
 			// an attribute no document has gets an id no attribute has
 			attr := if at < 0 { no_name } else { t.id(p[at + 1..]) or { no_name - 1 } }
-			// with local names, a path is of local names, however the rule spells them
-			kpath := if rs.local_names { path.split('/').map(local_part(it)).join('/') } else { path }
-			parts << KeyPart{t.path(kpath), attr, all, false}
+			parts << KeyPart{t.path(path), attr, all, false}
 		}
 		mut kind := RuleKind.each
 		if keyed {
@@ -266,13 +265,13 @@ fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 				return error('rules ${prev + 1} and ${k + 1} both name ${pair}')
 			}
 			seen[pair] = k
-			sel := out.selector(parent, t, rs.classify != none, rs.local_names) or {
+			sel := out.selector(parent, t, rs.classify != none) or {
 				if err.msg() != '' {
 					return error('rule ${k + 1}: ${err.msg()}')
 				}
 				continue
 			}
-			cid := if c == '*' { u32(0) } else { t.id(rule_name(c, rs.local_names)) or { continue } }
+			cid := if c == '*' { u32(0) } else { t.id(c) or { continue } }
 			out.pairs[pair_key(sel, cid)] = u32(k)
 		}
 	}
@@ -288,15 +287,21 @@ fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 		rules:    rules
 		ignore:   ignore
 		classify: rs.classify
-		local:    rs.local_names
+		local:    out.local
 		written:  rs.written_order
 	}
 }
 
-// rule_name is an element name as a rule compares it: without its prefix with local names, where
-// the merge names every element by its local name.
-fn rule_name(name string, local bool) string {
-	return if local { local_part(name) } else { name }
+// no_local marks compiled rules with no local namespace.
+const no_local = u32(0xFFFF_FFFF)
+
+// local_ns_id is the id of the local namespace in the table: no_local for none, and for a URI no
+// document declares, an id no element has.
+fn local_ns_id(t &Names, uri string) u32 {
+	if uri == '' {
+		return no_local
+	}
+	return t.uri_ids[uri] or { no_local - 1 }
 }
 
 // local_part is a name without its prefix, sharing its bytes.
@@ -307,7 +312,7 @@ fn local_part(name string) string {
 
 // selector is the selector of a parent as a rule names it, made the first time it is named: an
 // error with no message when it names an element no document has (the rule applies to nothing).
-fn (mut cr CompiledRules) selector(parent string, t &Names, classifies bool, local bool) !u32 {
+fn (mut cr CompiledRules) selector(parent string, t &Names, classifies bool) !u32 {
 	if parent == '*' {
 		return 0
 	}
@@ -331,7 +336,7 @@ fn (mut cr CompiledRules) selector(parent string, t &Names, classifies bool, loc
 	}
 	mut ids := []u32{}
 	for nm in names.reverse() {
-		ids << t.id(rule_name(nm, local)) or { return error('') }
+		ids << t.id(nm) or { return error('') }
 	}
 	if ids.len == 1 {
 		if id := cr.by_name[ids[0]] {
@@ -461,7 +466,7 @@ fn (mut cr CompiledRules) resolve(ctx u32, child u32) u32 {
 }
 
 // key is the child's key under a keyed rule; none when it has none.
-fn (cr &CRule) key(c Node, local bool) ?string {
+fn (cr &CRule) key(c Node, local u32) ?string {
 	if f := cr.key_fn {
 		return f(c)
 	}
@@ -479,7 +484,7 @@ fn (cr &CRule) key(c Node, local bool) ?string {
 	return if any { parts.join(key_sep) } else { none }
 }
 
-fn (p &KeyPart) read(c Node, local bool) ?string {
+fn (p &KeyPart) read(c Node, local u32) ?string {
 	if p.own {
 		t := own_key_text(c)
 		return if t == '' { none } else { t }
@@ -487,7 +492,7 @@ fn (p &KeyPart) read(c Node, local bool) ?string {
 	if p.all && p.path.names.len > 0 {
 		mut texts := []string{}
 		// one slot an occurrence, '' where its attribute is absent, so length and order count
-		for n in c.find_all_by(p.path, local) {
+		for n in c.find_all_in(p.path, local) {
 			texts << if p.attr == no_name {
 				n.text()
 			} else {
@@ -496,7 +501,7 @@ fn (p &KeyPart) read(c Node, local bool) ?string {
 		}
 		return if texts.len == 0 { none } else { texts.join(key_list_sep) }
 	}
-	n := if p.path.names.len == 0 { c } else { c.find_by(p.path, local) }
+	n := if p.path.names.len == 0 { c } else { c.find_in(p.path, local) }
 	if !n.ok() {
 		return none
 	}
@@ -529,7 +534,7 @@ fn own_key_text(c Node) string {
 //
 //   # a comment; blank lines are ignored
 //   !fold                   keys are compared ignoring ASCII case
-//   !local                  element names compared without their prefix (namespaces resolved)
+//   !local <uri>            the elements of a namespace named by their local name (resolved)
 //   !written                an aggregation's identities in the order first written
 //   !ignore <attr>...       attributes whose values may differ between contributions
 //   <parent> <child>[,<child>...] [key=<path>[,<path>...]] [keyless=own|empty|quiet] [single] [merge]
@@ -542,7 +547,8 @@ fn own_key_text(c Node) string {
 // rule. Rules are listed in the order their children are written.
 pub fn parse_rules(text string) !RuleSet {
 	mut rules := []Rule{}
-	mut fold, mut local, mut written := false, false, false
+	mut fold, mut written := false, false
+	mut local := ''
 	mut ignore := []string{}
 	for n, raw in text.split_into_lines() {
 		line := raw.all_before('#').trim_space()
@@ -562,10 +568,10 @@ pub fn parse_rules(text string) !RuleSet {
 					ignore << words[1..]
 				}
 				'!local' {
-					if words.len > 1 {
-						return error('line ${n + 1}: `!local` takes nothing')
+					if words.len != 2 {
+						return error('line ${n + 1}: `!local` takes a namespace URI')
 					}
-					local = true
+					local = words[1]
 				}
 				'!written' {
 					if words.len > 1 {
@@ -628,7 +634,7 @@ pub fn parse_rules(text string) !RuleSet {
 		rules:        rules
 		fold:         fold
 		ignore_attrs: ignore
-		local_names:   local
+		local_ns:      local
 		written_order: written
 	}
 }
@@ -645,8 +651,9 @@ pub fn format_rules(rs RuleSet) !string {
 	if rs.fold {
 		lines << '!fold'
 	}
-	if rs.local_names {
-		lines << '!local'
+	if rs.local_ns != '' {
+		check_rule_word(rs.local_ns, 'the local namespace')!
+		lines << '!local ${rs.local_ns}'
 	}
 	if rs.written_order {
 		lines << '!written'

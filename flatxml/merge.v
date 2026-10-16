@@ -57,8 +57,6 @@ pub mut:
 	problems []Problem
 mut:
 	rules  CompiledRules
-	// every document's namespaces were resolved when the view was made: what local names need
-	resolved bool
 	source []Rule // the rules as given, so a node can say which put it together
 	count u32 // merged nodes; the arrays below are allocated for as many as the set has nodes
 	// per merged node
@@ -128,7 +126,7 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 	for d in s.docs {
 		total += d.len() - 1 - d.text_node_count()
 	}
-	if rules.local_names {
+	if rules.local_ns != '' {
 		for d in s.docs {
 			if d.ns.len != d.tag.len {
 				return error('${d.path}: merging by local names needs namespaces resolved')
@@ -149,7 +147,6 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 		kid_lo:  []u32{len: total + 1}
 		frags:   []Frag{len: total}
 	}
-	m.resolved = s.docs.all(it.ns.len == it.tag.len)
 	m.by_name.reserve(total / 8)
 	m.by_key.reserve(total / 8)
 	if s.docs.len > 0 {
@@ -197,10 +194,20 @@ fn (mut m Merged) fit() {
 	}
 }
 
-// name_of is the name id element i of d is merged by: with local names, its local name's.
+// name_of is the name id element i of d is merged by: its local name's when it is in the local
+// namespace, its name as written otherwise.
 @[inline]
 fn (m &Merged) name_of(d &Doc, i u32) u32 {
-	return if m.rules.local { d.local_tag(i) } else { d.tag[i] }
+	return d.name_in(i, m.rules.local)
+}
+
+// joins_root reports whether document d's root is merged into the root: of the root's name, and,
+// with a local namespace, in it (a root of another namespace may share its local name).
+fn (m &Merged) joins_root(d &Doc, root_tag u32) bool {
+	if m.name_of(d, 1) != root_tag {
+		return false
+	}
+	return m.rules.local == no_local || d.ns[1] == m.rules.local
 }
 
 // build makes the merged root, then the children of every merged node in turn.
@@ -209,7 +216,7 @@ fn (mut m Merged) build() {
 	root_tag := m.name_of(s.docs[0], 1)
 	mut at := [s.docs[0].root_node()]
 	for k, d in s.docs {
-		if m.name_of(d, 1) == root_tag {
+		if m.joins_root(d, root_tag) {
 			put(m.frags, m.nfrags, Frag{u32(k), 1})
 			m.nfrags++
 		} else {
@@ -698,6 +705,10 @@ fn (mut m Merged) differs(n u32) {
 			if d.attr_tag[b] in m.rules.ignore {
 				continue
 			}
+			// with a local namespace, how a document spells a namespace is not its content
+			if m.rules.local != no_local && d.is_ns_decl(b) {
+				continue
+			}
 			for a := a_lo; a < a_hi; a++ {
 				if d0.attr_tag[a] == d.attr_tag[b] {
 					if d0.attr_value(a) != d.attr_value(b) {
@@ -961,23 +972,11 @@ pub fn (n MNode) name() string {
 	return if n.i == no_mnode { '' } else { n.m.set.tab.name(n.m.name[n.i]) }
 }
 
-// local_id is the name id of the node's local name: the same id for `ar:X` and `X`. Needs every
-// document's namespaces resolved; text_tag for none.
-pub fn (n MNode) local_id() u32 {
-	if n.i == no_mnode {
-		return text_tag
-	}
-	// every document of the set, not the shared table: resolving one document splits the
-	// table's names for all of them
-	if !n.m.resolved && !names_resolved(n.m) {
-		panic('flatxml: local names need resolve_namespaces() to have run on every document')
-	}
-	return n.m.set.tab.local[n.m.name[n.i]]
-}
-
-// local_name is the node's name without its prefix; '' for none. Needs namespaces resolved.
+// local_name is the node's name without its prefix, read from the name alone (no namespace is
+// consulted: a foreign `ext:x` is `x` too); '' for none. What the merge names the node by is
+// `name()` / `tag()`.
 pub fn (n MNode) local_name() string {
-	return if n.i == no_mnode { '' } else { n.m.set.tab.names[n.local_id()] }
+	return if n.i == no_mnode { '' } else { local_part(n.name()) }
 }
 
 // key is the key that identifies the node, as its first contribution has it; '' for a node
@@ -1034,15 +1033,13 @@ pub fn (n MNode) parent() MNode {
 	return MNode{n.m, if n.i == no_mnode { no_mnode } else { n.m.parent[n.i] }}
 }
 
-// child is the child named name with key (with '' for a single child). With local names, name
-// is compared without its prefix too.
+// child is the child named name with key (with '' for a single child): named as the merge names
+// it, so with a local namespace one of its elements by its local name.
 pub fn (n MNode) child(name string, key string) MNode {
 	if n.i == no_mnode {
 		return n
 	}
-	id := n.m.set.tab.id(if n.m.rules.local { local_part(name) } else { name }) or {
-		return MNode{n.m, no_mnode}
-	}
+	id := n.m.set.tab.id(name) or { return MNode{n.m, no_mnode} }
 	return n.child_id(id, key)
 }
 

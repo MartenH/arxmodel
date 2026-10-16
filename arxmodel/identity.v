@@ -78,6 +78,7 @@ fn glob(pattern string, name string) bool {
 pub struct Identified {
 pub:
 	id Identity
+	ns string // the model's namespace: its elements are named by their local names
 pub mut:
 	lists map[string]bool // element names some document holds as a list of named elements
 	// `definition sep label` of values given more than once under one parent
@@ -95,8 +96,10 @@ struct TabFacts {
 	name   [][]u32 // each path of id.name, as name ids (none: a name the table lacks)
 	def    []u32   // the definition path
 	label  []u32   // the label path ('' when the name has one part)
-	// some name of the table has a prefix: a child is then found by its local name, `ar:X` as X
+	// some name of the table has a prefix: a child is then found by its name in the model's
+	// namespace (`ar:X` as X there), as the merge names it
 	prefixed bool
+	ns       u32 // the model namespace's id in the table (absent: an id no element has)
 }
 
 // path_ids is a path of child names as ids of a table, or none when one of them is not in it
@@ -112,7 +115,7 @@ fn path_ids(tab &flatxml.Names, path string) ?[]u32 {
 	return out
 }
 
-fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
+fn (id &Identity) tab_facts(tab &flatxml.Names, ns u32) &TabFacts {
 	mut by_def := []bool{len: tab.len()}
 	mut prefixed := false
 	for k in 2 .. tab.len() {
@@ -124,6 +127,7 @@ fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
 	return &TabFacts{
 		tab:      tab
 		prefixed: prefixed
+		ns:       ns
 		by_def:   by_def
 		name:   id.name.map(path_ids(tab, it) or { []u32{} })
 		def:    path_ids(tab, r.definition) or { []u32{} }
@@ -144,13 +148,13 @@ fn (x &Identified) facts(n flatxml.Node) ?&TabFacts {
 
 // ids_text is the trimmed text at a path of child name ids below n ('' where there is none),
 // without copying: a slice of the document's text.
-fn ids_text(n flatxml.Node, ids []u32, prefixed bool) string {
+fn ids_text(n flatxml.Node, ids []u32, prefixed bool, ns u32) string {
 	if ids.len == 0 {
 		return ''
 	}
 	mut cur := n
 	for tag in ids {
-		cur = if prefixed { child_local_id(cur, tag) } else { cur.child_id(tag) }
+		cur = if prefixed { child_named_in(cur, tag, ns) } else { cur.child_id(tag) }
 		if !cur.ok() {
 			return ''
 		}
@@ -158,10 +162,11 @@ fn ids_text(n flatxml.Node, ids []u32, prefixed bool) string {
 	return trimmed(cur.text())
 }
 
-// child_local_id is the first child element whose local name has id `local`.
-fn child_local_id(n flatxml.Node, local u32) flatxml.Node {
+// child_named_in is the first child element named `name` in a merge whose local namespace has id
+// ns: by its local name when it is in that namespace, as written otherwise (`Doc.name_in`).
+fn child_named_in(n flatxml.Node, name u32, ns u32) flatxml.Node {
 	for c in n.children() {
-		if c.local_id() == local {
+		if c.doc.name_in(c.i, ns) == name {
 			return c
 		}
 	}
@@ -237,9 +242,9 @@ fn (x &Identified) named(n flatxml.Node) ?string {
 // named_by is `named` by the facts of n's name table: the same name, read by ids.
 fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 	tag := n.tag()
-	first := ids_text(n, f.name[0], f.prefixed)
+	first := ids_text(n, f.name[0], f.prefixed, f.ns)
 	if int(tag) < f.by_def.len && f.by_def[tag] {
-		k := ids_text(n, f.def, f.prefixed) + flatxml.key_sep + ids_text(n, f.label, f.prefixed)
+		k := ids_text(n, f.def, f.prefixed, f.ns) + flatxml.key_sep + ids_text(n, f.label, f.prefixed, f.ns)
 		if flatxml.empty_key(k) && first == '' {
 			return none
 		}
@@ -256,7 +261,7 @@ fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 	}
 	mut parts := [first]
 	for p in f.name[1..] {
-		parts << ids_text(n, p, f.prefixed)
+		parts << ids_text(n, p, f.prefixed, f.ns)
 	}
 	return parts.join(flatxml.key_sep)
 }
@@ -267,7 +272,7 @@ pub fn (mut x Identified) observe(models []&Model) {
 	for m in models {
 		for d in m.set.docs {
 			if x.facts(d.root_node()) == none {
-				x.tabs << x.id.tab_facts(d.tab)
+				x.tabs << x.id.tab_facts(d.tab, d.ns_id(x.ns) or { u32(0xFFFF_FFFE) })
 			}
 			f := x.facts(d.root_node()) or { panic('unreachable') }
 			x.observe_node(d.root_node(), f)
@@ -283,9 +288,9 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 		any = true
 		tag := c.tag()
 		by_def := int(tag) < f.by_def.len && f.by_def[tag]
-		named := ids_text(c, f.name[0], f.prefixed) != ''
+		named := ids_text(c, f.name[0], f.prefixed, f.ns) != ''
 		if by_def && !named {
-			k := ids_text(c, f.def, f.prefixed) + flatxml.key_sep + ids_text(c, f.label, f.prefixed)
+			k := ids_text(c, f.def, f.prefixed, f.ns) + flatxml.key_sep + ids_text(c, f.label, f.prefixed, f.ns)
 			if k in seen {
 				x.multi[k] = true
 			}
@@ -367,6 +372,7 @@ pub fn list_key(name string) string {
 pub fn identity_flat(id Identity, models []&Model) Flat {
 	mut x := &Identified{
 		id: id
+		ns: model_namespace(models)
 	}
 	x.observe(models)
 	key_fn := fn [x] (n flatxml.Node) ?string {
@@ -383,7 +389,7 @@ pub fn identity_flat(id Identity, models []&Model) Flat {
 				},
 			]
 			// a prefix is a spelling of the namespace: `ar:X` in one file is X in another
-			local_names: true
+			local_ns: x.ns
 		}
 		described:         ['built-in identity']
 		unkeyed_by_design: true

@@ -121,7 +121,7 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	flat.rules = flatxml.RuleSet{
 		...flat.rules
 		written_order: true
-		local_names:   true
+		local_ns:      model_namespace([m])
 	}
 	copts := CheckOptions{
 		skip_xml:          true
@@ -158,6 +158,17 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		}
 	}
 	return o
+}
+
+// model_namespace is the namespace a model is in: its first document's root's, which a merge
+// names by local names (flatxml's local_ns); '' for no document.
+pub fn model_namespace(models []&Model) string {
+	for m in models {
+		for d in m.set.docs {
+			return if d.ns.len == d.tag.len { d.ns_uri(d.ns_of(d.root())) } else { '' }
+		}
+	}
+	return ''
 }
 
 // free releases the documents. Nothing opened from them may be used after.

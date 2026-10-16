@@ -226,3 +226,16 @@ fn test_the_policy_filters_apply_to_what_open_found() {
 }
 
 const open_identity_line = 'item_identity = { "EcucContainerValue.parameterValue" = "definition", "EcucContainerValue.referenceValue" = "definition" }'
+
+fn test_an_element_of_another_namespace_is_not_the_models() {
+	text := '<AUTOSAR xmlns="urn:m" xmlns:ext="urn:x"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
+		'<THING><SHORT-NAME>A</SHORT-NAME></THING><ext:THING><ext:SHORT-NAME>Q</ext:SHORT-NAME></ext:THING>' +
+		'</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
+	mut o := open_sources([src('a.arxml', text)])!
+	defer {
+		o.free()
+	}
+	assert model_namespace([o.model]) == 'urn:m'
+	assert o.of_kind('THING').map(o.path_of(it)) == ['/P/A']
+	assert !o.at('/P/Q').ok()
+}

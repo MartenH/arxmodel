@@ -429,10 +429,7 @@ fn (p &Path) ids_for(t &Names) []u32 {
 
 // find is the first element, in document order, at path p below n.
 pub fn (n Node) find(p Path) Node {
-	if n.i == no_node || p.names.len == 0 {
-		return Node{n.doc, no_node}
-	}
-	return Node{n.doc, n.doc.find_from(n.i, p.ids_for(n.doc.tab), 0)}
+	return n.find_in(p, no_local)
 }
 
 // at is find with the path compiled on the spot: for a one-off lookup.
@@ -443,78 +440,42 @@ pub fn (n Node) at(p string) Node {
 	return n.find(n.doc.tab.path(p))
 }
 
-// find_by is find, the names compared without their prefix where local is set (namespaces
-// resolved).
-fn (n Node) find_by(p Path, local bool) Node {
-	if !local {
-		return n.find(p)
-	}
+// find_in is find, each element named as a merge with local namespace `local` names it
+// (`Doc.name_in`); no_local is find itself.
+fn (n Node) find_in(p Path, local u32) Node {
 	if n.i == no_node || p.names.len == 0 {
 		return Node{n.doc, no_node}
 	}
-	return Node{n.doc, n.doc.find_local(n.i, p.ids_for(n.doc.tab), 0)}
+	return Node{n.doc, n.doc.find_from(n.i, p.ids_for(n.doc.tab), 0, local)}
 }
 
-// find_all_by is find_all, the names compared without their prefix where local is set.
-fn (n Node) find_all_by(p Path, local bool) []Node {
-	if !local {
-		return n.find_all(p)
-	}
+// find_all_in is find_all, each element named as find_in names it.
+fn (n Node) find_all_in(p Path, local u32) []Node {
 	mut out := []Node{}
 	if n.i != no_node && p.names.len > 0 {
-		n.doc.collect_local(n.i, p.ids_for(n.doc.tab), 0, mut out)
+		n.doc.collect(n.i, p.ids_for(n.doc.tab), 0, local, mut out)
 	}
 	return out
-}
-
-fn (d &Doc) find_local(i u32, ids []u32, k int) u32 {
-	mut c := d.first_child(i)
-	for c != no_node {
-		if d.tag[c] != text_tag && d.local_tag(c) == ids[k] {
-			if k == ids.len - 1 {
-				return c
-			}
-			found := d.find_local(c, ids, k + 1)
-			if found != no_node {
-				return found
-			}
-		}
-		c = d.next_sibling(c)
-	}
-	return no_node
-}
-
-fn (d &Doc) collect_local(i u32, ids []u32, k int, mut out []Node) {
-	mut c := d.first_child(i)
-	for c != no_node {
-		if d.tag[c] != text_tag && d.local_tag(c) == ids[k] {
-			if k == ids.len - 1 {
-				out << Node{d, c}
-			} else {
-				d.collect_local(c, ids, k + 1, mut out)
-			}
-		}
-		c = d.next_sibling(c)
-	}
 }
 
 // find_all is every element at path p below n, in document order.
 pub fn (n Node) find_all(p Path) []Node {
 	mut out := []Node{}
 	if n.i != no_node && p.names.len > 0 {
-		n.doc.collect(n.i, p.ids_for(n.doc.tab), 0, mut out)
+		n.doc.collect(n.i, p.ids_for(n.doc.tab), 0, no_local, mut out)
 	}
 	return out
 }
 
-fn (d &Doc) find_from(i u32, ids []u32, k int) u32 {
+// find_from and collect walk a path of name ids below i, each element named by name_in.
+fn (d &Doc) find_from(i u32, ids []u32, k int, local u32) u32 {
 	mut c := d.first_child(i)
 	for c != no_node {
-		if d.tag[c] == ids[k] {
+		if d.name_in(c, local) == ids[k] {
 			if k == ids.len - 1 {
 				return c
 			}
-			found := d.find_from(c, ids, k + 1)
+			found := d.find_from(c, ids, k + 1, local)
 			if found != no_node {
 				return found
 			}
@@ -524,14 +485,14 @@ fn (d &Doc) find_from(i u32, ids []u32, k int) u32 {
 	return no_node
 }
 
-fn (d &Doc) collect(i u32, ids []u32, k int, mut out []Node) {
+fn (d &Doc) collect(i u32, ids []u32, k int, local u32, mut out []Node) {
 	mut c := d.first_child(i)
 	for c != no_node {
-		if d.tag[c] == ids[k] {
+		if d.name_in(c, local) == ids[k] {
 			if k == ids.len - 1 {
 				out << Node{d, c}
 			} else {
-				d.collect(c, ids, k + 1, mut out)
+				d.collect(c, ids, k + 1, local, mut out)
 			}
 		}
 		c = d.next_sibling(c)
