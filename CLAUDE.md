@@ -1,0 +1,44 @@
+# arxmodel — guide for coding agents
+
+`AGENTS.md` points here; this is the guide. Keep it short and true.
+
+arxmodel loads AUTOSAR models (ARXML) from many files as one model, on
+[flatxml](https://github.com/MartenH/flatxml). It is public and is likely to be used inside
+companies, on their models. That shapes what may be written down here.
+
+## What never goes into the repository, a commit message or a PR
+
+- **Nothing about a local project.** Runs against real models happen on the user's machine, often
+  on a company's model. Do not name such a project, its paths, its directory layout, its
+  modules, its build, its tools or the company, in code, comments, docs, test data, commit
+  messages, PR titles or PR descriptions. GitHub keeps PR text and the commits PRs point at
+  even after a history rewrite, so a mention cannot be taken back.
+  - Describe a local run generically: "on a large real-world model", with the effect measured
+    (faster, fewer findings, same output). Leave out file counts, sizes and finding counts that
+    could identify the model.
+  - Examples use neutral names (`model/modules/*/*.arxml`, `Trace`), never real ones.
+- **No AUTOSAR material.** No AUTOSAR schema (XSD), no ARXML file from AUTOSAR or a vendor, and
+  no table generated from either: the rules are read from the user's schema at load time.
+  Tests use the synthetic schemas and documents in `testdata/`. Specification items are cited
+  by identifier only (`[TPS_GST_00417]`), never quoted at length. Nothing claims conformance to
+  an AUTOSAR specification or endorsement by AUTOSAR; the README carries the trademark notice.
+- **No other tool's code.** A merge behaviour may be learned from another tool, never its code.
+  The `automat` policy profile is an option, described as such, with no comparison to any tool.
+- **The maintainer's commits are always from marten.hildell@gmail.com**, as author AND as
+  committer, never a work address. Contributors use whatever identity they like. Set
+  `git config user.email marten.hildell@gmail.com` in the checkout, and
+  `git config core.hooksPath .githooks`: `pre-commit` refuses a commit that looks like the
+  maintainer under another address, `pre-push` re-checks every commit about to be pushed
+  (a rebase or cherry-pick runs no commit hook). A merge in GitHub's web UI makes GitHub the
+  committer, so the maintainer merges by pushing a fast-forward instead.
+
+## Build and test
+
+```sh
+export V_MACOS_V3_NO_FALLBACK=1
+v test .                              # unit tests on the synthetic schemas
+v -prod -o bin/arxmodel cmd/arxmodel   # the command
+```
+
+V3 only; `.v-version` and `.vc-version` pin the toolchain. flatxml is vendored in `flatxml/` by
+`scripts/vendor_flatxml.sh`, never edited by hand.
