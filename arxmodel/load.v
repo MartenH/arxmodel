@@ -93,14 +93,17 @@ fn expand_into(args []string, dir string, mut out []string, mut lists []string, 
 		} else {
 			a
 		}
-		// a file is itself: `@x` names a list unless `@x` is a file and `x` is not
-		if !p.starts_with('@') || (os.is_file(p) && !os.is_file(p[1..])) {
-			out << p
-			continue
-		}
+		// a file is itself: `@x` names a list unless `@x` is a file and `x` is not, both read from
+		// the list's directory when the entry is a relative one inside a list
 		mut file := p[1..]
-		if dir != '' && !os.is_abs_path(file) {
+		mut literal := p
+		if p.starts_with('@') && dir != '' && !os.is_abs_path(file) {
 			file = os.norm_path(os.join_path(dir, file))
+			literal = os.norm_path(os.join_path(dir, p))
+		}
+		if !p.starts_with('@') || (os.is_file(literal) && !os.is_file(file)) {
+			out << literal
+			continue
 		}
 		real := os.real_path(file)
 		if real in seen {

@@ -146,6 +146,12 @@ fn cmd_git_diff(o Opts) {
 			println(l)
 		}
 	}
+	if o.rules_err != '' {
+		println('(not read as a model: ${o.rules_err}; a text diff follows)')
+		res := os.exec(['git', 'diff', '--no-index', '--no-ext-diff', '--', o.paths[1], o.paths[4]])
+		print(res.output)
+		exit(0)
+	}
 	r, v := versions(o, [o.paths[1], o.paths[4]], true) or {
 		println('(not read as a model: ${err.msg()}; a text diff follows)')
 		res := os.exec(['git', 'diff', '--no-index', '--no-ext-diff', '--', o.paths[1], o.paths[4]])

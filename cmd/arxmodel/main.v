@@ -157,6 +157,7 @@ mut:
 	diff       string   // policy: the policy to compare with
 	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
 	origin     string   // resolved: where the rules come from, for the `rules:` line
+	rules_err  string   // git-diff: why the rules could not be resolved, so it falls back to a text diff
 	format     string = 'text' // check: how the report is written
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
@@ -272,8 +273,12 @@ fn main() {
 	// git-setup records only what it is given: the drivers resolve the rest when they run
 	if args[0] in ['check', 'merge', 'get', 'list', 'diff', 'merge3', 'git-diff', 'rules'] {
 		resolve_rules(mut opts) or {
-			eprintln(err.msg())
-			exit(2)
+			// git's diff driver always answers, with a text diff where it cannot read models
+			if args[0] != 'git-diff' {
+				eprintln(err.msg())
+				exit(2)
+			}
+			opts.rules_err = err.msg()
 		}
 	}
 	match args[0] {

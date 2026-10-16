@@ -239,6 +239,11 @@ fn test_the_lists_read_are_reported() {
 	f := find_arxml(['@' + os.join_path(dir, 'outer.txt')], LoadOptions{})!
 	assert f.files.map(os.file_name(it)) == ['a.arxml']
 	assert f.lists.map(os.file_name(it)) == ['outer.txt', 'inner.txt']
+	// a list's relative `@x` entry that is a file, read from the list's directory: that file
+	os.write_file(os.join_path(dir, '@notes.arxml'), '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'with_at.txt'), '@notes.arxml\n')!
+	g := find_arxml(['@' + os.join_path(dir, 'with_at.txt')], LoadOptions{})!
+	assert g.files.map(os.file_name(it)) == ['@notes.arxml']
 }
 
 fn test_a_unc_glob_keeps_its_share() {
@@ -272,6 +277,16 @@ fn test_an_unreadable_configuration_is_an_error() {
 	}
 	configured_schema_dir() or {
 		assert err.msg().contains('config.toml'), err.msg()
+		// and one below a directory that cannot be searched is not absent either
+		os.chmod(cfg, 0o600)!
+		os.chmod(os.join_path(dir, 'arxmodel'), 0o000)!
+		configured_schema_dir() or {
+			os.chmod(os.join_path(dir, 'arxmodel'), 0o755) or {}
+			assert err.msg().contains('config.toml'), err.msg()
+			return
+		}
+		os.chmod(os.join_path(dir, 'arxmodel'), 0o755) or {}
+		assert false, 'a configuration that cannot be reached read as none'
 		return
 	}
 	assert false, 'an unreadable configuration read as none'
