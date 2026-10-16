@@ -101,6 +101,10 @@ fn test_names_in_a_policy_are_names() {
 	// a severity key: an element, or @ and an attribute, after the kind
 	refused(with_severity('"merge.value_differs:SHORT NAME" = "error"'), '`SHORT NAME` is not an element name or an @attribute name')
 	refused(with_severity('"merge.value_differs:@" = "error"'), '`@` is not an element name')
+	// an expanded name, as a merge names another namespace's element or a namespaced attribute
+	parse_policy(with_severity('"merge.value_differs:@{http://x/e}id" = "error"'))!
+	parse_policy(with_severity('"merge.value_differs:{urn:x}ITEM" = "error"'))!
+	refused(with_severity('"merge.value_differs:{urn:x}" = "error"'), 'is not an element name')
 	refused(with_severity('"merge.value_differs:" = "error"'), '`` is not an element name')
 	refused(with_severity('"merge:X" = "error"'), 'an element or attribute needs a kind')
 	refused(with_severity('"nolayer" = "error"'), 'no layer `nolayer`')

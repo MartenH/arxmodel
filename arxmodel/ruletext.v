@@ -175,8 +175,9 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	st.fold = rs.fold
 	st.ignore_attrs = rs.ignore_attrs.clone()
 	f.rules = flatxml.RuleSet{
-		rules:    rs.rules
-		local_ns: pv.namespace
+		rules:         rs.rules
+		local_ns:      pv.namespace
+		written_order: rs.written_order
 	}
 	f.described = f.rules.rules.map('')
 	return f, pv, st

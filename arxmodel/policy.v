@@ -548,7 +548,7 @@ fn check_severity_key(key string) ! {
 	if key.contains(':') {
 		what := key.all_after(':')
 		name := if what.starts_with('@') { what[1..] } else { what }
-		if !xml_name(name) {
+		if !xml_name(name) && !expanded_name(name) {
 			return error('policy: severity `${key}`: `${what}` is not an element name or an @attribute name')
 		}
 	}
@@ -577,6 +577,16 @@ fn unquoted_severity_key(text string) ?string {
 
 // xml_name reports whether s is an XML name (ASCII letters, digits, `_`, `-`, `.`, `:`, and any
 // character beyond ASCII; not starting with a digit, `-` or `.`).
+// expanded_name reports whether s is an expanded name, `{uri}local`, as a merge names an element
+// or attribute of a namespace (flatxml's local_ns, Doc.attr_id): a finding about one is selected so.
+fn expanded_name(s string) bool {
+	if !s.starts_with('{') {
+		return false
+	}
+	e := s.index_u8(`}`)
+	return e > 0 && xml_name(s[e + 1..])
+}
+
 fn xml_name(s string) bool {
 	if s == '' {
 		return false

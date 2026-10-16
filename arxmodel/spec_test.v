@@ -129,6 +129,15 @@ fn test_a_rules_file_keeps_what_the_policy_made() {
 	back, pv, _ := parse_rules_file(text)!
 	assert back.repeat_rules == flat.repeat_rules && back.ignored_content == flat.ignored_content
 	assert 'item_itself copy' in pv.policy && 'file_info_comment ignore' in pv.policy
+	// the merge settings a rules file carries come back: its namespace, and !written
+	assert back.rules.local_ns == u.ns
+	mut written := flat
+	written.rules = flatxml.RuleSet{
+		...flat.rules
+		written_order: true
+	}
+	back2, _, _ := parse_rules_file(format_rules(written, provenance(u, p), p.settings())!)!
+	assert back2.rules.written_order
 }
 
 fn test_each_node_by_the_rule_applied_to_it() {
