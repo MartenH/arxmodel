@@ -71,7 +71,10 @@ pub:
 mut:
 	pieces []Piece
 	nodes  map[u64]NodeEdit
-	number int = -1 // its document's number in a set, when it is one of a merged view's (`MEdit`)
+	// child lists `put` and `relocate` asked for (`kids`), kept current by every edit that
+	// changes them, so a run of edits under one parent does not rebuild its list each time
+	kid_lists map[u64][]u64
+	number    int = -1 // its document's number in a set, when it is one of a merged view's (`MEdit`)
 }
 
 // edit starts an empty edit set over the document, which must outlive it.
@@ -96,6 +99,7 @@ pub fn (mut e Edit) free() {
 	}
 	e.pieces = [e.pieces[0]]
 	e.nodes = map[u64]NodeEdit{}
+	e.kid_lists = map[u64][]u64{}
 }
 
 // ENode is a node of an edited document: an element, read with the edits applied.
@@ -371,6 +375,26 @@ fn (e &Edit) kids(p u64) []u64 {
 	return out
 }
 
+// kid_list is `kids(p)`, from `kid_lists` when it is there.
+fn (mut e Edit) kid_list(p u64) []u64 {
+	if l := e.kid_lists[p] {
+		return l
+	}
+	l := e.kids(p)
+	e.kid_lists[p] = l
+	return l
+}
+
+// kid_left takes k out of p's kept child list.
+fn (mut e Edit) kid_left(p u64, k u64) {
+	mut l := e.kid_lists[p] or { return }
+	i := l.index(k)
+	if i >= 0 {
+		l.delete(i)
+		e.kid_lists[p] = l
+	}
+}
+
 // --- edits ----------------------------------------------------------------------------------
 
 // check_node fails unless n is an element of this edit set.
@@ -570,7 +594,8 @@ fn (mut e Edit) relocate(n ENode, parent ENode, index int, what string) ! {
 		}
 		a = e.parent_of(a)
 	}
-	count := e.kids(parent.key).filter(it != n.key).len
+	list := e.kid_list(parent.key)
+	count := if e.parent_of(n.key) == parent.key { list.len - 1 } else { list.len }
 	if index < 0 || index > count {
 		return error('${what}: index ${index} is out of range: <${parent.name()}> has ${count} child elements')
 	}
@@ -583,6 +608,7 @@ fn (mut e Edit) relocate(n ENode, parent ENode, index int, what string) ! {
 fn (mut e Edit) detach(k u64) {
 	mut ne := e.nodes[k] or { NodeEdit{} }
 	if ne.placed {
+		e.kid_left(ne.parent, k)
 		mut pe := e.nodes[ne.parent] or { NodeEdit{} }
 		mut group := pe.ins[ne.anchor] or { []u64{} }
 		group.delete(group.index(k))
@@ -598,6 +624,7 @@ fn (mut e Edit) detach(k u64) {
 	} else if !ne.detached {
 		op := e.original_parent(k)
 		if op != no_key {
+			e.kid_left(op, k)
 			mut pe := e.nodes[op] or { NodeEdit{} }
 			pe.lost++
 			e.nodes[op] = pe
@@ -609,7 +636,7 @@ fn (mut e Edit) detach(k u64) {
 
 // put files k, which is detached, under p before what is now its child element number index.
 fn (mut e Edit) put(k u64, p u64, index int) ! {
-	list := e.kids(p)
+	mut list := e.kid_list(p)
 	if index < 0 || index > list.len {
 		return error('index ${index} is out of range: <${e.doc_of(p).name(kindex(p))}> has ${list.len} child elements')
 	}
@@ -634,6 +661,8 @@ fn (mut e Edit) put(k u64, p u64, index int) ! {
 	}
 	pe.ins[anchor] = group
 	e.nodes[p] = pe
+	list.insert(index, k)
+	e.kid_lists[p] = list
 	mut ne := e.nodes[k] or { NodeEdit{} }
 	ne.placed = true
 	ne.parent = p

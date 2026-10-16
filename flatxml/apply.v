@@ -701,6 +701,7 @@ fn (mut e Edit) unlift(k u64) {
 		mut pe := e.nodes[op] or { NodeEdit{} }
 		pe.lost--
 		e.nodes[op] = pe
+		e.kid_lists.delete(op)
 	}
 	ne.detached = false
 	e.nodes[k] = ne

@@ -21,6 +21,8 @@
 // are skipped. Names are interned to u32 ids, in a table a set of documents can share.
 module flatxml
 
+import sync.stdatomic as _
+
 // Reserved name ids. Element names are interned from 2 up.
 pub const text_tag = u32(0) // a text node
 pub const doc_tag = u32(1) // node 0, the document
@@ -52,6 +54,9 @@ pub mut:
 	// The interned names (shared by the documents of a set) and namespace URIs.
 	tab &Names = unsafe { nil }
 mut:
+	// the line index `line_col` and `pos` answer from, built by the first of them and published
+	// once (atomically: documents are read from several threads); nil until then
+	lines      voidptr
 	own_tab    bool // the table is this document's alone, and free() releases it
 	mapped     bool
 	keep_bytes []u8   // owns the source when it came from parse_bytes
@@ -126,6 +131,7 @@ pub fn (mut d Doc) free() {
 		d.ns.free()
 		d.attr_ns.free()
 	}
+	d.lines = unsafe { nil }
 	if d.own_tab {
 		d.tab.free()
 		d.own_tab = false
@@ -324,10 +330,29 @@ pub fn (d &Doc) attr(i u32, name string) ?string {
 
 // --- positions -----------------------------------------------------------------------------
 
-// line_col is the 1-based line and column (in bytes) of node i. It counts lines from the start
-// of the file, so it is meant for messages; `LineIndex` answers many of them quickly.
+// line_col is the 1-based line and column (in bytes) of node i. The first call scans the source
+// for line starts once (`line_index`); every call then is a binary search, so a position per
+// finding stays cheap however many findings a large file has.
 pub fn (d &Doc) line_col(i u32) (int, int) {
-	return line_col_at(d.src, int(d.src_off[i]))
+	return d.lines().line_col(d.src_off[i])
+}
+
+// lines is the document's line index, built on first use. Two threads may both build it; the
+// first to publish wins and the other's copy is dropped.
+fn (d &Doc) lines() &LineIndex {
+	slot := voidptr(&d.lines)
+	p := C.atomic_load_ptr(slot)
+	if p != unsafe { nil } {
+		return unsafe { &LineIndex(p) }
+	}
+	built := &LineIndex{
+		...d.line_index()
+	}
+	mut expected := unsafe { nil }
+	if C.atomic_compare_exchange_strong_ptr(slot, voidptr(&expected), isize(built)) {
+		return built
+	}
+	return unsafe { &LineIndex(C.atomic_load_ptr(slot)) }
 }
 
 // pos is `path:line:col` of node i.
