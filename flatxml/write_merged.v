@@ -227,7 +227,7 @@ fn (mut w MergedWriter) element(mut em Emitter, n u32, end u32, scope map[string
 			inner[p] = u
 		}
 	}
-	mut extras := w.extra_attrs(n, d, i, mut inner, mut decls)
+	mut extras := w.extra_attrs(n, d, i, mut inner, mut decls)!
 	if n == w.root && w.over.changes.len > 0 {
 		// the attributes given in place of those of their expanded names
 		extras = extras.filter(expanded_attr(it.name, inner) !in w.over.names)
@@ -253,25 +253,26 @@ fn (mut w MergedWriter) element(mut em Emitter, n u32, end u32, scope map[string
 // (element i of d) have, as attribute changes to its start tag: never a namespace declaration;
 // a prefixed one by a prefix bound to its namespace where it is written, declared (in decls and
 // inner) where none is.
-fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]string, mut decls []string) []AttrChange {
+fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]string, mut decls []string) ![]AttrChange {
 	m := w.m
 	if m.frag_lo[n + 1] - m.frag_lo[n] == 1 {
 		return []
 	}
 	// an attribute already given, by its expanded name where it has a namespace: p:id and q:id
 	// with p and q bound to one URI are one attribute, and the first fragment's value stands
-	mut have := map[string]bool{}
+	mut have := map[string]string{} // expanded name -> the value written
 	mut used := map[string]bool{} // prefixes the element's own names use
 	used[prefix_of(d.name(i))] = true
 	lo, hi := d.attr_range(i)
 	f0 := m.frags[m.frag_lo[n]] // d's element i
 	own := w.bindings_in(f0.doc, f0.i)
+	resolved := d.attr_ns.len == d.attr_tag.len
 	for a := lo; a < hi; a++ {
 		name := d.attr_name(a)
 		used[prefix_of(name)] = true
 		// a declaration is a binding, not an attribute: `xmlns:id` is not `id`
 		if !is_ns_decl_name(name) {
-			have[expanded_attr(name, own)] = true
+			have[expanded_attr(name, own)] = d.attr_value(a)
 		}
 	}
 	mut out := []AttrChange{}
@@ -285,11 +286,17 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 			if is_ns_decl_name(name) {
 				continue
 			}
+			// an element holds one attribute of an expanded name: the first fragment's value stands
+			// where the merge compared them (both documents resolved, a difference reported); where
+			// it could not, a different value is refused rather than dropped in silence
 			key := expanded_attr(name, scope)
-			if key in have {
+			if first := have[key] {
+				if first != fd.attr_value(a) && !(resolved && fd.attr_ns.len == fd.attr_tag.len) {
+					return error('${w.m.pos(Node{fd, f.i})}: ${name} is the attribute ${key.all_after(' ')} of namespace ${key.all_before(' ')} that another fragment gives the value "${first}"; resolve the documents\' namespaces and the merge reports the difference')
+				}
 				continue
 			}
-			have[key] = true
+			have[key] = fd.attr_value(a)
 			p := prefix_of(name)
 			if p == '' || p == 'xml' {
 				out << AttrChange{name, fd.attr_value(a)}

@@ -110,9 +110,10 @@ pub:
 	// a key path and `MNode.child` alike. An element of any other namespace is named by its
 	// expanded name, `{V}x` (`{}x` for none), prefixed or not, so it is never taken for the
 	// namespace's `x`, nor for another namespace's spelled alike. A document whose root is in
-	// another namespace is not merged with the others, and namespace declarations are not
-	// compared. '' for none; else the set's namespaces must be resolved. (An attribute in a
-	// namespace is told by its expanded name with or without this: `Doc.attr_id`.)
+	// another namespace is not merged with the others. Namespace declarations are compared as
+	// any attribute is (`ignore_attrs` leaves them out). '' for none; else the set's namespaces
+	// must be resolved. (An attribute in a namespace is told by its expanded name with or without
+	// this: `Doc.attr_id`.)
 	local_ns string
 	// the identities of an aggregation in the order first written, as an ordered rule has them,
 	// without requiring an ordered rule's children to come from one document
