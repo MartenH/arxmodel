@@ -62,8 +62,7 @@ mut:
 	// a node of the new view -> the node of the old one it was matched with, for the children of
 	// every pair compared
 	matched map[u32]u32
-	// for describing: each file's lines, each parent's children's places among their names
-	lines      map[u64]LineIndex
+	// for describing: each parent's children's places among their names
 	old_places map[u32][]int
 	new_places map[u32][]int
 }
@@ -795,19 +794,9 @@ pub fn (mut d Diff) path(n MNode) string {
 	return path_in(n, mut d.new_places)
 }
 
-// pos is the position of a node of either view (its first contribution), each file's lines
-// indexed once.
-pub fn (mut d Diff) pos(n MNode) string {
-	f := n.fragment(0)
-	if !f.ok() {
-		return ''
-	}
-	k := u64(voidptr(f.doc))
-	if k !in d.lines {
-		d.lines[k] = f.doc.line_index()
-	}
-	line, col := d.lines[k].line_col(f.doc.src_off[f.i])
-	return '${f.doc.path}:${line}:${col}'
+// pos is the position of a node of either view (its first contribution).
+pub fn (d &Diff) pos(n MNode) string {
+	return n.pos()
 }
 
 // describe is a change in one line: what, where (the node's path), and its positions.

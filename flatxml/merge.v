@@ -91,7 +91,6 @@ mut:
 	listed     []int
 	runs       []Run
 	keys       []string
-	lines      map[u64]LineIndex
 }
 
 struct Kid {
@@ -899,17 +898,9 @@ pub fn (m &Merged) at_path(path string) MNode {
 	return m.by_keys(path.split('/').filter(it != ''))
 }
 
-// pos is `path:line:column` of a node of the set, with each document's lines indexed once.
-pub fn (mut m Merged) pos(n Node) string {
-	if n.i == no_node {
-		return ''
-	}
-	k := u64(voidptr(n.doc))
-	if k !in m.lines {
-		m.lines[k] = n.doc.line_index()
-	}
-	line, col := m.lines[k].line_col(n.doc.src_off[n.i])
-	return '${n.doc.path}:${line}:${col}'
+// pos is `path:line:column` of a node of the set (each document indexes its lines once).
+pub fn (m &Merged) pos(n Node) string {
+	return n.pos()
 }
 
 // describe is a problem in one line, with every position.
