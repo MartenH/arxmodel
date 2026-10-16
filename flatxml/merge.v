@@ -507,6 +507,9 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 		})
 	}
 	for j in missing {
+		if rule.keyless == .quiet {
+			break
+		}
 		m.problems << Problem{
 			kind: .missing_key
 			node: p

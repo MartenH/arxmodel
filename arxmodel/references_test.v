@@ -25,10 +25,10 @@ fn test_paths_are_indexed_from_short_names() {
 	}
 	c := check(m, compile_schemas(m, fdata('schemas'), policy: automat_policy()))!
 	ix := c.index
-	assert ix.by_path.keys().sorted() == ['/fiction', '/fiction/analog', '/fiction/dune']
+	assert ix.indexed_keys().sorted() == ['/fiction', '/fiction/analog', '/fiction/dune']
 	dune := c.view.node(ix.holders('/Fiction/Dune')[0])
 	assert dune.name() == 'BOOK' && dune.fragment_count() == 2
-	assert ix.path_of[dune.i] == '/Fiction/Dune'
+	assert ix.path_of(dune.i) or { '' } == '/Fiction/Dune'
 	// a finding's path: the referrable element, then the elements below it
 	assert c.findings.any(it.path == '/Fiction#NOTES')
 }
@@ -44,8 +44,8 @@ fn test_referrable_from_the_schema() {
 	c := check(m, sc)!
 	// BOOK's PICK-REF has the reference's name but is plain text: not a reference
 	assert c.refs.checked == 12
-	for k, p in c.index.path_of {
-		assert ty.referrable_type(c.index.typ[k]), p
+	for j, p in c.index.paths {
+		assert ty.referrable_type(c.index.typ_of(c.index.nodes[j])), p
 	}
 	// a node below a keyed item: the item with its key, after the referrable element's path
 	mut borrower := ''

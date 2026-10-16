@@ -157,14 +157,19 @@ fn ids_text(n flatxml.Node, ids []u32) string {
 	return trimmed(cur.text())
 }
 
+@[inline]
+fn is_space(c u8) bool {
+	return c == ` ` || (c >= `\t` && c <= `\r`)
+}
+
 // trimmed is s without surrounding whitespace, as trim_space has it, but a slice of s, not a copy.
 fn trimmed(s string) string {
 	mut lo := 0
 	mut hi := s.len
-	for lo < hi && s[lo] in [` `, `\t`, `\n`, `\r`, `\v`, `\f`] {
+	for lo < hi && is_space(s[lo]) {
 		lo++
 	}
-	for hi > lo && s[hi - 1] in [` `, `\t`, `\n`, `\r`, `\v`, `\f`] {
+	for hi > lo && is_space(s[hi - 1]) {
 		hi--
 	}
 	if lo == 0 && hi == s.len {
@@ -333,7 +338,7 @@ pub fn identity_flat(id Identity, models []&Model) Flat {
 				flatxml.Rule{
 					parent:  '*'
 					key_fn:  key_fn
-					keyless: .own
+					keyless: .quiet
 					merge:   true
 				},
 			]

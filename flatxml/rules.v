@@ -56,6 +56,10 @@ pub enum Keyless {
 	// the one child of its name with the empty key (absent, or no text in any part), merged like
 	// a single child (with merge)
 	empty
+	// a child of its own, as with own, but not reported: for rules under which a child without a
+	// key is expected (a caller naming only some elements), where a report per child would be
+	// one per unnamed element of the documents
+	quiet
 }
 
 // Rule says how the children of one aggregation are told apart and put together: the children
@@ -82,7 +86,7 @@ pub:
 	// key, and is what keyless says.
 	key     []string
 	key_fn  ?KeyFn  // the key computed by the caller, in place of key
-	keyless Keyless // a child of a keyed rule with no key: its own (the default) or the empty one
+	keyless Keyless // a child of a keyed rule with no key: its own (the default, or quietly) or the empty one
 	single  bool    // the aggregation holds one child
 	merge   bool    // occurrences of one key (or of a single child) are one child
 	// ordered and max are for keyed and each aggregations; a single one holds one child a name
@@ -498,7 +502,7 @@ fn own_key_text(c Node) string {
 //   # a comment; blank lines are ignored
 //   !fold                   keys are compared ignoring ASCII case
 //   !ignore <attr>...       attributes whose values may differ between contributions
-//   <parent> <child>[,<child>...] [key=<path>[,<path>...]] [keyless=own|empty] [single] [merge]
+//   <parent> <child>[,<child>...] [key=<path>[,<path>...]] [keyless=own|empty|quiet] [single] [merge]
 //                           [ordered] [max=<n>]
 //
 // A parent is a name, a path of ancestor names (`a/b`) or a class (`%c`); `*` stands for any
@@ -550,7 +554,8 @@ pub fn parse_rules(text string) !RuleSet {
 				keyless = match w[8..] {
 					'own' { Keyless.own }
 					'empty' { Keyless.empty }
-					else { return error('line ${n + 1}: `${w}`: keyless is own or empty') }
+					'quiet' { Keyless.quiet }
+					else { return error('line ${n + 1}: `${w}`: keyless is own, empty or quiet') }
 				}
 			} else if w.starts_with('max=') {
 				max = w[4..].int()
@@ -648,8 +653,8 @@ fn format_rule(r Rule) !string {
 		}
 		out += ' key=' + parts.join(',')
 	}
-	if r.keyless == .empty {
-		out += ' keyless=empty'
+	if r.keyless != .own {
+		out += ' keyless=${r.keyless}'
 	}
 	if r.single {
 		out += ' single'

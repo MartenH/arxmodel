@@ -131,6 +131,7 @@ pub fn (mut d Doc) free() {
 		d.ns.free()
 		d.attr_ns.free()
 	}
+	free_line_index(d.lines)
 	d.lines = unsafe { nil }
 	if d.own_tab {
 		d.tab.free()
@@ -352,7 +353,20 @@ fn (d &Doc) lines() &LineIndex {
 	if C.atomic_compare_exchange_strong_ptr(slot, voidptr(&expected), isize(built)) {
 		return built
 	}
+	free_line_index(built)
 	return unsafe { &LineIndex(C.atomic_load_ptr(slot)) }
+}
+
+// free_line_index releases a line index `lines` built (nil: nothing).
+fn free_line_index(p voidptr) {
+	if p == unsafe { nil } {
+		return
+	}
+	unsafe {
+		mut li := &LineIndex(p)
+		li.starts.free()
+		free(li)
+	}
 }
 
 // pos is `path:line:col` of node i.
