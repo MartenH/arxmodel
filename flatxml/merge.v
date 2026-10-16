@@ -91,6 +91,10 @@ mut:
 	listed     []int
 	runs       []Run
 	keyed_at   []KeyAt
+	missing    []int  // keyed's children without a key
+	kid_sort   []Kid  // expand's children, sorted by aggregation
+	held       []Held // differs' attributes, of the first fragment to give each
+	ignored    map[u32]bool // differs' ignored attribute identities, for one node
 	keys       []string
 }
 
@@ -208,6 +212,10 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 		m.keyed_at.free()
 		m.keys.free()
 		m.group.free()
+		m.missing.free()
+		m.kid_sort.free()
+		m.held.free()
+		m.ignored.free()
 	}
 	return m
 }
@@ -379,14 +387,10 @@ fn (mut m Merged) expand(p u32) {
 	}
 	// by aggregation, in the order the rules are listed (none last), then as written
 	if !sorted {
-		mut kids := m.kids[..m.nkids].clone()
-		kids.sort_with_compare(fn (a &Kid, b &Kid) int {
-			if a.rule != b.rule {
-				return if a.rule < b.rule { -1 } else { 1 }
-			}
-			return a.seq - b.seq
-		})
-		for j, kid in kids {
+		m.kid_sort.clear()
+		m.kid_sort << m.kids[..m.nkids]
+		m.kid_sort.sort_with_compare(compare_kid_rule)
+		for j, kid in m.kid_sort {
 			put(m.kids, j, kid)
 		}
 	}
@@ -542,7 +546,7 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 	m.keys.clear()
 	m.order.clear()
 	m.runs.clear()
-	mut missing := []int{}
+	m.missing.clear()
 	// with keyless=empty, a key with no text is the empty key, as an absent one is
 	empty_is_absent := rule.keyless == .empty
 	for j in k .. e {
@@ -554,7 +558,7 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			}
 		}
 		m.keys << ''
-		missing << j
+		m.missing << j
 	}
 	fold := m.rules.fold
 	keys := m.keys
@@ -587,9 +591,9 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 		g = h
 	}
 	// with keyless=empty, the children of one name without a key are one, of the empty key
-	if rule.keyless == .empty && missing.len > 0 {
+	if rule.keyless == .empty && m.missing.len > 0 {
 		base := m.order.len
-		m.order << missing
+		m.order << m.missing
 		m.group_names(base)
 		for x in 0 .. m.starts.len {
 			m.runs << Run{
@@ -599,14 +603,14 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 				first: m.order[m.starts[x]]
 			}
 		}
-		missing.clear()
+		m.missing.clear()
 	}
 	order := m.order
 	written := rule.ordered || m.rules.written
 	if written {
 		m.runs.sort_with_compare(compare_run_first)
 	}
-	for j in missing {
+	for j in m.missing {
 		if rule.keyless == .quiet {
 			break
 		}
@@ -618,10 +622,9 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 		}
 	}
 	// the most there may be, keyed or not, in the order they were written
-	mut kept := missing.clone()
-	if rule.max > 0 && m.runs.len + missing.len > rule.max {
+	if rule.max > 0 && m.runs.len + m.missing.len > rule.max {
 		mut firsts := m.runs.map(it.first)
-		firsts << missing
+		firsts << m.missing
 		firsts.sort()
 		cut := firsts[rule.max - 1]
 		mut dropped := []Node{}
@@ -632,7 +635,7 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 				}
 			}
 		}
-		for j in missing {
+		for j in m.missing {
 			if j > cut {
 				dropped << m.kid_node(j)
 			}
@@ -644,13 +647,21 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			at:   dropped
 		}
 		m.runs = m.runs.filter(it.first <= cut)
-		kept = missing.filter(it <= cut)
+		// the children without a key within the cut, kept in place
+		mut w := 0
+		for j in m.missing {
+			if j <= cut {
+				m.missing[w] = j
+				w++
+			}
+		}
+		m.missing.trim(w)
 	}
 	// children without a key after the others, or where they were written when order matters
 	mut x := 0
 	for run in m.runs {
-		for written && x < kept.len && kept[x] < run.first {
-			m.out_one(kept[x], r, .each, '')
+		for written && x < m.missing.len && m.missing[x] < run.first {
+			m.out_one(m.missing[x], r, .each, '')
 			x++
 		}
 		if run.empty {
@@ -659,8 +670,8 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			m.identity_of(p, rule, r, .keyed, keys[run.first - k], run.lo, run.hi)
 		}
 	}
-	for x < kept.len {
-		m.out_one(kept[x], r, .each, '')
+	for x < m.missing.len {
+		m.out_one(m.missing[x], r, .each, '')
 		x++
 	}
 }
@@ -761,32 +772,52 @@ fn (mut m Merged) differs(n u32) {
 	f0 := m.frags[lo]
 	d0 := m.set.docs[f0.doc]
 	n0 := Node{d0, f0.i}
-	t0 := n0.text_runs()
 	mixed0 := d0.has_text_children(f0.i)
+	// the first fragment's text runs, read once a fragment with text mixed among elements needs
+	// them: otherwise the text is the one run, and comparing the texts needs no list of runs
+	mut t0 := []TextRun{}
+	mut t0_read := false
+	// and its whole text, read once a comparison gets that far
+	mut s0 := ''
+	mut s0_read := false
 	a_lo, a_hi := d0.attr_range(f0.i)
 	// an attribute any contribution spells by an ignored name is ignored in all of them: the
 	// identities of the ignored spellings, collected before anything is compared
-	mut ignored := map[u32]bool{}
+	// (one map kept between nodes, not a map per node)
+	m.ignored.clear()
 	if m.rules.ignore.len > 0 {
-		for f in m.frags[lo..hi] {
+		for x_f in lo .. hi {
+			f := m.frags[x_f]
 			d := m.set.docs[f.doc]
 			x_lo, x_hi := d.attr_range(f.i)
 			for x := x_lo; x < x_hi; x++ {
 				if d.attr_tag[x] in m.rules.ignore || d.attr_id(x) in m.rules.ignore {
-					ignored[d.attr_id(x)] = true
+					m.ignored[d.attr_id(x)] = true
 				}
 			}
 		}
 	}
-	mut held := []Held{cap: int(a_hi - a_lo)}
+	m.held.clear()
 	for a := a_lo; a < a_hi; a++ {
-		held << Held{d0, f0.i, a}
+		m.held << Held{d0, f0.i, a}
 	}
 	for f in m.frags[lo + 1..hi] {
 		d := m.set.docs[f.doc]
 		nf := Node{d, f.i}
 		mixed := mixed0 || d.has_text_children(f.i)
-		if nf.text_runs() != t0 || (mixed && nf.text() != n0.text()) {
+		if mixed && !t0_read {
+			t0 = n0.text_runs()
+			t0_read = true
+		}
+		mut differ := mixed && nf.text_runs() != t0
+		if !differ {
+			if !s0_read {
+				s0 = n0.text()
+				s0_read = true
+			}
+			differ = nf.text() != s0
+		}
+		if differ {
 			m.problems << Problem{
 				kind: .value_differs
 				node: n
@@ -797,18 +828,18 @@ fn (mut m Merged) differs(n u32) {
 		}
 		b_lo, b_hi := d.attr_range(f.i)
 		for b := b_lo; b < b_hi; b++ {
-			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in ignored {
+			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in m.ignored {
 				continue
 			}
 			// the first fragment that has this attribute, which a later one is compared with: the
 			// first fragment, or the earlier fragment that brought it
 			mut found := false
-			for h in held {
+			for h in m.held {
 				if !same_attr(h.doc, h.a, d, b) {
 					continue
 				}
 				found = true
-				if h.doc.attr_tag[h.a] in m.rules.ignore || h.doc.attr_id(h.a) in ignored {
+				if h.doc.attr_tag[h.a] in m.rules.ignore || h.doc.attr_id(h.a) in m.ignored {
 					break
 				}
 				if h.doc.attr_value(h.a) != d.attr_value(b) {
@@ -823,10 +854,19 @@ fn (mut m Merged) differs(n u32) {
 				break
 			}
 			if !found {
-				held << Held{d, f.i, b}
+				m.held << Held{d, f.i, b}
 			}
 		}
 	}
+}
+
+// compare_kid_rule orders children by aggregation, in the order the rules are listed (none
+// last), then as written.
+fn compare_kid_rule(a &Kid, b &Kid) int {
+	if a.rule != b.rule {
+		return if a.rule < b.rule { -1 } else { 1 }
+	}
+	return a.seq - b.seq
 }
 
 // Held is an attribute of a merged node's fragment, the first to give it.

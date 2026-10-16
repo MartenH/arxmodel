@@ -60,7 +60,9 @@ fn (mut r Reader) resolve() ! {
 			}
 			.agroup_ref {
 				g := r.s.attr_groups[p.name.key()] or {
-					return r.at(p, 'attribute group ${r.s.qname(p.name)} is not declared')
+					r.xml_agroup(p) or {
+						return r.at(p, 'attribute group ${r.s.qname(p.name)} is not declared')
+					}
 				}
 				if p.in_group {
 					r.agroups[p.slot].refs << g
@@ -97,9 +99,18 @@ fn (mut r Reader) resolve() ! {
 		r.flatten(u32(g))!
 	}
 	for ct in 0 .. r.s.complex_types.len {
+		mut from := map[u64]u64{}
 		for g in r.ct_agroups[u32(ct)] or { []u32{} } {
-			attrs := r.flatten(g)!
-			r.s.complex_types[ct].attrs = union_of(r.s.complex_types[ct].attrs, attrs)
+			// joined as union_of joins, recording the uses it keeps
+			for j, u in r.flatten(g)! {
+				if !r.s.complex_types[ct].attrs.any(it.decl == u.decl) {
+					r.s.complex_types[ct].attrs << u
+					from[use_key(u)] = r.agroups[g].origins[j]
+				}
+			}
+		}
+		if from.len > 0 {
+			r.ct_from_group[u32(ct)] = from.clone()
 		}
 	}
 	// Then what it inherits from a type it extends, and a check for an attribute twice.
@@ -129,10 +140,34 @@ fn (mut r Reader) finish(ct u32) ! {
 		return error('type ${r.ct_name(ct)} extends ${r.ct_name(base)}, which has no simple content')
 	}
 	r.s.complex_types[ct].simple = r.s.complex_types[base].simple
+	// a use both have through attribute groups from the one place it is written (a group,
+	// however nested, referred to by both) is one use, once; any other use the base has too is
+	// the attribute twice, which check_unique_attrs refuses
 	mut attrs := r.s.complex_types[base].attrs.clone()
-	attrs << r.s.complex_types[ct].attrs
+	inherited := (r.ct_from_group[base] or { map[u64]u64{} }).clone()
+	own := (r.ct_from_group[ct] or { map[u64]u64{} }).clone()
+	mut joined := map[u64]bool{}
+	for u in r.s.complex_types[ct].attrs {
+		k := use_key(u)
+		if k in own && k in inherited && own[k] == inherited[k] && k !in joined {
+			joined[k] = true
+			continue
+		}
+		attrs << u
+	}
 	r.s.complex_types[ct].attrs = attrs
+	if inherited.len > 0 {
+		mut from := inherited.clone()
+		for k, o in own {
+			from[k] = o
+		}
+		r.ct_from_group[ct] = from
+	}
 	r.ct_state[ct] = 2
+}
+
+fn use_key(u AttrUse) u64 {
+	return u64(u.decl) << 1 | u64(u.required)
 }
 
 fn (r &Reader) ct_name(ct u32) string {
@@ -180,10 +215,18 @@ fn (mut r Reader) flatten(g u32) ![]AttrUse {
 	}
 	r.agroups[g].busy = true
 	mut attrs := r.agroups[g].attrs.clone()
+	mut origins := []u64{len: attrs.len, init: u64(g) << 32 | u64(index)}
 	for sub in r.agroups[g].refs {
-		attrs = union_of(attrs, r.flatten(sub)!)
+		// joined as union_of joins, each kept use with where it is written
+		for j, u in r.flatten(sub)! {
+			if !attrs.any(it.decl == u.decl) {
+				attrs << u
+				origins << r.agroups[sub].origins[j]
+			}
+		}
 	}
 	r.agroups[g].attrs = attrs
+	r.agroups[g].origins = origins
 	r.agroups[g].busy = false
 	r.agroups[g].done = true
 	return attrs
@@ -333,6 +376,7 @@ fn (r &Reader) visit(p u32, mut state []u8) ! {
 fn (r &Reader) check_unique_attrs(ct u32) ! {
 	attrs := r.s.complex_types[ct].attrs
 	mut seen := map[u64]bool{}
+	mut id := no_id
 	for u in attrs {
 		k := r.s.attributes[u.decl].name.key()
 		if k in seen {
@@ -340,8 +384,30 @@ fn (r &Reader) check_unique_attrs(ct u32) ! {
 			return error('attribute ${name} appears twice in type ${r.ct_name(ct)}')
 		}
 		seen[k] = true
+		// at most one attribute of a type is an ID
+		if r.is_id(r.s.attributes[u.decl].typ) {
+			if id != no_id {
+				return error('attributes ${r.s.qname(r.s.attributes[id].name)} and ${r.s.qname(r.s.attributes[u.decl].name)} of type ${r.ct_name(ct)} are both IDs')
+			}
+			id = u.decl
+		}
 	}
 }
+
+const no_id = u32(0xFFFF_FFFF)
+
+// is_id reports whether a type is xs:ID or derived from it.
+fn (r &Reader) is_id(t TypeRef) bool {
+	return match t.kind {
+		.builtin { t.idx == u32(Builtin.id) }
+		.simple { r.s.simple_types[t.idx].root == .id }
+		else { false }
+	}
+}
+
+// xml_attr_names are the xml namespace's attributes, in the order its schema's xml:specialAttrs
+// lists them; xml_attr declares each.
+const xml_attr_names = ['base', 'lang', 'space', 'id']
 
 // xml_attr declares one of the xml namespace's attributes for a schema that refers to it without
 // importing its schema, as processors do: xml:lang (as a string, since the namespace's schema
@@ -379,6 +445,34 @@ fn (mut r Reader) xml_attr(q QName) ?u32 {
 	}
 	r.s.global_attrs[q.key()] = idx
 	return idx
+}
+
+// xml_agroup declares the xml namespace's attribute group, xml:specialAttrs, for a schema that
+// refers to it without importing its schema: xml:base, xml:lang, xml:space and xml:id, as that
+// schema has it. It is placed where it is first referred to, since no document declares it.
+fn (mut r Reader) xml_agroup(p Pending) ?u32 {
+	q := p.name
+	if r.s.uris[q.ns] != xml_ns_uri || r.s.names[q.local] != 'specialAttrs' {
+		return none
+	}
+	mut attrs := []AttrUse{}
+	for name in xml_attr_names {
+		a := QName{q.ns, r.s.intern_name(name)}
+		decl := r.s.global_attrs[a.key()] or { r.xml_attr(a)? }
+		attrs << AttrUse{
+			decl: decl
+		}
+	}
+	g := u32(r.agroups.len)
+	r.agroups << AttrGroup{
+		name:  q
+		attrs: attrs
+		own:   u32(attrs.len)
+		doc:   p.doc
+		node:  p.node
+	}
+	r.s.attr_groups[q.key()] = g
+	return g
 }
 
 fn (r &Reader) at(p Pending, msg string) IError {
