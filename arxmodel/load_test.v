@@ -207,3 +207,72 @@ fn test_the_set_knows_where_its_files_came_from() {
 	assert output_clash(f.files[0], all) != none
 	assert output_clash(os.join_path(root, 'elsewhere.arxml'), all) == none
 }
+
+fn test_a_file_is_itself_whatever_its_name_holds() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_literal_${os.getpid()}')
+	os.mkdir_all(os.join_path(dir, 'more')) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	odd := os.join_path(dir, 'body*.arxml')
+	os.write_file(odd, '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'bodyX.arxml'), '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'more', 'm.arxml'), '<AUTOSAR/>')!
+	// alone, or beside a directory: the file, not a glob over its neighbours
+	assert find_arxml([odd], LoadOptions{})!.files == [odd]
+	both := find_arxml([odd, os.join_path(dir, 'more')], LoadOptions{})!
+	assert both.files.map(os.file_name(it)) == ['body*.arxml', 'm.arxml']
+	// and excluded or named twice as any file is
+	assert find_arxml([odd], exclude: [odd])!.files == []
+	assert find_arxml([odd, os.join_path(dir, '.', 'body*.arxml')], LoadOptions{})!.files == [odd]
+}
+
+fn test_the_lists_read_are_reported() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_lists_${os.getpid()}')
+	os.mkdir_all(dir) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	os.write_file(os.join_path(dir, 'a.arxml'), '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'inner.txt'), 'a.arxml\n')!
+	os.write_file(os.join_path(dir, 'outer.txt'), '@inner.txt\n')!
+	f := find_arxml(['@' + os.join_path(dir, 'outer.txt')], LoadOptions{})!
+	assert f.files.map(os.file_name(it)) == ['a.arxml']
+	assert f.lists.map(os.file_name(it)) == ['outer.txt', 'inner.txt']
+}
+
+fn test_a_unc_glob_keeps_its_share() {
+	base, rest := glob_base('\\\\server\\share\\models\\*.arxml')
+	assert base == '//server/share/models'
+	assert rest == ['*.arxml']
+}
+
+fn test_an_unreadable_configuration_is_an_error() {
+	$if windows {
+		return
+	}
+	if os.getuid() == 0 {
+		return // root reads it anyway
+	}
+	dir := os.join_path(os.temp_dir(), 'arxmodel_cfg_${os.getpid()}')
+	os.mkdir_all(os.join_path(dir, 'arxmodel')) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	cfg := os.join_path(dir, 'arxmodel', 'config.toml')
+	os.write_file(cfg, 'schema_dir = "x"\n')!
+	os.chmod(cfg, 0o000)!
+	old_env, old_xdg := os.getenv('ARXMODEL_SCHEMA_DIR'), os.getenv('XDG_CONFIG_HOME')
+	os.setenv('ARXMODEL_SCHEMA_DIR', '', true)
+	os.setenv('XDG_CONFIG_HOME', dir, true)
+	defer {
+		os.setenv('ARXMODEL_SCHEMA_DIR', old_env, true)
+		os.setenv('XDG_CONFIG_HOME', old_xdg, true)
+		os.chmod(cfg, 0o600) or {}
+	}
+	configured_schema_dir() or {
+		assert err.msg().contains('config.toml'), err.msg()
+		return
+	}
+	assert false, 'an unreadable configuration read as none'
+}

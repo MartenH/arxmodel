@@ -46,7 +46,12 @@ pub fn configured_schema_dir() !(string, string) {
 		}
 	}
 	path := config_path()
-	text := os.read_file(path) or { return '', '' }
+	// none configured where the file is absent; one that cannot be read is an error, never a
+	// quiet fall back to other merge rules
+	if !os.exists(path) {
+		return '', ''
+	}
+	text := os.read_file(path) or { return error('${path}: ${err.msg()}') }
 	dir := parse_config(text, path)!
 	return dir, path
 }

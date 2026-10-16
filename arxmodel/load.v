@@ -34,6 +34,7 @@ pub:
 // asked for and matched nothing.
 pub struct Found {
 pub mut:
+	lists    []string // the @FILE lists read, nested ones included
 	files    []string
 	failed   []flatxml.LoadError
 	warnings []string
@@ -68,19 +69,32 @@ pub fn is_glob(path string) bool {
 pub fn expand_lists(args []string) !([]string, []string) {
 	mut out := []string{}
 	mut lists := []string{}
+	mut files := []string{}
 	mut seen := map[string]bool{}
-	expand_into(args, '', mut out, mut lists, mut seen)!
+	expand_into(args, '', mut out, mut lists, mut files, mut seen)!
 	return out, lists
 }
 
-fn expand_into(args []string, dir string, mut out []string, mut lists []string, mut seen map[string]bool) ! {
+// expand_lists_read is expand_lists with the list files themselves, every one read, nested ones
+// included: what a description read from them depends on besides the files they name.
+pub fn expand_lists_read(args []string) !([]string, []string, []string) {
+	mut out := []string{}
+	mut lists := []string{}
+	mut files := []string{}
+	mut seen := map[string]bool{}
+	expand_into(args, '', mut out, mut lists, mut files, mut seen)!
+	return out, lists, files
+}
+
+fn expand_into(args []string, dir string, mut out []string, mut lists []string, mut files []string, mut seen map[string]bool) ! {
 	for a in args {
 		p := if dir != '' && !os.is_abs_path(a) && !a.starts_with('@') {
 			os.norm_path(os.join_path(dir, a))
 		} else {
 			a
 		}
-		if !p.starts_with('@') {
+		// a file is itself: `@x` names a list unless `@x` is a file and `x` is not
+		if !p.starts_with('@') || (os.is_file(p) && !os.is_file(p[1..])) {
 			out << p
 			continue
 		}
@@ -102,7 +116,8 @@ fn expand_into(args []string, dir string, mut out []string, mut lists []string, 
 			}
 		}
 		lists << os.dir(file)
-		expand_into(listed, os.dir(file), mut out, mut lists, mut seen)!
+		files << file
+		expand_into(listed, os.dir(file), mut out, mut lists, mut files, mut seen)!
 		seen.delete(real)
 	}
 }
@@ -117,7 +132,9 @@ fn glob_base(pattern string) (string, []string) {
 		k++
 	}
 	mut base := parts[..k].join('/')
-	if norm.starts_with('/') {
+	if norm.starts_with('//') {
+		base = '//' + base // a UNC path, \\server\share
+	} else if norm.starts_with('/') {
 		base = '/' + base
 	} else if base == '' {
 		base = '.'
@@ -172,10 +189,12 @@ pub fn find_arxml(paths []string, opts LoadOptions) !Found {
 	mut f := Found{}
 	mut found := []string{}
 	mut bases := []string{}
-	args, lists := expand_lists(paths)!
+	args, lists, list_files := expand_lists_read(paths)!
 	bases << lists
+	f.lists = list_files
 	for p in args {
-		if is_glob(p) {
+		// a file is itself, even with * or ? in its name: a glob only where no such file is
+		if is_glob(p) && !os.is_file(p) {
 			base, _ := glob_base(p)
 			bases << base
 			matches := glob_paths(p, mut f.failed)
