@@ -86,7 +86,7 @@ fn cmd_merge3(o Opts) {
 		return
 	}
 	// a set of files (a directory, a glob, a list), or a single document
-	set := o.paths.any(os.is_dir(it) || arxmodel.is_glob(it) || it.starts_with('@'))
+	set := o.paths.any(arxmodel.is_set_arg(it))
 		|| v.any(it.model.set.docs.len > 1)
 	out := if o.out == '' { '-' } else { o.out }
 	if set && (out == '-' || (os.exists(out) && !os.is_dir(out))) {
@@ -145,6 +145,12 @@ fn cmd_git_diff(o Opts) {
 		for l in o.paths[8].split_into_lines() {
 			println(l)
 		}
+	}
+	if o.rules_err != '' {
+		println('(not read as a model: ${o.rules_err}; a text diff follows)')
+		res := os.exec(['git', 'diff', '--no-index', '--no-ext-diff', '--', o.paths[1], o.paths[4]])
+		print(res.output)
+		exit(0)
 	}
 	r, v := versions(o, [o.paths[1], o.paths[4]], true) or {
 		println('(not read as a model: ${err.msg()}; a text diff follows)')

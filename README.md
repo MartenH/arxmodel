@@ -105,7 +105,7 @@ was not declared, not found or did not compile; what could be done is still prin
 
 Every command that reads models takes the same paths, and makes one predictable set of them:
 
-- a **file** is itself; a path that does not exist is an error;
+- a **file** is itself, even with `*` or `?` in its name (a glob only where no such file is), and `@x` is a file named so when `x` is not one; a path that does not exist is an error;
 - a **directory** is every `.arxml` file below it, recursively (`DIR/*.arxml` for its own files);
 - a **glob** (`'model/modules/*/*.arxml'`: `*` and `?` within one name, `**` any depth;
   quoted, so arxmodel expands it, not the shell) is the `.arxml` files and the directories it

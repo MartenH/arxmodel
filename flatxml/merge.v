@@ -90,6 +90,7 @@ mut:
 	fill       []int
 	listed     []int
 	runs       []Run
+	keyed_at   []KeyAt
 	keys       []string
 }
 
@@ -116,6 +117,30 @@ struct Run {
 	lo    int
 	hi    int
 	empty bool
+	first int // the run's first child as written (order[lo]): ordered rules keep runs in its order
+}
+
+// KeyAt is a keyed child (its index in kids) with its key, for sorting them by key.
+struct KeyAt {
+	key string
+	j   int
+}
+
+// compare_key_at orders keyed children by key, then as written; compare_key_at_fold the same
+// with keys compared ignoring ASCII case. Plain functions, not closures: keyed sorts the
+// children of every keyed parent, and a V closure is allocated (and registered) when made.
+fn compare_key_at(a &KeyAt, b &KeyAt) int {
+	c := compare_keys(a.key, b.key, false)
+	return if c != 0 { c } else { a.j - b.j }
+}
+
+fn compare_key_at_fold(a &KeyAt, b &KeyAt) int {
+	c := compare_keys(a.key, b.key, true)
+	return if c != 0 { c } else { a.j - b.j }
+}
+
+fn compare_run_first(a &Run, b &Run) int {
+	return a.first - b.first
 }
 
 // merge reads the set's documents as one, by the rules: a view over them, and what the rules
@@ -176,17 +201,23 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 		m.outs.free()
 		m.out_frags.free()
 		m.order.free()
+		m.starts.free()
+		m.fill.free()
+		m.listed.free()
 		m.runs.free()
+		m.keyed_at.free()
 		m.keys.free()
+		m.group.free()
 	}
 	return m
 }
 
 // fit cuts the arrays to the merged nodes made, releasing what is left over when that is more
-// than an eighth.
+// than a quarter: releasing means copying every array, and on a large set of documents that
+// costs more time than a smaller surplus is worth in memory.
 fn (mut m Merged) fit() {
 	n := int(m.count)
-	if n * 8 < m.name.len * 7 {
+	if n * 4 < m.name.len * 3 {
 		m.name = m.name[..n].clone()
 		m.parent = m.parent[..n].clone()
 		m.scope = m.scope[..n].clone()
@@ -205,7 +236,7 @@ fn (mut m Merged) fit() {
 		m.frag_lo.trim(n + 1)
 		m.kid_lo.trim(n + 1)
 	}
-	if m.nfrags * 8 < m.frags.len * 7 {
+	if m.nfrags * 4 < m.frags.len * 3 {
 		m.frags = m.frags[..m.nfrags].clone()
 	} else {
 		m.frags.trim(m.nfrags)
@@ -529,10 +560,18 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 	keys := m.keys
 	// by key, then as written; one run of equal keys is one identity
 	if m.order.len > 1 {
-		m.order.sort_with_compare(fn [keys, k, fold] (a &int, b &int) int {
-			c := compare_keys(keys[*a - k], keys[*b - k], fold)
-			return if c != 0 { c } else { *a - *b }
-		})
+		m.keyed_at.clear()
+		for j in m.order {
+			m.keyed_at << KeyAt{keys[j - k], j}
+		}
+		if fold {
+			m.keyed_at.sort_with_compare(compare_key_at_fold)
+		} else {
+			m.keyed_at.sort_with_compare(compare_key_at)
+		}
+		for x, ka in m.keyed_at {
+			m.order[x] = ka.j
+		}
 	}
 	mut g := 0
 	for g < m.order.len {
@@ -541,8 +580,9 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			h++
 		}
 		m.runs << Run{
-			lo: g
-			hi: h
+			lo:    g
+			hi:    h
+			first: m.order[g]
 		}
 		g = h
 	}
@@ -552,16 +592,19 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 		m.order << missing
 		m.group_names(base)
 		for x in 0 .. m.starts.len {
-			m.runs << Run{m.starts[x], m.fill[x], true}
+			m.runs << Run{
+				lo:    m.starts[x]
+				hi:    m.fill[x]
+				empty: true
+				first: m.order[m.starts[x]]
+			}
 		}
 		missing.clear()
 	}
 	order := m.order
 	written := rule.ordered || m.rules.written
 	if written {
-		m.runs.sort_with_compare(fn [order] (a &Run, b &Run) int {
-			return order[a.lo] - order[b.lo]
-		})
+		m.runs.sort_with_compare(compare_run_first)
 	}
 	for j in missing {
 		if rule.keyless == .quiet {
@@ -577,13 +620,13 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 	// the most there may be, keyed or not, in the order they were written
 	mut kept := missing.clone()
 	if rule.max > 0 && m.runs.len + missing.len > rule.max {
-		mut firsts := m.runs.map(order[it.lo])
+		mut firsts := m.runs.map(it.first)
 		firsts << missing
 		firsts.sort()
 		cut := firsts[rule.max - 1]
 		mut dropped := []Node{}
 		for run in m.runs {
-			if order[run.lo] > cut {
+			if run.first > cut {
 				for x in run.lo .. run.hi {
 					dropped << m.kid_node(order[x])
 				}
@@ -600,20 +643,20 @@ fn (mut m Merged) keyed(p u32, rule &CRule, r u32, k int, e int) {
 			what: m.set.tab.name(m.kids[k].tag)
 			at:   dropped
 		}
-		m.runs = m.runs.filter(order[it.lo] <= cut)
+		m.runs = m.runs.filter(it.first <= cut)
 		kept = missing.filter(it <= cut)
 	}
 	// children without a key after the others, or where they were written when order matters
 	mut x := 0
 	for run in m.runs {
-		for written && x < kept.len && kept[x] < order[run.lo] {
+		for written && x < kept.len && kept[x] < run.first {
 			m.out_one(kept[x], r, .each, '')
 			x++
 		}
 		if run.empty {
 			m.identity_of(p, rule, r, .single, '', run.lo, run.hi)
 		} else {
-			m.identity_of(p, rule, r, .keyed, keys[order[run.lo] - k], run.lo, run.hi)
+			m.identity_of(p, rule, r, .keyed, keys[run.first - k], run.lo, run.hi)
 		}
 	}
 	for x < kept.len {

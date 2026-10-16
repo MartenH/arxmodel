@@ -32,6 +32,11 @@ grep -q '<WATTS>60</WATTS>' out/a/one.arxml || fail 'ours lost'
 grep -q '<WATTS>7</WATTS>' out/b/two.arxml || fail "theirs' second document lost"
 grep -q 'base/\*/\*.arxml: 2 files' merge3.log || { cat merge3.log; fail 'merge3 does not list its files'; }
 
+# merge3 of single files whose names hold * and @: each file is itself, merged to standard output
+cp base/a/one.arxml 'base*.arxml'; cp ours/a/one.arxml '@ours.arxml'; cp theirs/a/one.arxml 'theirs?.arxml'
+"$bin" merge3 'base*.arxml' '@ours.arxml' 'theirs?.arxml' > single.arxml 2> single.log || { cat single.log; fail 'merge3 of special-named single files'; }
+grep -q '<WATTS>60</WATTS>' single.arxml || fail 'merge3 of special-named single files lost ours'
+
 # diff prints the files it read
 "$bin" diff base ours > /dev/null 2> diff.log || true
 grep -q '^base: 2 files' diff.log && grep -q 'base/a/one.arxml' diff.log || { cat diff.log; fail 'diff does not list its files'; }

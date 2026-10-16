@@ -6,6 +6,9 @@ import toml
 // The user's configuration: where the AUTOSAR schemas are on this machine, so local runs read the
 // exact rules while CI, which has no schema, reads the built-in ones.
 
+// enoent is the errno of a path that does not exist (the same on Linux, macOS and Windows).
+const enoent = 2
+
 // schema_dir_env names the environment variable giving the schema directory.
 pub const schema_dir_env = 'ARXMODEL_SCHEMA_DIR'
 
@@ -46,7 +49,15 @@ pub fn configured_schema_dir() !(string, string) {
 		}
 	}
 	path := config_path()
-	text := os.read_file(path) or { return '', '' }
+	// none configured where the file is not there; one that cannot be reached or read is an
+	// error, never a quiet fall back to other merge rules
+	os.stat(path) or {
+		if err.code() == enoent {
+			return '', ''
+		}
+		return error('${path}: ${err.msg()}')
+	}
+	text := os.read_file(path) or { return error('${path}: ${err.msg()}') }
 	dir := parse_config(text, path)!
 	return dir, path
 }

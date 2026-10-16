@@ -167,6 +167,12 @@ fn (mut r Reader) import(c DocCtx, i u32) ! {
 	r.check_attrs(c, i, ['namespace', 'schemaLocation', 'id'])!
 	r.only_annotations(c, i, .schema, 0)!
 	ns := c.d.attr(i, 'namespace') or { '' }
+	// the XML namespace's attributes are built in (xml_attr), as processors have them: its
+	// schema document, often shipped beside the importing one, is not read
+	if ns == xml_ns_uri {
+		r.s.notes << '${c.d.pos(i)}: import of the XML namespace: its attributes are built in, nothing read'
+		return
+	}
 	loc := (c.d.attr(i, 'schemaLocation') or {
 		r.s.notes << '${c.d.pos(i)}: import of "${ns}" has no schemaLocation: nothing read'
 		return
