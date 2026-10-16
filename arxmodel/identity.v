@@ -86,6 +86,91 @@ pub mut:
 	lists map[string]bool // element names some document holds as a list of named elements
 	// `definition sep label` of values given more than once under one parent
 	multi map[string]bool
+mut:
+	// per name table seen by `observe`, what depends only on names, decided once; keys are
+	// read for every element, so they read these instead of matching and looking up strings
+	tabs []&TabFacts
+}
+
+// TabFacts is what the identity rules say about the names of one name table (one document set).
+struct TabFacts {
+	tab    &flatxml.Names
+	by_def []bool  // name id -> an element of that name is named by its definition
+	name   [][]u32 // each path of id.name, as name ids (none: a name the table lacks)
+	def    []u32   // the definition path
+	label  []u32   // the label path ('' when the name has one part)
+}
+
+// path_ids is a path of child names as ids of a table, or none when one of them is not in it
+// (so no element of the table has the path).
+fn path_ids(tab &flatxml.Names, path string) ?[]u32 {
+	if path == '' {
+		return none
+	}
+	mut out := []u32{}
+	for name in path.split('/') {
+		out << tab.id(name) or { return none }
+	}
+	return out
+}
+
+fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
+	mut by_def := []bool{len: tab.len()}
+	for k in 2 .. tab.len() {
+		name := tab.name(u32(k))
+		by_def[k] = id.by_definition.any(glob(it, name))
+	}
+	r := id.value_role()
+	return &TabFacts{
+		tab:    tab
+		by_def: by_def
+		name:   id.name.map(path_ids(tab, it) or { []u32{} })
+		def:    path_ids(tab, r.definition) or { []u32{} }
+		label:  path_ids(tab, r.label) or { []u32{} }
+	}
+}
+
+// facts is what `observe` decided for n's name table, or none for a table it did not see.
+@[inline]
+fn (x &Identified) facts(n flatxml.Node) ?&TabFacts {
+	for t in x.tabs {
+		if voidptr(t.tab) == voidptr(n.doc.tab) {
+			return t
+		}
+	}
+	return none
+}
+
+// ids_text is the trimmed text at a path of child name ids below n ('' where there is none),
+// without copying: a slice of the document's text.
+fn ids_text(n flatxml.Node, ids []u32) string {
+	if ids.len == 0 {
+		return ''
+	}
+	mut cur := n
+	for tag in ids {
+		cur = cur.child_id(tag)
+		if !cur.ok() {
+			return ''
+		}
+	}
+	return trimmed(cur.text())
+}
+
+// trimmed is s without surrounding whitespace, as trim_space has it, but a slice of s, not a copy.
+fn trimmed(s string) string {
+	mut lo := 0
+	mut hi := s.len
+	for lo < hi && s[lo] in [` `, `\t`, `\n`, `\r`, `\v`, `\f`] {
+		lo++
+	}
+	for hi > lo && s[hi - 1] in [` `, `\t`, `\n`, `\r`, `\v`, `\f`] {
+		hi--
+	}
+	if lo == 0 && hi == s.len {
+		return s
+	}
+	return unsafe { tos(s.str + lo, hi - lo) }
 }
 
 // value_role is how a value named by its definition is read.
@@ -107,6 +192,9 @@ fn (id &Identity) is_value(n flatxml.Node) bool {
 // container's short name); for a definition of several values, the value's content too.
 fn (x &Identified) named(n flatxml.Node) ?string {
 	id := x.id
+	if f := x.facts(n) {
+		return x.named_by(n, f)
+	}
 	if id.by_definition.any(glob(it, n.name())) {
 		r := id.value_role()
 		k := ident_of(n, r)
@@ -130,33 +218,66 @@ fn (x &Identified) named(n flatxml.Node) ?string {
 	return parts.join(flatxml.key_sep)
 }
 
+// named_by is `named` by the facts of n's name table: the same name, read by ids.
+fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
+	tag := n.tag()
+	first := ids_text(n, f.name[0])
+	if int(tag) < f.by_def.len && f.by_def[tag] {
+		k := ids_text(n, f.def) + flatxml.key_sep + ids_text(n, f.label)
+		if flatxml.empty_key(k) && first == '' {
+			return none
+		}
+		if first == '' && k in x.multi {
+			return k + flatxml.key_sep + content_of(n, x.id.value_role())
+		}
+		return first + flatxml.key_sep + k
+	}
+	if first == '' {
+		return none
+	}
+	if f.name.len == 1 {
+		return first
+	}
+	mut parts := [first]
+	for p in f.name[1..] {
+		parts << ids_text(n, p)
+	}
+	return parts.join(flatxml.key_sep)
+}
+
 // observe records, in every document of the models, the names held as lists and the definitions
-// given more than once under one parent.
+// given more than once under one parent; and per name table, what keys read of names.
 pub fn (mut x Identified) observe(models []&Model) {
 	for m in models {
 		for d in m.set.docs {
-			x.observe_node(d.root_node())
+			if x.facts(d.root_node()) == none {
+				x.tabs << x.id.tab_facts(d.tab)
+			}
+			f := x.facts(d.root_node()) or { panic('unreachable') }
+			x.observe_node(d.root_node(), f)
 		}
 	}
 }
 
-fn (mut x Identified) observe_node(n flatxml.Node) {
+fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 	mut seen := map[string]bool{}
 	mut any := false
 	mut all_named := true
-	r := x.id.value_role()
 	for c in n.children() {
 		any = true
-		if x.id.is_value(c) {
-			k := ident_of(c, r)
+		tag := c.tag()
+		by_def := int(tag) < f.by_def.len && f.by_def[tag]
+		named := ids_text(c, f.name[0]) != ''
+		if by_def && !named {
+			k := ids_text(c, f.def) + flatxml.key_sep + ids_text(c, f.label)
 			if k in seen {
 				x.multi[k] = true
 			}
 			seen[k] = true
-		} else if text_at(c, x.id.name[0]) == '' && !x.id.by_definition.any(glob(it, c.name())) {
+		} else if !named && !by_def {
 			all_named = false
 		}
-		x.observe_node(c)
+		x.observe_node(c, f)
 	}
 	if any && all_named && n.name() !in x.lists {
 		x.lists[n.name()] = true
