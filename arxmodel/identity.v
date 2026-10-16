@@ -87,6 +87,8 @@ mut:
 	// per name table seen by `observe`, what depends only on names, decided once; keys are
 	// read for every element, so they read these instead of matching and looking up strings
 	tabs []&TabFacts
+	// per depth of observe_node, one parent's value keys (see ValueKeys.keys_at)
+	keys_at [][]string
 }
 
 // TabFacts is what the identity rules say about the names of one name table (one document set).
@@ -230,13 +232,16 @@ pub fn (mut x Identified) observe(models []&Model) {
 				x.tabs << x.id.tab_facts(d.tab)
 			}
 			f := x.facts(d.root_node()) or { panic('unreachable') }
-			x.observe_node(d.root_node(), f)
+			x.observe_node(d.root_node(), f, 0)
 		}
 	}
 }
 
-fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
-	mut seen := map[string]bool{}
+fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts, depth int) {
+	for x.keys_at.len <= depth {
+		x.keys_at << []string{}
+	}
+	x.keys_at[depth].clear()
 	mut any := false
 	mut all_named := true
 	for c in n.children() {
@@ -245,16 +250,13 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 		by_def := int(tag) < f.by_def.len && f.by_def[tag]
 		named := ids_text(c, f.name[0], x.nm) != ''
 		if by_def && !named {
-			k := ids_text(c, f.def, x.nm) + flatxml.key_sep + ids_text(c, f.label, x.nm)
-			if k in seen {
-				x.multi[k] = true
-			}
-			seen[k] = true
+			x.keys_at[depth] << ids_text(c, f.def, x.nm) + flatxml.key_sep + ids_text(c, f.label, x.nm)
 		} else if !named && !by_def {
 			all_named = false
 		}
-		x.observe_node(c, f)
+		x.observe_node(c, f, depth + 1)
 	}
+	note_repeats(mut x.keys_at[depth], mut x.multi)
 	if any && all_named {
 		name := x.nm.node_name(n)
 		if name !in x.lists {

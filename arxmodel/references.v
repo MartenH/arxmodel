@@ -2,7 +2,7 @@ module arxmodel
 
 import flatxml
 import flatxml.xsd
-import hash
+import strings
 
 // A referrable element names itself by its SHORT-NAME child; its AUTOSAR path is the SHORT-NAMEs
 // of it and its referrable ancestors, `/Pkg/Sub/Name`. A variation point does not enter the path.
@@ -181,168 +181,25 @@ fn (t &Typing) root_decl(name string) ?u32 {
 
 // PathIndex is every referrable element of a merged model by its AUTOSAR path, and each node's
 // declaration where the schema gives it.
-@[heap]
-pub struct PathIndex {
-pub mut:
-	fold bool     // paths compared ignoring case, as the merge compares keys
-	dup  []string // the paths held by more than one node, in document order
-	// per merged node: its element declaration and complex type, or no_type; with no schema
-	// none is known and both are empty (decl_of, typ_of)
-	decl []u32
-	typ  []u32
-	// the referrable nodes in the order they were indexed (document order), and the path of
-	// each, as its element spells it
-	nodes []u32
-	paths []string
-mut:
-	at []u32 // per merged node: 1 + its index in nodes and paths, or 0 when it has none
-	// path (in lower case when keys are compared ignoring case) -> its holders: an
-	// open-addressing table of keys, each with its first holder; a key held by several has
-	// the list of them all, in document order
-	slots  []u32 // 0 for an empty slot, else 1 + the key's index
-	hashes []u64
-	keys   []string
-	first  []u32
-	many   []int // per key: its index in lists, or -1 when one node holds it
-	lists  [][]u32
-}
-
-const path_seed = u64(0x9e3779b97f4a7c15)
-
-// decl_of is a merged node's element declaration, or no_type.
-@[inline]
-pub fn (ix &PathIndex) decl_of(n u32) u32 {
-	return if int(n) < ix.decl.len { ix.decl[n] } else { no_type }
-}
-
-// typ_of is a merged node's complex type, or no_type.
-@[inline]
-pub fn (ix &PathIndex) typ_of(n u32) u32 {
-	return if int(n) < ix.typ.len { ix.typ[n] } else { no_type }
-}
-
-// key is how a path is looked up.
-pub fn (ix &PathIndex) key(path string) string {
-	return if ix.fold { path.to_lower_ascii() } else { path }
-}
-
-// holders are the merged nodes at a path, in document order.
-pub fn (ix &PathIndex) holders(path string) []u32 {
-	e := ix.find(ix.key(path))
-	if e < 0 {
-		return []u32{}
-	}
-	if ix.many[e] >= 0 {
-		return ix.lists[ix.many[e]]
-	}
-	// a view of the one holder: no list is made for a path one node holds
-	return ix.first[e..e + 1]
-}
-
-// path_of is the path of a referrable merged node, as its element spells it.
-pub fn (ix &PathIndex) path_of(n u32) ?string {
-	if int(n) >= ix.at.len || ix.at[n] == 0 {
-		return none
-	}
-	return ix.paths[ix.at[n] - 1]
-}
-
-// path_count is how many distinct paths are indexed (with fold, compared ignoring case).
-pub fn (ix &PathIndex) path_count() int {
-	return ix.keys.len
-}
-
-// indexed_keys are the distinct paths as they are looked up, in the order first indexed.
-pub fn (ix &PathIndex) indexed_keys() []string {
-	return ix.keys
-}
-
-// find is the index of a key, or -1.
-fn (ix &PathIndex) find(k string) int {
-	if ix.slots.len == 0 {
-		return -1
-	}
-	h := hash.wyhash_c(k.str, u64(k.len), path_seed)
-	mask := u64(ix.slots.len - 1)
-	mut s := h & mask
-	for {
-		e := ix.slots[s]
-		if e == 0 {
-			return -1
-		}
-		if ix.hashes[e - 1] == h && ix.keys[e - 1] == k {
-			return int(e - 1)
-		}
-		s = (s + 1) & mask
-	}
-	return -1
-}
-
-// add indexes node n at path, held by n as well when another already holds it.
-fn (mut ix PathIndex) add(path string, n u32) {
-	k := ix.key(path)
-	h := hash.wyhash_c(k.str, u64(k.len), path_seed)
-	if (ix.keys.len + 1) * 2 > ix.slots.len {
-		ix.grow()
-	}
-	mask := u64(ix.slots.len - 1)
-	mut s := h & mask
-	for {
-		e := ix.slots[s]
-		if e == 0 {
-			ix.slots[s] = u32(ix.keys.len + 1)
-			ix.hashes << h
-			ix.keys << k
-			ix.first << n
-			ix.many << -1
-			break
-		}
-		x := int(e - 1)
-		if ix.hashes[x] == h && ix.keys[x] == k {
-			if ix.many[x] < 0 {
-				ix.dup << path
-				ix.many[x] = ix.lists.len
-				ix.lists << [ix.first[x], n]
-			} else {
-				ix.lists[ix.many[x]] << n
-			}
-			break
-		}
-		s = (s + 1) & mask
-	}
-	ix.nodes << n
-	ix.paths << path
-	ix.at[n] = u32(ix.paths.len)
-}
-
-fn (mut ix PathIndex) grow() {
-	size := if ix.slots.len == 0 { 1024 } else { ix.slots.len * 2 }
-	ix.slots = []u32{len: size}
-	mask := u64(size - 1)
-	for x, h in ix.hashes {
-		mut s := h & mask
-		for ix.slots[s] != 0 {
-			s = (s + 1) & mask
-		}
-		ix.slots[s] = u32(x + 1)
-	}
-}
 
 // index_paths walks the merged model in document order and gives each referrable element its
 // path. With a schema, an element is referrable when its type is a kind of a referrable class;
 // without one, or below an element the schema does not declare, when it has a SHORT-NAME.
+@[heap]
 pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &PathIndex {
 	mut ix := &PathIndex{
 		fold: fold
 		decl: if typed { []u32{len: v.len(), init: no_type} } else { []u32{} }
 		typ:  if typed { []u32{len: v.len(), init: no_type} } else { []u32{} }
 		at:   []u32{len: v.len()}
+		view: v
 	}
 	root := v.root()
 	if !root.ok() {
 		return ix
 	}
 	sn := v.set.tab.id(short_name) or { u32(0xFFFF_FFFF) }
+	ix.sn = sn
 	if typed {
 		if d := ty.root_decl(root.name()) {
 			ix.decl[root.i] = d
@@ -350,18 +207,22 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 		}
 	}
 	mut stack := [root.i]
-	mut base := ['']
+	// per stack entry, the entry of its nearest referrable ancestor (1 + it, 0 for none)
+	mut base := [u32(0)]
 	mut kids := []flatxml.MNode{}
 	mut memo := map[u64]u32{}
 	for stack.len > 0 {
 		n := v.node(stack.pop())
-		mut path := base.pop()
+		mut up := base.pop()
 		ct := ix.typ_of(n.i)
 		named := !typed || ct == no_type || ty.referrable_type(ct)
-		name := if named { short_name_of(n, sn) } else { '' }
+		name, doc := if named {
+			short_name_and_doc(n, sn)
+		} else {
+			'', unsafe { &flatxml.Doc(nil) }
+		}
 		if name != '' {
-			path = '${path}/${name}'
-			ix.add(path, n.i)
+			up = ix.add(n.i, up, name, doc)
 		}
 		kids.clear()
 		for c in n.children() {
@@ -383,7 +244,7 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 				}
 			}
 			stack << c.i
-			base << path
+			base << up
 		}
 	}
 	return ix
@@ -392,6 +253,21 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 // short_name_of is a node's SHORT-NAME text: its single child of that name, or, where the rules
 // keep every occurrence apart (the built-in identity rules), its first child of that name — as the
 // merge names it, so with a local namespace a document binding it to `ar` is indexed alike.
+fn short_name_and_doc(n flatxml.MNode, sn u32) (string, &flatxml.Doc) {
+	c := n.child_id(sn, '')
+	if c.ok() {
+		f := c.fragment(0)
+		return trimmed(f.text()), f.doc
+	}
+	for k in n.children() {
+		if k.tag() == sn {
+			f := k.fragment(0)
+			return trimmed(f.text()), f.doc
+		}
+	}
+	return '', unsafe { &flatxml.Doc(nil) }
+}
+
 fn short_name_of(n flatxml.MNode, sn u32) string {
 	c := n.child_id(sn, '')
 	if c.ok() {
@@ -410,24 +286,71 @@ fn short_name_of(n flatxml.MNode, sn u32) string {
 // merge gives it one (`NAME[key]`); `#` and the elements from the root where no ancestor is
 // referrable.
 pub fn merged_path(n flatxml.MNode, ix &PathIndex) string {
-	mut inner := []string{}
+	// the nodes below the nearest referrable ancestor (or the root), n first; then the path
+	// written once into one builder, keys shown and escaped as they are written
+	mut chain := []u32{cap: 8}
 	mut cur := n
+	mut entry := u32(0) // 1 + the ancestor's entry, 0 for none
 	for cur.ok() {
-		if p := ix.path_of(cur.i) {
-			return join_path(p, inner)
+		if int(cur.i) < ix.at.len && ix.at[cur.i] != 0 {
+			entry = ix.at[cur.i]
+			break
 		}
-		k := cur.key()
-		inner << if flatxml.empty_key(k) || k == list_key(cur.name()) {
-			cur.name()
-		} else if k.starts_with(content_mark) {
-			// an item keyed by its content: by its place among its namesakes
-			'${cur.name()}[#${place_of(cur)}]'
-		} else {
-			'${cur.name()}[${escape_key(flatxml.show_key(k))}]'
-		}
+		chain << cur.i
 		cur = cur.parent()
 	}
-	return join_path('', inner)
+	mut sb := strings.new_builder(96)
+	if entry != 0 {
+		ix.write_path(mut sb, entry - 1)
+	}
+	if chain.len > 0 {
+		sb.write_u8(`#`)
+		for i := chain.len - 1; i >= 0; i-- {
+			if i < chain.len - 1 {
+				sb.write_u8(`/`)
+			}
+			write_segment(mut sb, ix.view.node(chain[i]))
+		}
+	}
+	return sb.str()
+}
+
+// write_segment writes a node below a referrable one as a path shows it: its name, and its key
+// where the merge gives it one (`NAME[key]`), an item keyed by its content by its place among
+// its namesakes (`NAME[#2]`).
+fn write_segment(mut sb strings.Builder, m flatxml.MNode) {
+	name := m.name()
+	sb.write_string(name)
+	k := m.key()
+	if flatxml.empty_key(k) || is_list_key(k, name) {
+		return
+	}
+	sb.write_u8(`[`)
+	if k.starts_with(content_mark) {
+		sb.write_u8(`#`)
+		sb.write_decimal(place_of(m))
+	} else {
+		// show_key then escape_key, a byte at a time
+		for c in k {
+			if c == flatxml.key_sep[0] {
+				sb.write_u8(`,`)
+			} else if c == flatxml.key_list_sep[0] {
+				sb.write_u8(`|`)
+			} else {
+				if c == `\\` || c == `[` || c == `]` {
+					sb.write_u8(`\\`)
+				}
+				sb.write_u8(c)
+			}
+		}
+	}
+	sb.write_u8(`]`)
+}
+
+// is_list_key reports whether k is list_key(name), without making it.
+fn is_list_key(k string, name string) bool {
+	return k.len == name.len + 1 && k[0] == flatxml.key_sep[0]
+		&& unsafe { C.memcmp(k.str + 1, name.str, name.len) } == 0
 }
 
 // escape_key is a key as a path shows it: its `\\`, `[` and `]` escaped with `\\`, so a path is
@@ -531,7 +454,7 @@ pub mut:
 pub fn reference_findings(mut v flatxml.Merged, ix &PathIndex, mut ty Typing, extra []RefView, p Policy) ([]Finding, RefStats) {
 	mut out := []Finding{}
 	mut st := RefStats{}
-	for path in ix.dup {
+	for path in ix.dup() {
 		hs := ix.holders(path)
 		mut at := []string{}
 		for h in hs {
@@ -637,11 +560,10 @@ fn resolve(target string, dest string, views []RefView, package string, mut ty T
 			// with no schema, any kind fits: DEST may name a class
 			untyped := ty.s == unsafe { nil }
 			if untyped || name == dest || (ct != no_type && dest in ty.kinds_of(ct)) {
-				exact := rv.ix.path_of(h) or { '' }
-				if exact == target {
+				if rv.ix.spelled(h, target) {
 					return '', ''
 				}
-				spelled = exact
+				spelled = rv.ix.path_of(h) or { '' }
 			} else if name !in kinds {
 				kinds << name
 			}

@@ -177,10 +177,13 @@ pub fn (rs &RuleSet) multiplicity_findings(mut v flatxml.Merged, ix &PathIndex, 
 	}
 	mut stack := [root.i]
 	mut types := [root_type.idx]
+	// one node's children, a list kept between nodes: made per node, it was most of this
+	// layer's allocation
+	mut kids := []flatxml.MNode{}
 	for stack.len > 0 {
 		n := v.node(stack.pop())
 		ct := types.pop()
-		mut kids := []flatxml.MNode{}
+		kids.clear()
 		for c in n.children() {
 			kids << c
 		}

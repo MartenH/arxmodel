@@ -817,7 +817,39 @@ pub mut:
 
 // count is the findings of one severity.
 pub fn (c &Checked) count(s Severity) int {
-	return c.findings.filter(it.severity == s).len
+	mut n := 0
+	for f in c.findings {
+		if f.severity == s {
+			n++
+		}
+	}
+	return n
+}
+
+// repeats_a_document reports whether two of n's contributions come from one document; without a
+// map for the few a node has, as it is asked of every merged node.
+fn repeats_a_document(n flatxml.MNode) bool {
+	k := n.fragment_count()
+	if k > 32 {
+		mut docs := map[voidptr]bool{}
+		for a in 0 .. k {
+			d := voidptr(n.fragment(a).doc)
+			if d in docs {
+				return true
+			}
+			docs[d] = true
+		}
+		return false
+	}
+	for a in 0 .. k {
+		da := n.fragment(a).doc
+		for b in a + 1 .. k {
+			if n.fragment(b).doc == da {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // governing_use is the schema governing m's documents. One model has one namespace; a namespace
@@ -866,7 +898,9 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 	if !opts.skip_xml {
 		sw := time.new_stopwatch()
 		found, fallback := xml_findings(m, sc, opts.jobs)
-		// a finding's path: the merged node its element went into, else the element's names
+		// a finding's path: the merged node its element went into, else the element's names;
+		// gathered at their number, then added at once, not grown a finding at a time
+		mut add := []Finding{cap: found.len}
 		for f in found {
 			mut path := f.finding.path
 			if f.doc >= 0 {
@@ -877,11 +911,12 @@ pub fn check(m &Model, sc &Schemas, opts CheckOptions) !Checked {
 					'#' + doc_names(d, f.node)
 				}
 			}
-			c.findings << Finding{
+			add << Finding{
 				...f.finding
 				path: path
 			}
 		}
+		c.findings << add
 		c.xml_fallback = fallback
 		c.times['xml_schema'] = sw.elapsed()
 	}
@@ -962,12 +997,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 		n := view.node(u32(i))
 		if n.fragment_count() > 1 {
 			merged++
-			frags := n.fragments()
-			mut docs := map[voidptr]bool{}
-			for fr in frags {
-				docs[voidptr(fr.doc)] = true
-			}
-			if docs.len < frags.len {
+			if repeats_a_document(n) {
 				within++
 			}
 		}
@@ -978,7 +1008,8 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	}
 	mut in_conflict := []bool{len: view.problems.len}
 	mut violations := 0
-	mut findings := []Finding{}
+	// at their number (the view's problems are most of them), not grown a finding at a time
+	mut findings := []Finding{cap: view.problems.len + flat.conflicts.len}
 	for x in flat.used() {
 		findings << Finding{
 			layer:    .merge
@@ -1004,12 +1035,14 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 			child = parent.name()
 			parent = parent.parent()
 		}
-		in_conflict[k] = '${parent.parent().name()}/${parent.name()} ${child}' in conflicted
-			|| '${parent.name()} ${child}' in conflicted
+		// the keys are only built where there are conflicts to look them up in
+		in_conflict[k] = conflicted.len > 0
+			&& ('${parent.parent().name()}/${parent.name()} ${child}' in conflicted
+				|| '${parent.name()} ${child}' in conflicted)
 		if !in_conflict[k] {
 			violations++
 		}
-		kind := '${pr.kind}'
+		kind := pr.kind.str() // a constant; interpolation would make a string per problem
 		findings << Finding{
 			layer:       .merge
 			kind:        kind
