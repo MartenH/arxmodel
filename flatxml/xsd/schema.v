@@ -203,7 +203,9 @@ pub mut:
 pub:
 	appinfo          []Appinfo
 	groups           []ModelGroup     // the named model groups, in the order they were read
-	attribute_groups []AttributeGroup // the named attribute groups, in the order they were read
+	// the named attribute groups, in the order they were read, then the built-in xml:specialAttrs
+	// where a schema refers to it
+	attribute_groups []AttributeGroup
 mut:
 	name_ids      map[string]u32
 	uri_ids       map[string]u32

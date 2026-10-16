@@ -93,30 +93,71 @@ const no_match = u32(0xFFFF_FFFF)
 // gives it, and every element, attribute and run of text the schema does not allow is a finding.
 // Namespaces are resolved first; a document that is not namespace-well-formed is an error.
 pub fn validate(mut d flatxml.Doc, s &Schema, opts Options) !Validation {
-	mut vr := new_validator(mut d, s, opts)!
+	mut c := new_checker(s, opts)
+	return c.validate(mut d)
+}
+
+// Checker validates documents against one schema, keeping what it works out about the schema
+// from one document to the next: each complex type's index of children and attributes and its
+// content automaton, each particle's first set, each pattern's automaton. A document uses
+// hundreds of types, and every document of a model the same ones, so validating many with one
+// checker builds each once. One per thread: a checker is not safe to share.
+@[heap]
+pub struct Checker {
+mut:
+	s        &Schema
+	opts     Options
+	index    []&TypeIndex
+	checked  []bool
+	firsts   []&FirstSet
+	dfas     []&ContentDfa
+	dfa_made []bool
+	matcher  Matcher
+}
+
+// new_checker is a checker for schema s; opts apply to every document it validates.
+pub fn new_checker(s &Schema, opts Options) &Checker {
+	return &Checker{
+		s:        s
+		opts:     opts
+		index:    []&TypeIndex{len: s.complex_types.len, init: unsafe { nil }}
+		checked:  s.checked()
+		firsts:   []&FirstSet{len: s.particles.len, init: unsafe { nil }}
+		dfas:     []&ContentDfa{len: s.complex_types.len, init: unsafe { nil }}
+		dfa_made: []bool{len: s.complex_types.len}
+		matcher:  Matcher{
+			use_dfa: true
+		}
+	}
+}
+
+// validate checks document d, as the function validate does, with what earlier documents taught
+// the checker.
+pub fn (mut c Checker) validate(mut d flatxml.Doc) !Validation {
+	mut vr := new_validator(mut d, c)!
 	vr.walk()
 	vr.check_idrefs()
+	// the arrays are the checker's own (filled in place); the matcher is a value, so taken back
+	c.matcher = vr.matcher
 	return vr.v
 }
 
-fn new_validator(mut d flatxml.Doc, s &Schema, opts Options) !Validator {
+fn new_validator(mut d flatxml.Doc, c &Checker) !Validator {
 	d.resolve_namespaces()!
 	mut vr := Validator{
-		d:    d
-		s:    s
-		opts: opts
-		v:    Validation{
+		d:        d
+		s:        c.s
+		opts:     c.opts
+		v:        Validation{
 			decl: []u32{len: d.len()}
 		}
-		xsi:  d.ns_id(xsi_ns_uri) or { no_match }
-		index: []&TypeIndex{len: s.complex_types.len, init: unsafe { nil }}
-		checked:   s.checked()
-		firsts:    []&FirstSet{len: s.particles.len, init: unsafe { nil }}
-		dfas:      []&ContentDfa{len: s.complex_types.len, init: unsafe { nil }}
-		dfa_made:  []bool{len: s.complex_types.len}
-		matcher:   Matcher{
-			use_dfa: true
-		}
+		xsi:      d.ns_id(xsi_ns_uri) or { no_match }
+		index:    c.index
+		checked:  c.checked
+		firsts:   c.firsts
+		dfas:     c.dfas
+		dfa_made: c.dfa_made
+		matcher:  c.matcher
 	}
 	vr.map_names()
 	return vr
