@@ -707,7 +707,7 @@ fn (mut m Merged) differs(n u32) {
 				kind: .value_differs
 				node: n
 				key:  m.key_of(n).clone()
-				what: d0.name(f0.i)
+				what: m.set.tab.name(m.name[n]) // the merge's name, not the first file's spelling
 				at:   [Node{d0, f0.i}, Node{d, f.i}]
 			}
 		}
@@ -727,7 +727,7 @@ fn (mut m Merged) differs(n u32) {
 							kind: .value_differs
 							node: n
 							key:  m.key_of(n).clone()
-							what: '@${d.attr_name(b)}'
+							what: '@${d.tab.name(d.attr_id(b))}'
 							at:   [Node{d0, f0.i}, Node{d, f.i}]
 						}
 					}

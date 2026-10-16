@@ -229,8 +229,8 @@ fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 			if all && p.starts_with('@') {
 				return error('rule ${k + 1}: key part `${p_}`: `+` reads every element at a path, and names none')
 			}
-			at := p.index_u8(`@`)
-			if at >= 0 && (p[at..].contains('/') || at + 1 == p.len) {
+			at := index_outside(p, `@`)
+			if at >= 0 && (index_outside(p[at..], `/`) >= 0 || at + 1 == p.len) {
 				return error('rule ${k + 1}: key path `${p}`: an attribute ends a path')
 			}
 			path := if at < 0 { p } else { p[..at] }
@@ -339,7 +339,7 @@ fn (mut cr CompiledRules) selector(parent string, t &Names, classifies bool) !u3
 		cr.classes[parent[1..]] = id
 		return id
 	}
-	names := parent.split('/')
+	names := split_names(parent, `/`)
 	if names.any(it == '' || it == '*' || it.starts_with('%')) {
 		return error('parent `${parent}`: a path is of element names')
 	}
@@ -560,7 +560,9 @@ pub fn parse_rules(text string) !RuleSet {
 	mut local := ''
 	mut ignore := []string{}
 	for n, raw in text.split_into_lines() {
-		line := raw.all_before('#').trim_space()
+		// a comment starts at a `#` outside an expanded name's braces (`{…ns#}x` holds one)
+		hash := index_outside(raw, `#`)
+		line := (if hash < 0 { raw } else { raw[..hash] }).trim_space()
 		if line == '' {
 			continue
 		}
@@ -614,7 +616,7 @@ pub fn parse_rules(text string) !RuleSet {
 		mut keyless := Keyless.own
 		for w in words[2..] {
 			if w.starts_with('key=') {
-				key = w[4..].split(',').filter(it != '')
+				key = split_names(w[4..], `,`).filter(it != '')
 				if key.len == 0 {
 					return error('line ${n + 1}: an empty key')
 				}
@@ -641,7 +643,7 @@ pub fn parse_rules(text string) !RuleSet {
 		}
 		rules << Rule{
 			parent:   words[0]
-			children: words[1].split(',').filter(it != '')
+			children: split_names(words[1], `,`).filter(it != '')
 			key:      key
 			keyless:  keyless
 			single:   single
@@ -672,7 +674,7 @@ pub fn format_rules(rs RuleSet) !string {
 		lines << '!fold'
 	}
 	if rs.local_ns != '' {
-		if rs.local_ns.contains_any(' \t\n\r') || rs.local_ns.starts_with('#') {
+		if rs.local_ns.fields() != [rs.local_ns] || rs.local_ns.starts_with('#') {
 			return error('the local namespace `${rs.local_ns}` cannot be written as rule text')
 		}
 		lines << '!local ${rs.local_ns}'
@@ -754,7 +756,8 @@ fn format_rule(r Rule) !string {
 // line or a word, or is trimmed from a line (space, tab, newline, carriage return, vertical tab,
 // form feed), and without `,` or `#`.
 fn check_rule_word(w string, what string) ! {
-	if w.contains_any(' \t\n\r\v\f,#') {
+	// inside an expanded name's braces `,` and `#` are the URI's; whitespace ends a word anywhere
+	if w.contains_any(' \t\n\r\v\f') || index_outside(w, `,`) >= 0 || index_outside(w, `#`) >= 0 {
 		return error('${what} `${w}` cannot be written: whitespace, `,` and `#` end a word')
 	}
 }

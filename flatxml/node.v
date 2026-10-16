@@ -403,16 +403,51 @@ pub struct Path {
 
 const no_name = u32(0xFFFF_FFFF)
 
-// path compiles p (names separated by `/`) against the table: a set's table serves every
-// document of the set.
+// path compiles p (names separated by `/`, an expanded name's `{uri}` read whole) against the
+// table: a set's table serves every document of the set.
 pub fn (t &Names) path(p string) Path {
-	names := p.split('/').filter(it != '')
+	names := split_names(p, `/`).filter(it != '')
 	return Path{
 		names: names
 		ids:   t.ids_of(names)
 		tab:   t
 		known: t.names.len
 	}
+}
+
+// split_names splits s at sep, except inside an expanded name's braces: `{http://x/e}id/b` is
+// two names.
+fn split_names(s string, sep u8) []string {
+	mut out := []string{}
+	mut depth := 0
+	mut start := 0
+	for i, c in s {
+		if c == `{` {
+			depth++
+		} else if c == `}` && depth > 0 {
+			depth--
+		} else if c == sep && depth == 0 {
+			out << s[start..i]
+			start = i + 1
+		}
+	}
+	out << s[start..]
+	return out
+}
+
+// index_outside is the index of the first c in s outside an expanded name's braces; -1 for none.
+fn index_outside(s string, c u8) int {
+	mut depth := 0
+	for i, b in s {
+		if b == `{` {
+			depth++
+		} else if b == `}` && depth > 0 {
+			depth--
+		} else if b == c && depth == 0 {
+			return i
+		}
+	}
+	return -1
 }
 
 fn (t &Names) ids_of(names []string) []u32 {

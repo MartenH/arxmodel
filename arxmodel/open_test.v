@@ -280,3 +280,22 @@ fn test_a_repetition_is_said_once() {
 	assert o.repeated.len == 1
 	assert o.repeated[0].starts_with('/P: ')
 }
+
+fn test_an_element_of_no_namespace_is_no_value_of_the_model() {
+	// {}VENDOR-PARAM-VALUE has the shape of an ECUC value's name and is not the model's
+	text := '<AUTOSAR xmlns="urn:m"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
+		'<ECUC-CONTAINER-VALUE><SHORT-NAME>C</SHORT-NAME><PARAMETER-VALUES><VENDOR-PARAM-VALUE xmlns=""><DEFINITION-REF>/D/p</DEFINITION-REF></VENDOR-PARAM-VALUE></PARAMETER-VALUES></ECUC-CONTAINER-VALUE>' +
+		'</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
+	mut o := open_sources([src('a.arxml', text)])!
+	defer {
+		o.free()
+	}
+	f := o.view.set.tab.id('{}VENDOR-PARAM-VALUE') or { panic('no expanded name') }
+	mut x := &Identified{
+		id: builtin_identity()
+		nm: naming(model_namespace([o.model]), [o.model])
+	}
+	x.observe([o.model])
+	facts := x.facts(o.model.set.docs[0].root_node()) or { panic('no facts') }
+	assert !facts.by_def[f]
+}

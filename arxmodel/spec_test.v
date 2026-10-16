@@ -173,6 +173,8 @@ fn test_content_hashes_name_elements_as_the_merge_does() {
 	// the model's namespace by local names, whatever the prefix; another namespace as written
 	assert hash('<A xmlns="urn:m"><B>1</B></A>') == hash('<m:A xmlns:m="urn:m"><m:B>1</m:B></m:A>')
 	assert hash('<A xmlns="urn:m"><B>1</B></A>') != hash('<A xmlns="urn:m" xmlns:e="urn:e"><e:B>1</e:B></A>')
+	// an attribute in a namespace by its expanded name, whatever its prefix
+	assert hash('<A xmlns="urn:m" xmlns:p="urn:x" p:id="1"/>') == hash('<A xmlns="urn:m" xmlns:q="urn:x" q:id="1"/>')
 }
 
 fn test_an_item_keyed_by_content_is_shown_by_its_place() {

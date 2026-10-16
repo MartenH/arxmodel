@@ -115,9 +115,10 @@ fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
 	mut by_def := []bool{len: tab.len()}
 	for k in 2 .. tab.len() {
 		name := tab.name(u32(k))
-		// a name with a prefix is never the merge's name for a model element (Naming): an
-		// element of another namespace is not an ECUC value, whatever its local name
-		by_def[k] = !name.contains_u8(`:`) && id.by_definition.any(glob(it, name))
+		// a prefixed or an expanded name ({uri}x, {}x) is never the merge's name for an element
+		// of the model's namespace (Naming): another namespace's is no ECUC value
+		by_def[k] = !name.contains_u8(`:`) && !name.starts_with('{')
+			&& id.by_definition.any(glob(it, name))
 	}
 	r := id.value_role()
 	return &TabFacts{

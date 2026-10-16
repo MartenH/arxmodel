@@ -64,7 +64,8 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 		for a := lo; a < hi; a++ {
 			name := d.attr_name(a)
 			if name !in ch.ignore && !d.is_ns_decl(a) {
-				attrs << '${name}=${d.attr_value(a)}'
+				// by its identity (an expanded name in a namespace), as the merge compares it
+				attrs << '${d.tab.name(d.attr_id(a))}=${d.attr_value(a)}'
 			}
 		}
 		attrs.sort()
