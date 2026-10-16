@@ -146,7 +146,7 @@ fn test_each_node_by_the_rule_applied_to_it() {
 }
 
 fn test_content_hashes() {
-	mut ch := new_content_hashes(['UUID'])
+	mut ch := new_content_hashes(['UUID'], Naming{})
 	hash := fn [mut ch] (xml string) u64 {
 		d := flatxml.parse_string(xml) or { panic(err) }
 		return ch.hash(d.root_node())
@@ -159,6 +159,20 @@ fn test_content_hashes() {
 	assert hash('<A UUID="1"/>') == hash('<A UUID="2"/>')
 	assert hash('<A>\n  <B>1</B>\n</A>') == hash('<A><B>1</B></A>')
 	assert hash('<A><B>1</B></A>') != hash('<A><B>2</B></A>')
+}
+
+fn test_content_hashes_name_elements_as_the_merge_does() {
+	mut ch := new_content_hashes([], Naming{
+		ns: 'urn:m'
+	})
+	hash := fn [mut ch] (xml string) u64 {
+		mut d := flatxml.parse_string(xml) or { panic(err) }
+		d.resolve_namespaces() or { panic(err) }
+		return ch.hash(d.root_node())
+	}
+	// the model's namespace by local names, whatever the prefix; another namespace as written
+	assert hash('<A xmlns="urn:m"><B>1</B></A>') == hash('<m:A xmlns:m="urn:m"><m:B>1</m:B></m:A>')
+	assert hash('<A xmlns="urn:m"><B>1</B></A>') != hash('<A xmlns="urn:m" xmlns:e="urn:e"><e:B>1</e:B></A>')
 }
 
 fn test_an_item_keyed_by_content_is_shown_by_its_place() {

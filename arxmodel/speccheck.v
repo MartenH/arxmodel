@@ -17,6 +17,7 @@ pub const content_mark = '\x1d'
 @[heap]
 pub struct ContentHashes {
 	ignore []string
+	nm     Naming // how the merge names the documents' elements
 mut:
 	doc_of map[voidptr]int   // a document -> its number here
 	hashes [][]u64           // per document number, per node: the hash, 0 until computed
@@ -24,9 +25,10 @@ mut:
 	names  map[voidptr][]u64 // per name table: each name's hash, 0 until computed
 }
 
-pub fn new_content_hashes(ignore []string) &ContentHashes {
+pub fn new_content_hashes(ignore []string, nm Naming) &ContentHashes {
 	return &ContentHashes{
 		ignore: ignore.clone()
+		nm:     nm
 	}
 }
 
@@ -93,10 +95,10 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 	return h
 }
 
-// name_hash is the hash of a node's name, once per name of a table.
+// name_hash is the hash of a node's name as the merge names it, once per name of a table.
 fn (mut ch ContentHashes) name_hash(d &flatxml.Doc, i u32) u64 {
 	t := voidptr(d.tab)
-	tag := d.tag[i]
+	tag := ch.nm.tag(d, i)
 	mut hs := ch.names[t] or { []u64{} }
 	if tag < hs.len && hs[tag] != 0 {
 		return hs[tag]
@@ -108,7 +110,7 @@ fn (mut ch ContentHashes) name_hash(d &flatxml.Doc, i u32) u64 {
 			hs[j] = x
 		}
 	}
-	h := fnv1a.sum64_string(d.name(i))
+	h := fnv1a.sum64_string(d.tab.name(tag))
 	hs[tag] = h
 	ch.names[t] = hs
 	return h
@@ -145,11 +147,11 @@ fn (mut ch ContentHashes) repeat_key(n flatxml.Node, children []string) string {
 	// every child of the role under this parent, keyed at once
 	d := n.doc
 	p := d.parent[n.i]
-	pname := d.name(p)
+	pname := ch.nm.name(d, p)
 	mut seen := map[u64]int{}
 	mut c := d.first_child(p)
 	for c != flatxml.no_node {
-		if d.is_element(c) && (children.len == 0 || d.name(c) in children) {
+		if d.is_element(c) && (children.len == 0 || ch.nm.name(d, c) in children) {
 			h := ch.hash_at(k, d, c)
 			ch.keys[k][c] = content_key(pname, h, seen[h])
 			seen[h]++

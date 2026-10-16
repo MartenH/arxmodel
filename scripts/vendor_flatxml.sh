@@ -11,10 +11,9 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 git -C "$work" init -q
-git -C "$work" fetch -q --depth=1 "$src" "$commit"
-full=$(git -C "$work" rev-parse FETCH_HEAD)
-# a local checkout is accepted only as a copy of the public repository, and recorded as that: a
-# path on this machine, or any other remote, never goes into VENDORED
+# a local checkout is accepted only as a copy of the public repository, and the commit is then
+# fetched from that repository: a path on this machine, another remote, or a commit not pushed
+# never goes into VENDORED
 public=https://github.com/MartenH/flatxml
 if [ -d "$src" ]; then
 	origin=$(git -C "$src" remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##')
@@ -24,6 +23,8 @@ if [ -d "$src" ]; then
 	fi
 	src=$public
 fi
+git -C "$work" fetch -q --depth=1 "$src" "$commit"
+full=$(git -C "$work" rev-parse FETCH_HEAD)
 git -C "$work" checkout -q FETCH_HEAD -- flatxml
 find "$work/flatxml" -name '*_test.v' -delete
 rm -rf "$root/flatxml"

@@ -213,10 +213,21 @@ fn (m &Merged) joins_root(d &Doc, root_tag u32) bool {
 // build makes the merged root, then the children of every merged node in turn.
 fn (mut m Merged) build() {
 	s := m.set
-	root_tag := m.name_of(s.docs[0], 1)
-	mut at := [s.docs[0].root_node()]
+	// the root is the first document's, or with a local namespace the first document's in it:
+	// a document of another namespace listed first does not decide what the others merge into
+	mut first := 0
+	if m.rules.local != no_local {
+		for k, d in s.docs {
+			if d.ns[1] == m.rules.local {
+				first = k
+				break
+			}
+		}
+	}
+	root_tag := m.name_of(s.docs[first], 1)
+	mut at := [s.docs[first].root_node()]
 	for k, d in s.docs {
-		if m.joins_root(d, root_tag) {
+		if k == first || m.joins_root(d, root_tag) {
 			put(m.frags, m.nfrags, Frag{u32(k), 1})
 			m.nfrags++
 		} else {

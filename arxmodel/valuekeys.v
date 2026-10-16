@@ -25,18 +25,19 @@ pub:
 pub struct ValueKeys {
 pub mut:
 	roles []IdentityRole
+	nm    Naming // how the merge names the documents' elements
 	// `definition sep label` given more than once under one parent: a set
 	multi map[string]bool
 }
 
-// role_of is the identity role an element is an item of, by its name and its parent's, each
-// compared without its prefix as the schema's role names are written.
+// role_of is the identity role an element is an item of, by its name and its parent's, each as
+// the merge names it (the model's namespace by local names, as the schema's role names are).
 fn (vk &ValueKeys) role_of(n flatxml.Node) ?IdentityRole {
 	p := n.parent()
 	if !p.ok() {
 		return none
 	}
-	name, pname := local_part(n.name()), local_part(p.name())
+	name, pname := vk.nm.node_name(n), vk.nm.node_name(p)
 	for r in vk.roles {
 		if r.parent == pname && name in r.items {
 			return r
@@ -46,8 +47,8 @@ fn (vk &ValueKeys) role_of(n flatxml.Node) ?IdentityRole {
 }
 
 // ident is an item's definition and label, joined.
-fn ident_of(n flatxml.Node, r IdentityRole) string {
-	return text_at(n, r.definition) + flatxml.key_sep + text_at(n, r.label)
+fn ident_of(n flatxml.Node, r IdentityRole, nm &Naming) string {
+	return nm.text_at(n, r.definition) + flatxml.key_sep + nm.text_at(n, r.label)
 }
 
 // observe records, in every document of the models, the definitions given more than once under
@@ -67,7 +68,7 @@ fn (mut vk ValueKeys) observe_node(n flatxml.Node) {
 	mut seen := map[string]bool{}
 	for c in n.children() {
 		if r := vk.role_of(c) {
-			k := ident_of(c, r)
+			k := ident_of(c, r, vk.nm)
 			if k in seen {
 				vk.multi[k] = true
 			}
@@ -81,35 +82,35 @@ fn (mut vk ValueKeys) observe_node(n flatxml.Node) {
 // content too. None for an element of no identity role, or with neither.
 pub fn (vk &ValueKeys) key(n flatxml.Node) ?string {
 	r := vk.role_of(n)?
-	k := ident_of(n, r)
+	k := ident_of(n, r, vk.nm)
 	if flatxml.empty_key(k) {
 		return none
 	}
 	if k in vk.multi {
-		return k + flatxml.key_sep + content_of(n, r)
+		return k + flatxml.key_sep + content_of(n, r, vk.nm)
 	}
 	return k
 }
 
 // content_of is what an item holds besides its definition and label: each element's path (of
-// local names, so a prefix does not tell two values apart) and text, in order.
-fn content_of(n flatxml.Node, r IdentityRole) string {
+// names as the merge names them, so a prefix does not tell two values apart) and text, in order.
+fn content_of(n flatxml.Node, r IdentityRole, nm &Naming) string {
 	skip := [r.definition.all_before('/'), r.label.all_before('/')]
 	mut out := []string{}
 	for c in n.children() {
-		local := local_part(c.name())
-		if local !in skip {
-			leaf_texts(c, local, mut out)
+		name := nm.node_name(c)
+		if name !in skip {
+			leaf_texts(c, name, nm, mut out)
 		}
 	}
 	return out.join(flatxml.key_list_sep)
 }
 
-fn leaf_texts(n flatxml.Node, path string, mut out []string) {
+fn leaf_texts(n flatxml.Node, path string, nm &Naming, mut out []string) {
 	mut any := false
 	for c in n.children() {
 		any = true
-		leaf_texts(c, '${path}/${local_part(c.name())}', mut out)
+		leaf_texts(c, '${path}/${nm.node_name(c)}', nm, mut out)
 	}
 	if !any {
 		out << '${path}=${n.text().trim_space()}'
@@ -159,6 +160,7 @@ pub fn with_value_keys(rs flatxml.RuleSet, vk &ValueKeys) flatxml.RuleSet {
 pub fn (f &Flat) value_keys(models []&Model) &ValueKeys {
 	mut vk := &ValueKeys{
 		roles: f.identity_roles
+		nm:    naming(f.rules.local_ns, models)
 	}
 	vk.observe(models)
 	return vk

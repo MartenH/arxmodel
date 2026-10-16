@@ -101,7 +101,7 @@ pub fn (mut f Flat) place(m &Model) {
 			pairs << pair
 		}
 	}
-	contexts := contexts_of(m, pairs)
+	contexts := contexts_of(m, pairs, naming(f.rules.local_ns, [m]))
 	for mut c in f.conflicts {
 		pair, above := c.pair()
 		seen := (contexts[pair] or { map[string]int{} }).clone()
@@ -424,8 +424,8 @@ fn (rs &RuleSet) per_item(d u32) map[u32]u32 {
 }
 
 // contexts_of counts, for each of the pairs given, the names of the elements above the parent
-// where the pair occurs in m's documents.
-pub fn contexts_of(m &Model, pairs []string) map[string]map[string]int {
+// where the pair occurs in m's documents, every element named as the merge names it.
+pub fn contexts_of(m &Model, pairs []string, nm Naming) map[string]map[string]int {
 	tab := m.set.tab
 	// the pairs as name ids: a child's id says whether to look at all
 	mut wanted := map[u64]int{}
@@ -439,14 +439,14 @@ pub fn contexts_of(m &Model, pairs []string) map[string]map[string]int {
 	mut counts := map[u64]int{} // (pair, name id above) -> occurrences
 	for d in m.set.docs {
 		for i in 2 .. d.len() {
-			t := d.tag[i]
-			if !is_child[t] {
+			t := nm.tag(d, i)
+			if int(t) >= is_child.len || !is_child[t] {
 				continue
 			}
 			p := d.parent[i]
-			k := wanted[u64(d.tag[p]) << 32 | t] or { continue }
+			k := wanted[u64(nm.tag(d, p)) << 32 | t] or { continue }
 			g := d.parent[p]
-			counts[u64(k) << 32 | (if g == 0 { u32(0) } else { d.tag[g] })]++
+			counts[u64(k) << 32 | (if g == 0 { u32(0) } else { nm.tag(d, g) })]++
 		}
 	}
 	mut out := map[string]map[string]int{}
@@ -834,10 +834,16 @@ pub fn governing_use(sc &Schemas) !&SchemaUse {
 }
 
 // governing_flat is the flatxml rules of the schema governing the documents, by the policy the
-// schemas were read with.
+// schemas were read with: the schema's namespace named by local names (flatxml's local_ns), so a
+// document binding it to a prefix merges as one that does not.
 pub fn governing_flat(sc &Schemas) !(Flat, string) {
 	gov := governing_use(sc)!
-	return gov.rules.to_flat(keyless: sc.policy.absent_keys), gov.name
+	mut f := gov.rules.to_flat(keyless: sc.policy.absent_keys)
+	f.rules = flatxml.RuleSet{
+		...f.rules
+		local_ns: gov.ns
+	}
+	return f, gov.name
 }
 
 // with_settings is a rule set with the merge's case and attribute settings.
@@ -941,7 +947,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
 	flat.rules = with_settings(flat0.rules, fold, ignore)
-	mut ch := new_content_hashes(ignore)
+	mut ch := new_content_hashes(ignore, naming(flat.rules.local_ns, [m]))
 	flat.rules = flat.merge_rules([m], mut ch)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!

@@ -116,12 +116,12 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	} else {
 		flat, name = identity_flat(builtin_identity(), [m]), 'built-in identity rules'
 	}
-	// a reader reads in the order the files are written (siblings as first written, not by key),
-	// and a prefix is a spelling of the namespace: `ar:X` in one file is X in another
+	// a reader reads in the order the files are written: siblings as first written, not by key.
+	// The rules name the local namespace already (the schema's, or the model's for the built-in
+	// rules), so `ar:X` in one file is X in another, as check merges them
 	flat.rules = flatxml.RuleSet{
 		...flat.rules
 		written_order: true
-		local_ns:      model_namespace([m])
 	}
 	copts := CheckOptions{
 		skip_xml:          true
@@ -142,7 +142,10 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	for k in c.index.nodes {
 		o.by_kind[c.view.node(k).tag()] << k
 	}
+	// the outermost of what one file repeats: below a repeated element everything repeats with
+	// it, and is the one repetition (a parent's index is below its children's)
 	mut v := c.view
+	mut repeats := []bool{len: v.len()}
 	for i in 0 .. v.len() {
 		n := v.node(u32(i))
 		if n.fragment_count() < 2 {
@@ -154,21 +157,43 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 			docs[voidptr(f.doc)] = true
 		}
 		if docs.len < frags.len {
-			o.repeated << '${merged_path(n, c.index)}: ${frags.map(v.pos(it)).join(', ')}'
+			repeats[i] = true
+			up := n.parent()
+			if !(up.ok() && repeats[up.i]) {
+				o.repeated << '${merged_path(n, c.index)}: ${frags.map(v.pos(it)).join(', ')}'
+			}
 		}
 	}
 	return o
 }
 
-// model_namespace is the namespace a model is in: its first document's root's, which a merge
-// names by local names (flatxml's local_ns); '' for no document.
+// model_namespace is the namespace a model is in: the one most of its documents' roots are in,
+// the first such in the documents' order on a tie, which a merge by the built-in rules names by
+// local names (flatxml's local_ns); a document whose root is in another is not merged. '' for
+// none, or documents whose namespaces are not resolved.
 pub fn model_namespace(models []&Model) string {
+	mut count := map[string]int{}
+	mut order := []string{}
 	for m in models {
 		for d in m.set.docs {
-			return if d.ns.len == d.tag.len { d.ns_uri(d.ns_of(d.root())) } else { '' }
+			if d.ns.len != d.tag.len {
+				return ''
+			}
+			uri := d.ns_uri(d.ns_of(d.root()))
+			if uri !in count {
+				order << uri
+			}
+			count[uri]++
 		}
 	}
-	return ''
+	mut best := ''
+	mut most := 0
+	for uri in order {
+		if count[uri] > most {
+			best, most = uri, count[uri]
+		}
+	}
+	return best
 }
 
 // free releases the documents. Nothing opened from them may be used after.

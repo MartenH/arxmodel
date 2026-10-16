@@ -78,7 +78,7 @@ fn glob(pattern string, name string) bool {
 pub struct Identified {
 pub:
 	id Identity
-	ns string // the model's namespace: its elements are named by their local names
+	nm Naming // how the merge names the documents' elements: the model's namespace by local names
 pub mut:
 	lists map[string]bool // element names some document holds as a list of named elements
 	// `definition sep label` of values given more than once under one parent
@@ -96,10 +96,6 @@ struct TabFacts {
 	name   [][]u32 // each path of id.name, as name ids (none: a name the table lacks)
 	def    []u32   // the definition path
 	label  []u32   // the label path ('' when the name has one part)
-	// some name of the table has a prefix: a child is then found by its name in the model's
-	// namespace (`ar:X` as X there), as the merge names it
-	prefixed bool
-	ns       u32 // the model namespace's id in the table (absent: an id no element has)
 }
 
 // path_ids is a path of child names as ids of a table, or none when one of them is not in it
@@ -115,20 +111,18 @@ fn path_ids(tab &flatxml.Names, path string) ?[]u32 {
 	return out
 }
 
-fn (id &Identity) tab_facts(tab &flatxml.Names, ns u32) &TabFacts {
+fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
 	mut by_def := []bool{len: tab.len()}
-	mut prefixed := false
 	for k in 2 .. tab.len() {
 		name := tab.name(u32(k))
-		by_def[k] = id.by_definition.any(glob(it, local_part(name)))
-		prefixed = prefixed || name.contains_u8(`:`)
+		// a name with a prefix is never the merge's name for a model element (Naming): an
+		// element of another namespace is not an ECUC value, whatever its local name
+		by_def[k] = !name.contains_u8(`:`) && id.by_definition.any(glob(it, name))
 	}
 	r := id.value_role()
 	return &TabFacts{
-		tab:      tab
-		prefixed: prefixed
-		ns:       ns
-		by_def:   by_def
+		tab:    tab
+		by_def: by_def
 		name:   id.name.map(path_ids(tab, it) or { []u32{} })
 		def:    path_ids(tab, r.definition) or { []u32{} }
 		label:  path_ids(tab, r.label) or { []u32{} }
@@ -147,30 +141,19 @@ fn (x &Identified) facts(n flatxml.Node) ?&TabFacts {
 }
 
 // ids_text is the trimmed text at a path of child name ids below n ('' where there is none),
-// without copying: a slice of the document's text.
-fn ids_text(n flatxml.Node, ids []u32, prefixed bool, ns u32) string {
+// each child named as the merge names it, without copying: a slice of the document's text.
+fn ids_text(n flatxml.Node, ids []u32, nm &Naming) string {
 	if ids.len == 0 {
 		return ''
 	}
 	mut cur := n
 	for tag in ids {
-		cur = if prefixed { child_named_in(cur, tag, ns) } else { cur.child_id(tag) }
+		cur = nm.child_id(cur, tag)
 		if !cur.ok() {
 			return ''
 		}
 	}
 	return trimmed(cur.text())
-}
-
-// child_named_in is the first child element named `name` in a merge whose local namespace has id
-// ns: by its local name when it is in that namespace, as written otherwise (`Doc.name_in`).
-fn child_named_in(n flatxml.Node, name u32, ns u32) flatxml.Node {
-	for c in n.children() {
-		if c.doc.name_in(c.i, ns) == name {
-			return c
-		}
-	}
-	return flatxml.Node{}
 }
 
 @[inline]
@@ -202,54 +185,25 @@ fn (id &Identity) value_role() IdentityRole {
 	}
 }
 
-// is_value reports whether an element is a value named by its definition: an element of a
-// by_definition name with no short name (a container, which has one, is named by both).
-fn (id &Identity) is_value(n flatxml.Node) bool {
-	return id.by_definition.any(glob(it, local_part(n.name()))) && text_at(n, id.name[0]) == ''
-}
-
 // named is the name of an element by these rules, or none: its short name (and the further
 // parts); for an element named by its definition, the definition and the label (and a
 // container's short name); for a definition of several values, the value's content too.
 fn (x &Identified) named(n flatxml.Node) ?string {
-	id := x.id
-	if f := x.facts(n) {
-		return x.named_by(n, f)
-	}
-	if id.by_definition.any(glob(it, local_part(n.name()))) {
-		r := id.value_role()
-		k := ident_of(n, r)
-		s := text_at(n, id.name[0])
-		if flatxml.empty_key(k) && s == '' {
-			return none
-		}
-		if s == '' && k in x.multi {
-			return k + flatxml.key_sep + content_of(n, r)
-		}
-		return s + flatxml.key_sep + k
-	}
-	first := text_at(n, id.name[0])
-	if first == '' {
-		return none
-	}
-	mut parts := [first]
-	for p in id.name[1..] {
-		parts << text_at(n, p)
-	}
-	return parts.join(flatxml.key_sep)
+	f := x.facts(n) or { x.id.tab_facts(n.doc.tab) }
+	return x.named_by(n, f)
 }
 
 // named_by is `named` by the facts of n's name table: the same name, read by ids.
 fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
-	tag := n.tag()
-	first := ids_text(n, f.name[0], f.prefixed, f.ns)
+	tag := x.nm.tag(n.doc, n.i)
+	first := ids_text(n, f.name[0], x.nm)
 	if int(tag) < f.by_def.len && f.by_def[tag] {
-		k := ids_text(n, f.def, f.prefixed, f.ns) + flatxml.key_sep + ids_text(n, f.label, f.prefixed, f.ns)
+		k := ids_text(n, f.def, x.nm) + flatxml.key_sep + ids_text(n, f.label, x.nm)
 		if flatxml.empty_key(k) && first == '' {
 			return none
 		}
 		if first == '' && k in x.multi {
-			return k + flatxml.key_sep + content_of(n, x.id.value_role())
+			return k + flatxml.key_sep + content_of(n, x.id.value_role(), x.nm)
 		}
 		return first + flatxml.key_sep + k
 	}
@@ -261,7 +215,7 @@ fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 	}
 	mut parts := [first]
 	for p in f.name[1..] {
-		parts << ids_text(n, p, f.prefixed, f.ns)
+		parts << ids_text(n, p, x.nm)
 	}
 	return parts.join(flatxml.key_sep)
 }
@@ -272,7 +226,7 @@ pub fn (mut x Identified) observe(models []&Model) {
 	for m in models {
 		for d in m.set.docs {
 			if x.facts(d.root_node()) == none {
-				x.tabs << x.id.tab_facts(d.tab, d.ns_id(x.ns) or { u32(0xFFFF_FFFE) })
+				x.tabs << x.id.tab_facts(d.tab)
 			}
 			f := x.facts(d.root_node()) or { panic('unreachable') }
 			x.observe_node(d.root_node(), f)
@@ -286,11 +240,11 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 	mut all_named := true
 	for c in n.children() {
 		any = true
-		tag := c.tag()
+		tag := x.nm.tag(c.doc, c.i)
 		by_def := int(tag) < f.by_def.len && f.by_def[tag]
-		named := ids_text(c, f.name[0], f.prefixed, f.ns) != ''
+		named := ids_text(c, f.name[0], x.nm) != ''
 		if by_def && !named {
-			k := ids_text(c, f.def, f.prefixed, f.ns) + flatxml.key_sep + ids_text(c, f.label, f.prefixed, f.ns)
+			k := ids_text(c, f.def, x.nm) + flatxml.key_sep + ids_text(c, f.label, x.nm)
 			if k in seen {
 				x.multi[k] = true
 			}
@@ -300,54 +254,12 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 		}
 		x.observe_node(c, f)
 	}
-	if any && all_named && local_part(n.name()) !in x.lists {
-		x.lists[local_part(n.name())] = true
-	}
-}
-
-// text_at is the text of the element at a path of child names below n ('' where there is none),
-// read child by child, each name compared without its prefix: `ar:SHORT-NAME` is SHORT-NAME.
-fn text_at(n flatxml.Node, path string) string {
-	if !path.contains('/') {
-		c := child_local(n, path)
-		return if c.ok() { c.text().trim_space() } else { '' }
-	}
-	mut cur := n
-	for name in path.split('/') {
-		cur = child_local(cur, name)
-		if !cur.ok() {
-			return ''
+	if any && all_named {
+		name := x.nm.node_name(n)
+		if name !in x.lists {
+			x.lists[name] = true
 		}
 	}
-	return cur.text().trim_space()
-}
-
-// child_local is the first child element whose name without its prefix is name. A prefix is the
-// author's choice of a spelling for a namespace, so `<ar:SHORT-NAME>` in a document binding the
-// AUTOSAR namespace to `ar` is the SHORT-NAME of an unprefixed one.
-fn child_local(n flatxml.Node, name string) flatxml.Node {
-	c := n.child(name)
-	if c.ok() {
-		return c
-	}
-	for k in n.children() {
-		if local_is(k.name(), name) {
-			return k
-		}
-	}
-	return flatxml.Node{}
-}
-
-// local_part is a name without its prefix, sharing the name's bytes.
-fn local_part(name string) string {
-	c := name.last_index_u8(`:`)
-	return if c < 0 { name } else { unsafe { tos(name.str + c + 1, name.len - c - 1) } }
-}
-
-// local_is reports whether a name, without its prefix, is local.
-fn local_is(name string, local string) bool {
-	return name == local || (name.len > local.len && name[name.len - local.len - 1] == `:`
-		&& name.ends_with(local))
 }
 
 // key is an element's key by these rules: its name; for a list (an element name some document
@@ -357,8 +269,8 @@ pub fn (x &Identified) key(n flatxml.Node) ?string {
 	if k := x.named(n) {
 		return k
 	}
-	local := local_part(n.name())
-	return if local in x.lists { list_key(local) } else { none }
+	name := x.nm.node_name(n)
+	return if name in x.lists { list_key(name) } else { none }
 }
 
 // list_key is the key of a list: its element name, after a separator no text can hold, so it is
@@ -372,7 +284,7 @@ pub fn list_key(name string) string {
 pub fn identity_flat(id Identity, models []&Model) Flat {
 	mut x := &Identified{
 		id: id
-		ns: model_namespace(models)
+		nm: naming(model_namespace(models), models)
 	}
 	x.observe(models)
 	key_fn := fn [x] (n flatxml.Node) ?string {
@@ -389,7 +301,7 @@ pub fn identity_flat(id Identity, models []&Model) Flat {
 				},
 			]
 			// a prefix is a spelling of the namespace: `ar:X` in one file is X in another
-			local_ns: x.ns
+			local_ns: x.nm.ns
 		}
 		described:         ['built-in identity']
 		unkeyed_by_design: true

@@ -239,3 +239,44 @@ fn test_an_element_of_another_namespace_is_not_the_models() {
 	assert o.of_kind('THING').map(o.path_of(it)) == ['/P/A']
 	assert !o.at('/P/Q').ok()
 }
+
+fn test_check_merges_a_prefixed_file_by_the_schemas_namespace() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_check_prefix_${os.getpid()}')
+	os.mkdir_all(dir) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	os.write_file(os.join_path(dir, 'a.arxml'), vk_setting_doc('', '1'))!
+	os.write_file(os.join_path(dir, 'b.arxml'), vk_setting_doc('l', '1'))!
+	m := load([dir])!
+	sc := compile_schemas(m, os.join_path(@VMODROOT, 'testdata', 'schemas'))
+	c := check(m, sc, skip_xml: true, skip_references: true, skip_multiplicity: true)!
+	mut shelves := 0
+	for i in 0 .. c.view.len() {
+		if c.view.node(u32(i)).name() == 'SHELF' {
+			shelves++
+		}
+	}
+	assert shelves == 1 // one shelf, from both files, as open merges it
+}
+
+fn test_the_models_namespace_is_most_roots_one() {
+	foreign := '<x:AUTOSAR xmlns:x="urn:other"><x:AR-PACKAGES/></x:AUTOSAR>'
+	mut o := open_sources([src('00.arxml', foreign), src('a.arxml', open_a), src('b.arxml', open_b)])!
+	defer {
+		o.free()
+	}
+	assert model_namespace([o.model]) == 'urn:m'
+	assert o.at('/P/A').ok() && o.at('/P/B').ok()
+	assert o.findings.any(it.kind == 'name_differs')
+}
+
+fn test_a_repetition_is_said_once() {
+	pkg := '<AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS><THING><SHORT-NAME>A</SHORT-NAME></THING></ELEMENTS></AR-PACKAGE>'
+	mut o := open_sources([src('a.arxml', '<AUTOSAR xmlns="urn:m"><AR-PACKAGES>${pkg}${pkg}</AR-PACKAGES></AUTOSAR>')])!
+	defer {
+		o.free()
+	}
+	assert o.repeated.len == 1
+	assert o.repeated[0].starts_with('/P: ')
+}

@@ -302,9 +302,18 @@ const identity_text = '# arxmodel\'s built-in identity rules: how the elements o
 	'# order counts: a reorder is reported. The order of named elements does not count.\n'
 
 // flatxml/VENDORED
-const flatxml_vendored_text = 'flatxml 1d2350a8ea47a284cd94009a4030cad97a852cca\n' +
+const flatxml_vendored_text = 'flatxml e5a75f6c1a8ea3d3069e39e79e81df783831c326\n' +
 	'source https://github.com/MartenH/flatxml\n' +
 	'The library folder at that commit, without its tests. Do not edit; re-vendor.\n'
+
+// v.mod
+const vmod_text = 'Module {\n' +
+	'\tname: \'arxmodel\'\n' +
+	'\tdescription: \'AUTOSAR models from many ARXML files, by the AUTOSAR merge model\'\n' +
+	'\tversion: \'0.1.0\'\n' +
+	'\tlicense: \'MIT\'\n' +
+	'\tdependencies: []\n' +
+	'}\n'
 
 // builtin_files is every built-in text by the file it was made from.
 const builtin_files = {
@@ -312,4 +321,5 @@ const builtin_files = {
 	'arxmodel/automat.policy.toml': automat_policy_text
 	'arxmodel/identity.toml': identity_text
 	'flatxml/VENDORED': flatxml_vendored_text
+	'v.mod': vmod_text
 }

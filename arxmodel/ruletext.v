@@ -13,8 +13,9 @@ import os
 // of another format is refused: its rules are not in the order this one merges and writes by.
 pub const rules_format = 2
 
-// version is arxmodel's version, from v.mod.
-pub const version = vmod_version(@VMOD_FILE)
+// version is arxmodel's version, from its own v.mod (builtin.v: @VMOD_FILE would be the v.mod of a
+// program that vendors arxmodel).
+pub const version = vmod_version(vmod_text)
 
 // flatxml_commit is the flatxml commit vendored, from flatxml/VENDORED.
 pub const flatxml_commit = vendored_commit(flatxml_vendored_text)
@@ -97,10 +98,12 @@ pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	if f.ignored_content.len > 0 {
 		out << '# ignore-content: ${f.ignored_content.join(' ')}'
 	}
+	// the local namespace is the schema's, in `# namespace:` above
 	body := flatxml.format_rules(flatxml.RuleSet{
 		...f.rules
 		fold:         st.fold
 		ignore_attrs: st.ignore_attrs
+		local_ns:     ''
 	}) or { return error('the rules cannot be written as flatxml rule text: ${err.msg()}') }
 	return out.join('\n') + '\n' + body
 }
@@ -172,7 +175,8 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	st.fold = rs.fold
 	st.ignore_attrs = rs.ignore_attrs.clone()
 	f.rules = flatxml.RuleSet{
-		rules: rs.rules
+		rules:    rs.rules
+		local_ns: pv.namespace
 	}
 	f.described = f.rules.rules.map('')
 	return f, pv, st

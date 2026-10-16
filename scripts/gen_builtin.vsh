@@ -14,6 +14,7 @@ const table = [
 	['automat_policy_text', 'arxmodel/automat.policy.toml'],
 	['identity_text', 'arxmodel/identity.toml'],
 	['flatxml_vendored_text', 'flatxml/VENDORED'],
+	['vmod_text', 'v.mod'], // @VMOD_FILE is the nearest v.mod: a host's, once vendored
 ]
 
 fn literal(s string) string {
