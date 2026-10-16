@@ -61,7 +61,9 @@ fn severity_key_pattern() string {
 	mut layers := []string{}
 	for layer in ['merge', 'xml_schema', 'multiplicity', 'reference', 'policy'] {
 		kinds := known_kinds[layer] or { continue }
-		layers << '${layer}(\\\\.(${kinds.join('|')})(:@?[A-Za-z_][-A-Za-z0-9_.:]*)?)?'
+		// after the kind, an element or @attribute: a name, or an expanded name ({uri}local) as a
+		// merge names another namespace's element or a namespaced attribute
+		layers << '${layer}(\\\\.(${kinds.join('|')})(:@?([A-Za-z_][-A-Za-z0-9_.:]*|\\\\{[^}]*\\\\}[A-Za-z_][-A-Za-z0-9_.]*))?)?'
 	}
 	return '^(${layers.join('|')})$'
 }

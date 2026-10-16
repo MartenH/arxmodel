@@ -133,6 +133,17 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 			}
 		}
 	}
+	// one reading of names for every document: a resolved document's prefixes are bound, an
+	// unresolved one's are only spellings, and an attribute of one cannot be told to be or not to
+	// be the other's. So every document resolved, or none
+	if s.docs.len > 1 {
+		r0 := s.docs[0].ns.len == s.docs[0].tag.len
+		for d in s.docs[1..] {
+			if (d.ns.len == d.tag.len) != r0 {
+				return error('${d.path}: its namespaces are ${if r0 { 'not' } else { '' }} resolved and ${s.docs[0].path}\'s are${if r0 { '' } else { ' not' }}; resolve every document of the set, or none'.replace('  ', ' '))
+			}
+		}
+	}
 	mut m := &Merged{
 		set:     s
 		rules:   rules.compile(s.tab)!
@@ -217,11 +228,22 @@ fn (mut m Merged) build() {
 	// a document of another namespace listed first does not decide what the others merge into
 	mut first := 0
 	if m.rules.local != no_local {
+		first = -1
 		for k, d in s.docs {
 			if d.ns[1] == m.rules.local {
 				first = k
 				break
 			}
+		}
+		if first < 0 {
+			// no root is in the namespace: there is nothing of it to merge
+			m.problems << Problem{
+				kind: .name_differs
+				node: 0
+				what: s.tab.name(s.docs[0].tag[1])
+				at:   s.docs.map(it.root_node())
+			}
+			return
 		}
 	}
 	root_tag := m.name_of(s.docs[first], 1)
@@ -698,6 +720,20 @@ fn (mut m Merged) differs(n u32) {
 	t0 := n0.text_runs()
 	mixed0 := d0.has_text_children(f0.i)
 	a_lo, a_hi := d0.attr_range(f0.i)
+	// an attribute any contribution spells by an ignored name is ignored in all of them: the
+	// identities of the ignored spellings, collected before anything is compared
+	mut ignored := map[u32]bool{}
+	if m.rules.ignore.len > 0 {
+		for f in m.frags[lo..hi] {
+			d := m.set.docs[f.doc]
+			x_lo, x_hi := d.attr_range(f.i)
+			for x := x_lo; x < x_hi; x++ {
+				if d.attr_tag[x] in m.rules.ignore || d.attr_id(x) in m.rules.ignore {
+					ignored[d.attr_id(x)] = true
+				}
+			}
+		}
+	}
 	mut held := []Held{cap: int(a_hi - a_lo)}
 	for a := a_lo; a < a_hi; a++ {
 		held << Held{d0, f0.i, a}
@@ -717,7 +753,7 @@ fn (mut m Merged) differs(n u32) {
 		}
 		b_lo, b_hi := d.attr_range(f.i)
 		for b := b_lo; b < b_hi; b++ {
-			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in m.rules.ignore {
+			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in ignored {
 				continue
 			}
 			// the first fragment that has this attribute, which a later one is compared with: the
@@ -728,8 +764,7 @@ fn (mut m Merged) differs(n u32) {
 					continue
 				}
 				found = true
-				// ignored by any name of the one attribute, as written or expanded, in either
-				if h.doc.attr_tag[h.a] in m.rules.ignore || h.doc.attr_id(h.a) in m.rules.ignore {
+				if h.doc.attr_tag[h.a] in m.rules.ignore || h.doc.attr_id(h.a) in ignored {
 					break
 				}
 				if h.doc.attr_value(h.a) != d.attr_value(b) {
@@ -758,8 +793,7 @@ struct Held {
 }
 
 // same_attr reports whether attribute a of d0 and b of d are one attribute: by expanded name when
-// both documents are resolved, by name as written otherwise (one resolved and one not share no
-// reading of a prefix).
+// the documents are resolved, by name as written when they are not (a merge takes all or none).
 fn same_attr(d0 &Doc, a u32, d &Doc, b u32) bool {
 	if d0.attr_ns.len == d0.attr_tag.len && d.attr_ns.len == d.attr_tag.len {
 		return d0.attr_id(a) == d.attr_id(b)

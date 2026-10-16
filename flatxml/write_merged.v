@@ -272,7 +272,7 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 		used[prefix_of(name)] = true
 		// a declaration is a binding, not an attribute: `xmlns:id` is not `id`
 		if !is_ns_decl_name(name) {
-			have[expanded_attr(name, own)] = d.attr_value(a)
+			have[written_attr_key(name, own)] = d.attr_value(a)
 		}
 	}
 	mut out := []AttrChange{}
@@ -289,7 +289,7 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 			// an element holds one attribute of an expanded name: the first fragment's value stands
 			// where the merge compared them (both documents resolved, a difference reported); where
 			// it could not, a different value is refused rather than dropped in silence
-			key := expanded_attr(name, scope)
+			key := written_attr_key(name, scope)
 			if first := have[key] {
 				if first != fd.attr_value(a) && !(resolved && fd.attr_ns.len == fd.attr_tag.len) {
 					return error('${w.m.pos(Node{fd, f.i})}: ${name} is the attribute ${key.all_after(' ')} of namespace ${key.all_before(' ')} that another fragment gives the value "${first}"; resolve the documents\' namespaces and the merge reports the difference')
@@ -411,6 +411,17 @@ fn root_override(d &Doc, i u32, attrs []EAttr) !RootOverride {
 		o.changes << AttrChange{have[key] or { a.name }, a.value}
 	}
 	return o
+}
+
+// written_attr_key is what tells an attribute of one element from another for the writer: its expanded
+// name where its prefix is bound (or it has none), its name as written where the prefix is bound
+// to nothing in scope (an unresolved document's), so an unbound `p:id` is not the unprefixed `id`.
+fn written_attr_key(name string, scope map[string]string) string {
+	p := prefix_of(name)
+	if p != '' && p != 'xml' && p !in scope {
+		return name
+	}
+	return expanded_attr(name, scope)
 }
 
 // expanded_attr is an attribute name's expanded name, `uri local`, by the bindings in scope: an
