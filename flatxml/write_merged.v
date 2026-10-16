@@ -261,6 +261,7 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 	// an attribute already given, by its expanded name where it has a namespace: p:id and q:id
 	// with p and q bound to one URI are one attribute, and the first fragment's value stands
 	mut have := map[string]string{} // expanded name -> the value written
+	mut spelled := map[string]string{} // expanded name -> its name as the written value spells it
 	mut used := map[string]bool{} // prefixes the element's own names use
 	used[prefix_of(d.name(i))] = true
 	lo, hi := d.attr_range(i)
@@ -272,7 +273,9 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 		used[prefix_of(name)] = true
 		// a declaration is a binding, not an attribute: `xmlns:id` is not `id`
 		if !is_ns_decl_name(name) {
-			have[written_attr_key(name, own)] = d.attr_value(a)
+			k := written_attr_key(name, own)
+			have[k] = d.attr_value(a)
+			spelled[k] = name
 		}
 	}
 	mut out := []AttrChange{}
@@ -287,16 +290,19 @@ fn (mut w MergedWriter) extra_attrs(n u32, d &Doc, i u32, mut inner map[string]s
 				continue
 			}
 			// an element holds one attribute of an expanded name: the first fragment's value stands
-			// where the merge compared them (both documents resolved, a difference reported); where
-			// it could not, a different value is refused rather than dropped in silence
+			// where the merge compared the two (both documents resolved, or one name as written: a
+			// difference reported, or ignored as the rules say); where it could not (two spellings
+			// of one expanded name, unresolved), a different value is refused, not dropped in silence
 			key := written_attr_key(name, scope)
 			if first := have[key] {
-				if first != fd.attr_value(a) && !(resolved && fd.attr_ns.len == fd.attr_tag.len) {
+				compared := (resolved && fd.attr_ns.len == fd.attr_tag.len) || spelled[key] == name
+				if first != fd.attr_value(a) && !compared {
 					return error('${w.m.pos(Node{fd, f.i})}: ${name} is the attribute ${key.all_after(' ')} of namespace ${key.all_before(' ')} that another fragment gives the value "${first}"; resolve the documents\' namespaces and the merge reports the difference')
 				}
 				continue
 			}
 			have[key] = fd.attr_value(a)
+			spelled[key] = name
 			p := prefix_of(name)
 			if p == '' || p == 'xml' {
 				out << AttrChange{name, fd.attr_value(a)}
