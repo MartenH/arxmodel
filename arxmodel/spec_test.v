@@ -296,3 +296,12 @@ fn test_content_key_writes_what_interpolation_does() {
 		}
 	}
 }
+
+fn test_key_part_is_what_split_gives() {
+	for key in ['', 'a', 'a\x1fb', '\x1fb', 'a\x1f', 'a\x1fb\x1fc', '\x1f\x1f'] {
+		for part in 0 .. 4 {
+			assert key_part(key, part) == (key.split('\x1f')[part] or { '' }), '${key} ${part}'
+		}
+	}
+	assert fold_cmp('Abc', 'aBC') == 0 && fold_cmp('a', 'B') < 0 && fold_cmp('b', 'A') > 0
+}

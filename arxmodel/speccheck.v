@@ -321,17 +321,68 @@ fn short_name_parts(rules flatxml.RuleSet) []int {
 
 // case_only_findings are the children of one parent whose short names differ only in case:
 // short names are unique ignoring case ([constr_2508]), compared as written by this policy.
+// ShortAt is a short name and its place in a node's list of them.
+struct ShortAt {
+	s string
+	j int
+}
+
+fn compare_short_fold(a &ShortAt, b &ShortAt) int {
+	return fold_cmp(a.s, b.s)
+}
+
+// fold_cmp orders two strings by their bytes in ASCII lower case.
+fn fold_cmp(a string, b string) int {
+	n := if a.len < b.len { a.len } else { b.len }
+	for i in 0 .. n {
+		mut x := a[i]
+		mut y := b[i]
+		if x >= `A` && x <= `Z` {
+			x += 32
+		}
+		if y >= `A` && y <= `Z` {
+			y += 32
+		}
+		if x != y {
+			return if x < y { -1 } else { 1 }
+		}
+	}
+	return a.len - b.len
+}
+
+// key_part is part `part` of a key, its parts separated by key_sep (as split would give it, ''
+// past the last), as a view of the key.
+fn key_part(key string, part int) string {
+	mut start := 0
+	mut k := 0
+	for i in 0 .. key.len {
+		if key[i] == flatxml.key_sep[0] {
+			if k == part {
+				return unsafe { tos(key.str + start, i - start) }
+			}
+			k++
+			start = i + 1
+		}
+	}
+	return if k == part { unsafe { tos(key.str + start, key.len - start) } } else { '' }
+}
+
 fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet, p Policy) []Finding {
 	parts := short_name_parts(rules)
 	mut out := []Finding{}
+	// one node's short names, their children and their order ignoring case: lists kept
+	// between nodes, as most nodes have none of the clash looked for
+	mut shorts := []string{}
+	mut ids := []u32{}
+	mut folded := []ShortAt{}
 	for i in 0 .. v.len() {
 		n := v.node(u32(i))
 		if n.child_count() < 2 {
 			continue
 		}
 		// the short names of the children whose rule keys by one
-		mut shorts := []string{}
-		mut ids := []u32{}
+		shorts.clear()
+		ids.clear()
 		for c in n.children() {
 			// a child of a keyed rule missing its key has no short name to compare
 			if !c.keyed() {
@@ -342,12 +393,7 @@ fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet
 			if part < 0 {
 				continue
 			}
-			key := c.key()
-			sn := if part == 0 && !key.contains(flatxml.key_sep) {
-				key
-			} else {
-				key.split(flatxml.key_sep)[part] or { '' }
-			}
+			sn := key_part(c.key(), part)
 			if sn != '' {
 				shorts << sn
 				ids << c.i
@@ -356,12 +402,15 @@ fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet
 		if shorts.len < 2 {
 			continue
 		}
-		mut lows := shorts.map(it.to_lower_ascii())
-		mut sorted := lows.clone()
-		sorted.sort()
+		// a clash ignoring case: neighbours once sorted ignoring case, without lower-case copies
+		folded.clear()
+		for j, sn in shorts {
+			folded << ShortAt{sn, j}
+		}
+		folded.sort_with_compare(compare_short_fold)
 		mut clash := false
-		for j in 1 .. sorted.len {
-			if sorted[j] == sorted[j - 1] {
+		for j in 1 .. folded.len {
+			if fold_cmp(folded[j].s, folded[j - 1].s) == 0 {
 				clash = true
 				break
 			}
@@ -369,6 +418,7 @@ fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet
 		if !clash {
 			continue
 		}
+		lows := shorts.map(it.to_lower_ascii())
 		mut by := map[string][]string{}
 		mut at_of := map[string][]u32{}
 		for j, low in lows {
