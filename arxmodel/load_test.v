@@ -244,6 +244,26 @@ fn test_the_lists_read_are_reported() {
 	os.write_file(os.join_path(dir, 'with_at.txt'), '@notes.arxml\n')!
 	g := find_arxml(['@' + os.join_path(dir, 'with_at.txt')], LoadOptions{})!
 	assert g.files.map(os.file_name(it)) == ['@notes.arxml']
+	// and one whose x is absolute: `@x` is still read from the list's directory
+	os.mkdir_all(os.join_path(dir, '@', 'no_such_arxmodel_dir'))!
+	os.write_file(os.join_path(dir, '@', 'no_such_arxmodel_dir', 'm.arxml'), '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'abs_at.txt'), '@/no_such_arxmodel_dir/m.arxml\n')!
+	h := find_arxml(['@' + os.join_path(dir, 'abs_at.txt')], LoadOptions{})!
+	assert h.files == [os.join_path(dir, '@', 'no_such_arxmodel_dir', 'm.arxml')]
+}
+
+fn test_a_set_argument_is_what_find_arxml_reads_as_a_set() {
+	dir := os.join_path(os.vtmp_dir(), 'arxmodel_set_arg_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	os.write_file(os.join_path(dir, 'body*.arxml'), '<AUTOSAR/>')!
+	os.write_file(os.join_path(dir, 'list.txt'), 'body*.arxml\n')!
+	assert !is_set_arg(os.join_path(dir, 'body*.arxml'))
+	assert is_set_arg(os.join_path(dir, 'b*.arxml'))
+	assert is_set_arg('@' + os.join_path(dir, 'list.txt'))
+	assert is_set_arg(dir)
 }
 
 fn test_a_unc_glob_keeps_its_share() {

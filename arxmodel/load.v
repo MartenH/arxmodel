@@ -64,6 +64,24 @@ pub fn is_glob(path string) bool {
 	return path.contains_any('*?')
 }
 
+// is_list reports whether an `@x` argument, spelled literal with x spelled file, names a list:
+// unless `@x` is a file and `x` is not.
+fn is_list(literal string, file string) bool {
+	return !os.is_file(literal) || os.is_file(file)
+}
+
+// is_set_arg reports whether a path argument names a set of files (a directory, a glob, a list)
+// rather than one file, by the rules find_arxml reads it by: a file is itself.
+pub fn is_set_arg(p string) bool {
+	if os.is_dir(p) {
+		return true
+	}
+	if p.starts_with('@') {
+		return is_list(p, p[1..])
+	}
+	return is_glob(p) && !os.is_file(p)
+}
+
 // expand_lists replaces each `@FILE` by the paths it lists.
 // The directories of the lists read come second.
 pub fn expand_lists(args []string) !([]string, []string) {
@@ -95,13 +113,16 @@ fn expand_into(args []string, dir string, mut out []string, mut lists []string, 
 		}
 		// a file is itself: `@x` names a list unless `@x` is a file and `x` is not, both read from
 		// the list's directory when the entry is a relative one inside a list
+		// (`@x` itself is always relative, whether or not x is)
 		mut file := if p.starts_with('@') { p[1..] } else { p }
 		mut literal := p
-		if p.starts_with('@') && dir != '' && !os.is_abs_path(file) {
-			file = os.norm_path(os.join_path(dir, file))
+		if p.starts_with('@') && dir != '' {
 			literal = os.norm_path(os.join_path(dir, p))
+			if !os.is_abs_path(file) {
+				file = os.norm_path(os.join_path(dir, file))
+			}
 		}
-		if !p.starts_with('@') || (os.is_file(literal) && !os.is_file(file)) {
+		if !p.starts_with('@') || !is_list(literal, file) {
 			out << literal
 			continue
 		}

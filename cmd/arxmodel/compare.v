@@ -86,7 +86,7 @@ fn cmd_merge3(o Opts) {
 		return
 	}
 	// a set of files (a directory, a glob, a list), or a single document
-	set := o.paths.any(os.is_dir(it) || arxmodel.is_glob(it) || it.starts_with('@'))
+	set := o.paths.any(arxmodel.is_set_arg(it))
 		|| v.any(it.model.set.docs.len > 1)
 	out := if o.out == '' { '-' } else { o.out }
 	if set && (out == '-' || (os.exists(out) && !os.is_dir(out))) {
