@@ -4,13 +4,6 @@ import flatxml
 import os
 import toml
 
-// default_policy_text is the committed policy.toml, built in: the AUTOSAR specification's merge
-// behaviour.
-const default_policy_text = $embed_file('../policy.toml').to_string()
-
-// automat_policy_text is the committed automat.policy.toml, built in.
-const automat_policy_text = $embed_file('../automat.policy.toml').to_string()
-
 // PolicyCache holds the built-in policy once it is read.
 @[heap]
 struct PolicyCache {

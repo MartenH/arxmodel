@@ -3,10 +3,6 @@ module arxmodel
 import flatxml
 import toml
 
-// identity_text is the committed identity.toml, built in: the identity rules used when no schema
-// is given.
-const identity_text = $embed_file('../identity.toml').to_string()
-
 // Identity is how elements are named without a schema (identity.toml).
 pub struct Identity {
 pub:
@@ -99,6 +95,8 @@ struct TabFacts {
 	name   [][]u32 // each path of id.name, as name ids (none: a name the table lacks)
 	def    []u32   // the definition path
 	label  []u32   // the label path ('' when the name has one part)
+	// some name of the table has a prefix: a child is then found by its local name, `ar:X` as X
+	prefixed bool
 }
 
 // path_ids is a path of child names as ids of a table, or none when one of them is not in it
@@ -109,21 +107,24 @@ fn path_ids(tab &flatxml.Names, path string) ?[]u32 {
 	}
 	mut out := []u32{}
 	for name in path.split('/') {
-		out << tab.id(name) or { return none }
+		out << tab.id(name) or { return none } // a local name: the split interns it
 	}
 	return out
 }
 
 fn (id &Identity) tab_facts(tab &flatxml.Names) &TabFacts {
 	mut by_def := []bool{len: tab.len()}
+	mut prefixed := false
 	for k in 2 .. tab.len() {
 		name := tab.name(u32(k))
-		by_def[k] = id.by_definition.any(glob(it, name))
+		by_def[k] = id.by_definition.any(glob(it, local_part(name)))
+		prefixed = prefixed || name.contains_u8(`:`)
 	}
 	r := id.value_role()
 	return &TabFacts{
-		tab:    tab
-		by_def: by_def
+		tab:      tab
+		prefixed: prefixed
+		by_def:   by_def
 		name:   id.name.map(path_ids(tab, it) or { []u32{} })
 		def:    path_ids(tab, r.definition) or { []u32{} }
 		label:  path_ids(tab, r.label) or { []u32{} }
@@ -143,18 +144,28 @@ fn (x &Identified) facts(n flatxml.Node) ?&TabFacts {
 
 // ids_text is the trimmed text at a path of child name ids below n ('' where there is none),
 // without copying: a slice of the document's text.
-fn ids_text(n flatxml.Node, ids []u32) string {
+fn ids_text(n flatxml.Node, ids []u32, prefixed bool) string {
 	if ids.len == 0 {
 		return ''
 	}
 	mut cur := n
 	for tag in ids {
-		cur = cur.child_id(tag)
+		cur = if prefixed { child_local_id(cur, tag) } else { cur.child_id(tag) }
 		if !cur.ok() {
 			return ''
 		}
 	}
 	return trimmed(cur.text())
+}
+
+// child_local_id is the first child element whose local name has id `local`.
+fn child_local_id(n flatxml.Node, local u32) flatxml.Node {
+	for c in n.children() {
+		if c.local_id() == local {
+			return c
+		}
+	}
+	return flatxml.Node{}
 }
 
 @[inline]
@@ -189,7 +200,7 @@ fn (id &Identity) value_role() IdentityRole {
 // is_value reports whether an element is a value named by its definition: an element of a
 // by_definition name with no short name (a container, which has one, is named by both).
 fn (id &Identity) is_value(n flatxml.Node) bool {
-	return id.by_definition.any(glob(it, n.name())) && text_at(n, id.name[0]) == ''
+	return id.by_definition.any(glob(it, local_part(n.name()))) && text_at(n, id.name[0]) == ''
 }
 
 // named is the name of an element by these rules, or none: its short name (and the further
@@ -200,7 +211,7 @@ fn (x &Identified) named(n flatxml.Node) ?string {
 	if f := x.facts(n) {
 		return x.named_by(n, f)
 	}
-	if id.by_definition.any(glob(it, n.name())) {
+	if id.by_definition.any(glob(it, local_part(n.name()))) {
 		r := id.value_role()
 		k := ident_of(n, r)
 		s := text_at(n, id.name[0])
@@ -226,9 +237,9 @@ fn (x &Identified) named(n flatxml.Node) ?string {
 // named_by is `named` by the facts of n's name table: the same name, read by ids.
 fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 	tag := n.tag()
-	first := ids_text(n, f.name[0])
+	first := ids_text(n, f.name[0], f.prefixed)
 	if int(tag) < f.by_def.len && f.by_def[tag] {
-		k := ids_text(n, f.def) + flatxml.key_sep + ids_text(n, f.label)
+		k := ids_text(n, f.def, f.prefixed) + flatxml.key_sep + ids_text(n, f.label, f.prefixed)
 		if flatxml.empty_key(k) && first == '' {
 			return none
 		}
@@ -245,7 +256,7 @@ fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 	}
 	mut parts := [first]
 	for p in f.name[1..] {
-		parts << ids_text(n, p)
+		parts << ids_text(n, p, f.prefixed)
 	}
 	return parts.join(flatxml.key_sep)
 }
@@ -272,9 +283,9 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 		any = true
 		tag := c.tag()
 		by_def := int(tag) < f.by_def.len && f.by_def[tag]
-		named := ids_text(c, f.name[0]) != ''
+		named := ids_text(c, f.name[0], f.prefixed) != ''
 		if by_def && !named {
-			k := ids_text(c, f.def) + flatxml.key_sep + ids_text(c, f.label)
+			k := ids_text(c, f.def, f.prefixed) + flatxml.key_sep + ids_text(c, f.label, f.prefixed)
 			if k in seen {
 				x.multi[k] = true
 			}
@@ -284,26 +295,54 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts) {
 		}
 		x.observe_node(c, f)
 	}
-	if any && all_named && n.name() !in x.lists {
-		x.lists[n.name()] = true
+	if any && all_named && local_part(n.name()) !in x.lists {
+		x.lists[local_part(n.name())] = true
 	}
 }
 
 // text_at is the text of the element at a path of child names below n ('' where there is none),
-// read child by child.
+// read child by child, each name compared without its prefix: `ar:SHORT-NAME` is SHORT-NAME.
 fn text_at(n flatxml.Node, path string) string {
 	if !path.contains('/') {
-		c := n.child(path)
+		c := child_local(n, path)
 		return if c.ok() { c.text().trim_space() } else { '' }
 	}
 	mut cur := n
 	for name in path.split('/') {
-		cur = cur.child(name)
+		cur = child_local(cur, name)
 		if !cur.ok() {
 			return ''
 		}
 	}
 	return cur.text().trim_space()
+}
+
+// child_local is the first child element whose name without its prefix is name. A prefix is the
+// author's choice of a spelling for a namespace, so `<ar:SHORT-NAME>` in a document binding the
+// AUTOSAR namespace to `ar` is the SHORT-NAME of an unprefixed one.
+fn child_local(n flatxml.Node, name string) flatxml.Node {
+	c := n.child(name)
+	if c.ok() {
+		return c
+	}
+	for k in n.children() {
+		if local_is(k.name(), name) {
+			return k
+		}
+	}
+	return flatxml.Node{}
+}
+
+// local_part is a name without its prefix, sharing the name's bytes.
+fn local_part(name string) string {
+	c := name.last_index_u8(`:`)
+	return if c < 0 { name } else { unsafe { tos(name.str + c + 1, name.len - c - 1) } }
+}
+
+// local_is reports whether a name, without its prefix, is local.
+fn local_is(name string, local string) bool {
+	return name == local || (name.len > local.len && name[name.len - local.len - 1] == `:`
+		&& name.ends_with(local))
 }
 
 // key is an element's key by these rules: its name; for a list (an element name some document
@@ -313,7 +352,8 @@ pub fn (x &Identified) key(n flatxml.Node) ?string {
 	if k := x.named(n) {
 		return k
 	}
-	return if n.name() in x.lists { list_key(n.name()) } else { none }
+	local := local_part(n.name())
+	return if local in x.lists { list_key(local) } else { none }
 }
 
 // list_key is the key of a list: its element name, after a separator no text can hold, so it is
@@ -342,6 +382,8 @@ pub fn identity_flat(id Identity, models []&Model) Flat {
 					merge:   true
 				},
 			]
+			// a prefix is a spelling of the namespace: `ar:X` in one file is X in another
+			local_names: true
 		}
 		described:         ['built-in identity']
 		unkeyed_by_design: true

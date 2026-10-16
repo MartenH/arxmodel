@@ -17,7 +17,7 @@ pub const rules_format = 2
 pub const version = vmod_version(@VMOD_FILE)
 
 // flatxml_commit is the flatxml commit vendored, from flatxml/VENDORED.
-pub const flatxml_commit = vendored_commit($embed_file('../flatxml/VENDORED').to_string())
+pub const flatxml_commit = vendored_commit(flatxml_vendored_text)
 
 fn vmod_version(text string) string {
 	for line in text.split_into_lines() {

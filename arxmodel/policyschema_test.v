@@ -5,7 +5,7 @@ import toml
 import x.json2
 
 fn test_the_committed_schema_is_the_generated_one() {
-	committed := os.read_file(os.join_path(@VMODROOT, 'policy.schema.json'))!
+	committed := os.read_file(os.join_path(@VMODROOT, 'arxmodel', 'policy.schema.json'))!
 	assert committed == policy_schema_json(), 'policy.schema.json is stale: run `arxmodel policy --schema -o policy.schema.json`'
 }
 
@@ -75,7 +75,7 @@ fn conforms(text string, schema map[string]json2.Any) ! {
 fn test_both_policy_files_conform_to_the_schema() {
 	schema := (json2.decode[json2.Any](policy_schema_json())!).as_map()
 	for name in ['policy.toml', 'automat.policy.toml'] {
-		text := os.read_file(os.join_path(@VMODROOT, name))!
+		text := os.read_file(os.join_path(@VMODROOT, 'arxmodel', name))!
 		assert text.starts_with('#:schema ./policy.schema.json\n'), name
 		conforms(text, schema) or { assert false, '${name}: ${err.msg()}' }
 	}

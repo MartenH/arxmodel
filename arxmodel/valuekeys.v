@@ -96,7 +96,7 @@ fn content_of(n flatxml.Node, r IdentityRole) string {
 	skip := [r.definition.all_before('/'), r.label.all_before('/')]
 	mut out := []string{}
 	for c in n.children() {
-		if c.name() !in skip {
+		if local_part(c.name()) !in skip {
 			leaf_texts(c, c.name(), mut out)
 		}
 	}

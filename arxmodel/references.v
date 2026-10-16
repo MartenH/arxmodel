@@ -390,14 +390,15 @@ pub fn index_paths(v &flatxml.Merged, mut ty Typing, typed bool, fold bool) &Pat
 }
 
 // short_name_of is a node's SHORT-NAME text: its single child of that name, or, where the rules
-// keep every occurrence apart (the built-in identity rules), its first child of that name.
+// keep every occurrence apart (the built-in identity rules), its first child of that name — the
+// name compared without its prefix, so a document binding the namespace to `ar` is indexed alike.
 fn short_name_of(n flatxml.MNode, sn u32) string {
 	c := n.child_id(sn, '')
 	if c.ok() {
 		return trimmed(c.text())
 	}
 	for k in n.children() {
-		if k.tag() == sn {
+		if k.tag() == sn || k.local_id() == sn {
 			return trimmed(k.text())
 		}
 	}

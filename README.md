@@ -32,9 +32,9 @@ A merge is made of three things, kept apart:
    them as flatxml rule text (`*.rules.txt`, ignored by git), and `check --rules FILE` merges by
    that file instead of compiling the schema. Such a file is derived from the AUTOSAR schema, so it
    is **never committed**.
-2. **Policy** ([policy.toml](policy.toml), committed): every choice that is arxmodel's and not the
+2. **Policy** ([policy.toml](arxmodel/policy.toml), committed): every choice that is arxmodel's and not the
    schema's, in TOML. The default follows the AUTOSAR specification (Generic Structure Template
-   R24-11); [automat.policy.toml](automat.policy.toml) is a second built-in profile (`--policy
+   R24-11); [automat.policy.toml](arxmodel/automat.policy.toml) is a second built-in profile (`--policy
    automat`), and `--policy FILE` reads one's own. Each setting has a comment saying why and the
    specification item it concerns: `[merge]` absent keys, the case of keys, attributes that may
    differ, items and primitive values named by their role alone, non-splittable repetitions,
@@ -42,7 +42,7 @@ A merge is made of three things, kept apart:
    comments; `[schema]` which release governs, splittability; `[references]` the package element;
    `[severity]` each finding's severity. Every setting must be given, with a value of its type
    this build supports; an unknown table, key or value is refused by name.
-   [policy.schema.json](policy.schema.json) is its JSON Schema (draft-07, generated from the code's
+   [policy.schema.json](arxmodel/policy.schema.json) is its JSON Schema (draft-07, generated from the code's
    one list of settings by `arxmodel policy --schema`; a test holds the committed file to it), which
    editors read through the files' first line, `#:schema ./policy.schema.json` (Taplo, Even Better
    TOML). `arxmodel policy` prints every setting with the values it takes, its value and its
@@ -419,6 +419,55 @@ filters, written against its inputs, and without unused reports.
 each finding it changed, and the counts in its summary; JUnit lists the counts as properties. The
 shipped policies have none; policy.toml's comments end with two examples.
 
+## As a library (`arxmodel.open`)
+
+A program that reads a model, rather than checks it, opens it:
+
+```v
+import arxmodel
+
+mut o := arxmodel.open(['system/'])! // or open_sources([arxmodel.Source{path, bytes}])
+defer {
+	o.free()
+}
+for f in o.model.failed {
+	eprintln(f.msg)
+}
+for c in o.of_kind('CAN-CLUSTER') { // every element of a name, in document order
+	println('${o.path_of(c)} at ${o.pos(c)}')
+}
+frame := o.at('/Frames/F1') // by AUTOSAR path; an empty handle where there is none
+if t := o.target(frame.child('PDU-REF', '')) { // a reference followed
+	println(t.local_name())
+}
+```
+
+The files are merged by the schema they declare when `schema_dir` (or `rules_file`, a rules file
+from `rules --emit`) is given: the AUTOSAR merge model exactly. Without one they are merged by the
+built-in identity rules, which key every named element by its SHORT-NAME; `rules` says which was
+read by. Either way element names are compared without their prefix, so a file binding the
+AUTOSAR namespace to `ar:` merges with one that does not, and siblings are read in the order
+first written. What the merge found is in `findings`, and what one file describes twice in
+`repeated`.
+
+A **model file** (`<name>.arxmodel.toml`) states a model once, beside it, for a program that
+opens it by name:
+
+```toml
+paths      = ["system/", "extracts/*.arxml", "@more.txt"] # the input set
+exclude    = ["system/old/*.arxml"]
+schema_dir = "/opt/autosar/schemas" # or rules = "autosar.rules.txt"
+policy     = "spec"                 # spec (the default), automat, or a policy file
+```
+
+Relative paths are read from the file's directory. With neither `schema_dir` nor `rules`, this
+machine's schema directory is used (`ARXMODEL_SCHEMA_DIR`, else the user's configuration), else
+the built-in rules. `arxmodel.load_model_file(path)!.open()!` opens it.
+
+The library folder, `arxmodel/`, is self-contained: it embeds only its own files (the policies,
+the identity rules) and the vendored flatxml's `VENDORED`, so a program vendors it as it is,
+beside `flatxml/`.
+
 ## Which rules (schema, rules file, or built-in)
 
 Every command that merges says on one line which rules it read by (`rules: built-in identity
@@ -427,7 +476,7 @@ and a local run can be compared. The rules are, in order: `--no-schema` forces t
 `--rules FILE`; `--schema-dir DIR`; the schema directory of the environment
 (`ARXMODEL_SCHEMA_DIR`) or of the user's configuration (`schema_dir = "DIR"` in
 `~/.config/arxmodel/config.toml`, `$XDG_CONFIG_HOME` respected); else the **built-in identity
-rules** ([identity.toml](identity.toml), committed and built in), which need no schema, so CI and
+rules** ([identity.toml](arxmodel/identity.toml), committed and built in), which need no schema, so CI and
 git merges never need the AUTOSAR XSD:
 
 - an element with a SHORT-NAME child is named by it (and by its VARIATION-POINT's SHORT-LABEL);

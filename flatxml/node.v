@@ -45,6 +45,17 @@ pub fn (n Node) name() string {
 	return if n.i == no_node { '' } else { n.doc.name(n.i) }
 }
 
+// local_id is the name id of the element's local name (`Doc.local_id`): the same id for `ar:X`
+// and `X`. Needs namespaces resolved; text_tag for none.
+pub fn (n Node) local_id() u32 {
+	return if n.i == no_node { text_tag } else { n.doc.local_id(n.i) }
+}
+
+// local_name is the element's name without its prefix; '' for none. Needs namespaces resolved.
+pub fn (n Node) local_name() string {
+	return if n.i == no_node { '' } else { n.doc.local_name(n.i) }
+}
+
 // is reports whether the element is named name.
 pub fn (n Node) is(name string) bool {
 	return n.i != no_node && n.doc.name(n.i) == name
@@ -430,6 +441,61 @@ pub fn (n Node) at(p string) Node {
 		return n
 	}
 	return n.find(n.doc.tab.path(p))
+}
+
+// find_by is find, the names compared without their prefix where local is set (namespaces
+// resolved).
+fn (n Node) find_by(p Path, local bool) Node {
+	if !local {
+		return n.find(p)
+	}
+	if n.i == no_node || p.names.len == 0 {
+		return Node{n.doc, no_node}
+	}
+	return Node{n.doc, n.doc.find_local(n.i, p.ids_for(n.doc.tab), 0)}
+}
+
+// find_all_by is find_all, the names compared without their prefix where local is set.
+fn (n Node) find_all_by(p Path, local bool) []Node {
+	if !local {
+		return n.find_all(p)
+	}
+	mut out := []Node{}
+	if n.i != no_node && p.names.len > 0 {
+		n.doc.collect_local(n.i, p.ids_for(n.doc.tab), 0, mut out)
+	}
+	return out
+}
+
+fn (d &Doc) find_local(i u32, ids []u32, k int) u32 {
+	mut c := d.first_child(i)
+	for c != no_node {
+		if d.tag[c] != text_tag && d.tab.local[d.tag[c]] == ids[k] {
+			if k == ids.len - 1 {
+				return c
+			}
+			found := d.find_local(c, ids, k + 1)
+			if found != no_node {
+				return found
+			}
+		}
+		c = d.next_sibling(c)
+	}
+	return no_node
+}
+
+fn (d &Doc) collect_local(i u32, ids []u32, k int, mut out []Node) {
+	mut c := d.first_child(i)
+	for c != no_node {
+		if d.tag[c] != text_tag && d.tab.local[d.tag[c]] == ids[k] {
+			if k == ids.len - 1 {
+				out << Node{d, c}
+			} else {
+				d.collect_local(c, ids, k + 1, mut out)
+			}
+		}
+		c = d.next_sibling(c)
+	}
 }
 
 // find_all is every element at path p below n, in document order.
