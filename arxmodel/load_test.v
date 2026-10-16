@@ -291,3 +291,11 @@ fn test_an_unreadable_configuration_is_an_error() {
 	}
 	assert false, 'an unreadable configuration read as none'
 }
+
+fn test_an_empty_path_is_no_such_file() {
+	find_arxml([''], LoadOptions{}) or {
+		assert err.msg().contains('no such file')
+		return
+	}
+	assert false
+}

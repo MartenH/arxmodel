@@ -95,7 +95,7 @@ fn expand_into(args []string, dir string, mut out []string, mut lists []string, 
 		}
 		// a file is itself: `@x` names a list unless `@x` is a file and `x` is not, both read from
 		// the list's directory when the entry is a relative one inside a list
-		mut file := p[1..]
+		mut file := if p.starts_with('@') { p[1..] } else { p }
 		mut literal := p
 		if p.starts_with('@') && dir != '' && !os.is_abs_path(file) {
 			file = os.norm_path(os.join_path(dir, file))
