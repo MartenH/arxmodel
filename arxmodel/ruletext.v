@@ -11,7 +11,7 @@ import os
 
 // rules_format is the version of the rules file's format this arxmodel writes and reads. A file
 // of another format is refused: its rules are not in the order this one merges and writes by.
-pub const rules_format = 2
+pub const rules_format = 3
 
 // version is arxmodel's version, from its own v.mod (builtin.v: @VMOD_FILE would be the v.mod of a
 // program that vendors arxmodel).
@@ -98,12 +98,11 @@ pub fn format_rules(f Flat, pv Provenance, st Settings) !string {
 	if f.ignored_content.len > 0 {
 		out << '# ignore-content: ${f.ignored_content.join(' ')}'
 	}
-	// the local namespace is the schema's, in `# namespace:` above
+	// the local namespace as a `!local` setting, so `flatxml merge --rules` merges as arxmodel does
 	body := flatxml.format_rules(flatxml.RuleSet{
 		...f.rules
 		fold:         st.fold
 		ignore_attrs: st.ignore_attrs
-		local_ns:     ''
 	}) or { return error('the rules cannot be written as flatxml rule text: ${err.msg()}') }
 	return out.join('\n') + '\n' + body
 }
@@ -176,7 +175,7 @@ pub fn parse_rules_file(text string) !(Flat, Provenance, Settings) {
 	st.ignore_attrs = rs.ignore_attrs.clone()
 	f.rules = flatxml.RuleSet{
 		rules:         rs.rules
-		local_ns:      pv.namespace
+		local_ns:      rs.local_ns
 		written_order: rs.written_order
 	}
 	f.described = f.rules.rules.map('')

@@ -133,6 +133,13 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 			}
 		}
 	}
+	// with a local namespace, the root is a document's in it: with none, there is nothing of it
+	// to merge, and a view holding a problem about a root it does not have would be no view
+	if rules.local_ns != '' && s.docs.len > 0 {
+		if !s.docs.any(it.ns_uri(it.ns_of(it.root())) == rules.local_ns) {
+			return error('no document\'s root is in the local namespace ${rules.local_ns} (${s.docs.map(it.path).join(', ')})')
+		}
+	}
 	// one reading of names for every document: a resolved document's prefixes are bound, an
 	// unresolved one's are only spellings, and an attribute of one cannot be told to be or not to
 	// be the other's. So every document resolved, or none
@@ -236,14 +243,8 @@ fn (mut m Merged) build() {
 			}
 		}
 		if first < 0 {
-			// no root is in the namespace: there is nothing of it to merge
-			m.problems << Problem{
-				kind: .name_differs
-				node: 0
-				what: s.tab.name(s.docs[0].tag[1])
-				at:   s.docs.map(it.root_node())
-			}
-			return
+			// refused by merge before build: no root is in the namespace
+			panic('flatxml: build with no root in the local namespace')
 		}
 	}
 	root_tag := m.name_of(s.docs[first], 1)
