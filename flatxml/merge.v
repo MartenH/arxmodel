@@ -686,7 +686,7 @@ fn (mut m Merged) limit(p u32, rule &CRule, k int, e int) int {
 // differs reports where the contributions to node n disagree with its first: their own text,
 // run by run in its place among the children (`Node.text_runs`), and where text is mixed with
 // elements, all the text inside them, which the view does not merge child by child; or the
-// value of an attribute both have (unless the rules ignore it).
+// value of an attribute, against the first contribution that has it (unless the rules ignore it).
 fn (mut m Merged) differs(n u32) {
 	lo, hi := m.frag_lo[n], m.frag_lo[n + 1]
 	if hi - lo < 2 {
@@ -698,6 +698,10 @@ fn (mut m Merged) differs(n u32) {
 	t0 := n0.text_runs()
 	mixed0 := d0.has_text_children(f0.i)
 	a_lo, a_hi := d0.attr_range(f0.i)
+	mut held := []Held{cap: int(a_hi - a_lo)}
+	for a := a_lo; a < a_hi; a++ {
+		held << Held{d0, f0.i, a}
+	}
 	for f in m.frags[lo + 1..hi] {
 		d := m.set.docs[f.doc]
 		nf := Node{d, f.i}
@@ -716,34 +720,51 @@ fn (mut m Merged) differs(n u32) {
 			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in m.rules.ignore {
 				continue
 			}
-			// one identity for both: expanded names when both documents are resolved, else names
-			// as written (one resolved and one not have no common reading of a prefix)
-			both := d0.attr_ns.len == d0.attr_tag.len && d.attr_ns.len == d.attr_tag.len
-			for a := a_lo; a < a_hi; a++ {
-				same := if both {
-					d0.attr_id(a) == d.attr_id(b)
-				} else {
-					d0.attr_tag[a] == d.attr_tag[b]
+			// the first fragment that has this attribute, which a later one is compared with: the
+			// first fragment, or the earlier fragment that brought it
+			mut found := false
+			for h in held {
+				if !same_attr(h.doc, h.a, d, b) {
+					continue
 				}
-				if same {
-					// ignored by any name of the one attribute, as written or expanded, in either
-					if d0.attr_tag[a] in m.rules.ignore || d0.attr_id(a) in m.rules.ignore {
-						break
-					}
-					if d0.attr_value(a) != d.attr_value(b) {
-						m.problems << Problem{
-							kind: .value_differs
-							node: n
-							key:  m.key_of(n).clone()
-							what: '@${d.tab.name(d.attr_id(b))}'
-							at:   [Node{d0, f0.i}, Node{d, f.i}]
-						}
-					}
+				found = true
+				// ignored by any name of the one attribute, as written or expanded, in either
+				if h.doc.attr_tag[h.a] in m.rules.ignore || h.doc.attr_id(h.a) in m.rules.ignore {
 					break
 				}
+				if h.doc.attr_value(h.a) != d.attr_value(b) {
+					m.problems << Problem{
+						kind: .value_differs
+						node: n
+						key:  m.key_of(n).clone()
+						what: '@${d.tab.name(d.attr_id(b))}'
+						at:   [Node{h.doc, h.i}, Node{d, f.i}]
+					}
+				}
+				break
+			}
+			if !found {
+				held << Held{d, f.i, b}
 			}
 		}
 	}
+}
+
+// Held is an attribute of a merged node's fragment, the first to give it.
+struct Held {
+	doc &Doc
+	i   u32 // the element
+	a   u32 // the attribute
+}
+
+// same_attr reports whether attribute a of d0 and b of d are one attribute: by expanded name when
+// both documents are resolved, by name as written otherwise (one resolved and one not share no
+// reading of a prefix).
+fn same_attr(d0 &Doc, a u32, d &Doc, b u32) bool {
+	if d0.attr_ns.len == d0.attr_tag.len && d.attr_ns.len == d.attr_tag.len {
+		return d0.attr_id(a) == d.attr_id(b)
+	}
+	return d0.attr_tag[a] == d.attr_tag[b]
 }
 
 // key_of is the key of node n: a view of key_buf, which does not change once the view is built.
