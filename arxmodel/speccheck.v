@@ -189,7 +189,17 @@ fn (mut ch ContentHashes) repeat_key(n flatxml.Node, children []string) string {
 // content_key is a content key: the parent's name (keys are unique in a scope, which may hold
 // several single holders), the content's hash, and the identical siblings before it.
 fn content_key(parent string, h u64, before int) string {
-	return '${content_mark}${parent}${flatxml.key_sep}${h:016x}${flatxml.key_sep}${before}'
+	return '${content_mark}${parent}${flatxml.key_sep}${hex16(h)}${flatxml.key_sep}${before}'
+}
+
+// hex16 is h as 16 lower-case hex digits, as `${h:016x}` writes it, without the general
+// formatter: a content key is made for every item keyed by its content.
+fn hex16(h u64) string {
+	mut b := []u8{len: 16}
+	for i in 0 .. 16 {
+		b[15 - i] = '0123456789abcdef'[int((h >> (4 * i)) & 0xf)]
+	}
+	return b.bytestr()
 }
 
 // with_repeat_keys is a rule set whose unkeyed rules of repeated roles key their items by their

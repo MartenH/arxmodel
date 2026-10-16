@@ -286,3 +286,9 @@ fn test_case_only_leaves_out_a_shelf_missing_its_key() {
 	assert co.len == 1 && co[0].message == 'short names that differ only in case: Fiction, fiction'
 	assert co[0].at.len == 2
 }
+
+fn test_hex16_writes_what_the_formatter_does() {
+	for h in [u64(0), 1, 0xabcdef, 0x0123456789abcdef, 0xffffffffffffffff] {
+		assert hex16(h) == '${h:016x}'
+	}
+}
