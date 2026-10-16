@@ -19,7 +19,7 @@ fn read_version(o Opts, path string, quiet bool) !&arxmodel.Model {
 	if path == '/dev/null' {
 		return arxmodel.empty_model()
 	}
-	m := arxmodel.load([path], jobs: o.jobs, exclude: o.exclude)!
+	m := arxmodel.load([path], jobs: o.jobs, exclude: o.exclude, grow_heap: true)!
 	if !quiet {
 		eprintln('${path}: ${plural(m.files.len, 'file')}')
 		print_files(Out{ err: true }, m.files, o.verbose)

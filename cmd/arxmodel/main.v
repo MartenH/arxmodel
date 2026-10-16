@@ -441,7 +441,7 @@ fn parse_opts(args []string) !Opts {
 }
 
 fn load_or_exit(o Opts, out Out) &arxmodel.Model {
-	m := arxmodel.load(o.paths, jobs: o.jobs, exclude: o.exclude) or {
+	m := arxmodel.load(o.paths, jobs: o.jobs, exclude: o.exclude, grow_heap: true) or {
 		eprintln(err.msg())
 		exit(1)
 	}

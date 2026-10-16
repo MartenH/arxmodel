@@ -28,6 +28,9 @@ pub struct LoadOptions {
 pub:
 	jobs    int      // threads; 0 for the default (`default_jobs`), at most 16
 	exclude []string // file globs: files they match are left out
+	// before parsing, reserve the heap the model will need (grow_heap): for a program that reads one
+	// model and is done, such as the command; off for a library user, whose heap is its own
+	grow_heap bool
 }
 
 // Found is the .arxml files at some paths, the directories that could not be read, and what was
@@ -273,6 +276,13 @@ fn jobs_or_default(asked int) int {
 // or a directory that cannot be read, is listed in failed; the rest load all the same.
 pub fn load(paths []string, opts LoadOptions) !&Model {
 	found := find_arxml(paths, opts)!
+	if opts.grow_heap {
+		mut size := u64(0)
+		for f in found.files {
+			size += os.file_size(f)
+		}
+		grow_heap(size)
+	}
 	sw := time.new_stopwatch()
 	mut set := flatxml.DocSet.new()
 	mut failed := found.failed.clone()
