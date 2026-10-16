@@ -22,10 +22,30 @@ mut:
 	// the identities (expanded names) of attributes any document spells by an ignored name, so
 	// one ignored is ignored however another document spells it, as the merge ignores it
 	ignored map[string]bool
-	doc_of map[voidptr]int   // a document -> its number here
-	hashes [][]u64           // per document number, per node: the hash, 0 until computed
-	keys   [][]string        // per document number, per node: its repeat key, '' until made
-	names  map[voidptr][]u64 // per name table: each name's hash, 0 until computed
+	doc_of  map[voidptr]int // a document -> its number here
+	hashes  [][]u64         // per document number, per node: the hash, 0 until computed
+	// per document number, per node: 1 + its repeat key's index in key_strs, 0 until made (an
+	// array of u32 the collector does not scan, made on the document's first key; the keys
+	// themselves only for the items that have one)
+	key_at   [][]u32
+	key_strs []string
+	names    map[voidptr][]u64 // per name table: each name's hash, 0 until computed
+	// repeat_key's scratch, kept between parents: one parent's items, (hash, position) each
+	sibs []HashAt
+}
+
+// HashAt is an item's content hash and its place among its parent's children.
+struct HashAt {
+	h   u64
+	pos int
+	c   u32
+}
+
+fn compare_hash_at(a &HashAt, b &HashAt) int {
+	if a.h != b.h {
+		return if a.h < b.h { -1 } else { 1 }
+	}
+	return a.pos - b.pos
 }
 
 pub fn new_content_hashes(ignore []string, nm Naming) &ContentHashes {
@@ -63,7 +83,7 @@ fn (mut ch ContentHashes) slot(d &flatxml.Doc) int {
 	k := ch.hashes.len
 	ch.doc_of[voidptr(d)] = k
 	ch.hashes << []u64{len: d.tag.len}
-	ch.keys << []string{}
+	ch.key_at << []u32{}
 	return k
 }
 
@@ -160,36 +180,78 @@ fn mix_text(h u64, slot u64, d &flatxml.Doc, i u32) u64 {
 // apart while an identical repetition in another document is the same items.
 fn (mut ch ContentHashes) repeat_key(n flatxml.Node, children []string) string {
 	k := ch.slot(n.doc)
-	if ch.keys[k].len == 0 {
-		ch.keys[k] = []string{len: n.doc.tag.len}
+	if ch.key_at[k].len == 0 {
+		ch.key_at[k] = []u32{len: n.doc.tag.len}
 	}
-	if ch.keys[k][n.i] != '' {
-		return ch.keys[k][n.i]
+	if ch.key_at[k][n.i] != 0 {
+		return ch.key_strs[ch.key_at[k][n.i] - 1]
 	}
-	// every child of the role under this parent, keyed at once
+	// every child of the role under this parent, keyed at once; identical ones numbered in
+	// the order written, by sorting (hash, position) pairs in a scratch list, not by a map
 	d := n.doc
 	p := d.parent[n.i]
 	pname := ch.nm.name(d, p)
-	mut seen := map[u64]int{}
+	ch.sibs.clear()
 	mut c := d.first_child(p)
+	mut pos := 0
 	for c != flatxml.no_node {
 		if d.is_element(c) && (children.len == 0 || ch.nm.name(d, c) in children) {
-			h := ch.hash_at(k, d, c)
-			ch.keys[k][c] = content_key(pname, h, seen[h])
-			seen[h]++
+			ch.sibs << HashAt{ch.hash_at(k, d, c), pos, c}
+			pos++
 		}
 		c = d.next_sibling(c)
 	}
-	if ch.keys[k][n.i] == '' {
-		ch.keys[k][n.i] = content_key(pname, ch.hash_at(k, d, n.i), 0)
+	ch.sibs.sort_with_compare(compare_hash_at)
+	mut before := 0
+	for x, sb in ch.sibs {
+		before = if x > 0 && ch.sibs[x - 1].h == sb.h { before + 1 } else { 0 }
+		ch.key_strs << content_key(pname, sb.h, before)
+		ch.key_at[k][sb.c] = u32(ch.key_strs.len)
 	}
-	return ch.keys[k][n.i]
+	if ch.key_at[k][n.i] == 0 {
+		ch.key_strs << content_key(pname, ch.hash_at(k, d, n.i), 0)
+		ch.key_at[k][n.i] = u32(ch.key_strs.len)
+	}
+	return ch.key_strs[ch.key_at[k][n.i] - 1]
 }
 
 // content_key is a content key: the parent's name (keys are unique in a scope, which may hold
 // several single holders), the content's hash, and the identical siblings before it.
 fn content_key(parent string, h u64, before int) string {
-	return '${content_mark}${parent}${flatxml.key_sep}${h:016x}${flatxml.key_sep}${before}'
+	// written into one buffer of its length: `${content_mark}${parent}${key_sep}${h:016x}
+	// ${key_sep}${before}`, as interpolation would, without its intermediate strings
+	nb := if before == 0 { 1 } else { decimal_len(before) }
+	n := content_mark.len + parent.len + 1 + 16 + 1 + nb
+	mut b := []u8{len: n}
+	mut at := 0
+	b[at] = content_mark[0]
+	at++
+	unsafe { vmemcpy(&b[at], parent.str, parent.len) }
+	at += parent.len
+	b[at] = flatxml.key_sep[0]
+	at++
+	for i in 0 .. 16 {
+		b[at + 15 - i] = '0123456789abcdef'[int((h >> (4 * i)) & 0xf)]
+	}
+	at += 16
+	b[at] = flatxml.key_sep[0]
+	at++
+	mut v := before
+	for i := n - 1; i >= at; i-- {
+		b[i] = u8(`0` + v % 10)
+		v /= 10
+	}
+	return b.bytestr()
+}
+
+fn decimal_len(v int) int {
+	mut n := 0
+	mut x := v
+	for x > 0 {
+		n++
+		x /= 10
+	}
+	return n
 }
 
 // with_repeat_keys is a rule set whose unkeyed rules of repeated roles key their items by their

@@ -1,6 +1,7 @@
 module arxmodel
 
 import flatxml
+import strings
 
 // PathIndex is the AUTOSAR path of every referrable merged node, as a trie: an entry per node
 // with its parent entry and its path's hash, nothing else. A path's text is never stored: each
@@ -183,6 +184,20 @@ pub fn (ix &PathIndex) spelled(n u32, path string) bool {
 		return false
 	}
 	return ix.spells(ix.at[n] - 1, path, true)
+}
+
+// write_path writes entry e's path into sb.
+fn (ix &PathIndex) write_path(mut sb strings.Builder, e u32) {
+	mut chain := []u32{cap: 8}
+	mut x := e + 1
+	for x != 0 {
+		chain << x - 1
+		x = ix.parent[x - 1]
+	}
+	for i := chain.len - 1; i >= 0; i-- {
+		sb.write_u8(`/`)
+		sb.write_string(ix.name_of(chain[i]))
+	}
 }
 
 // path_at is the path of the j-th node indexed (nodes[j]).

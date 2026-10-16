@@ -2,6 +2,7 @@ module arxmodel
 
 import flatxml
 import flatxml.xsd
+import strings
 
 // A referrable element names itself by its SHORT-NAME child; its AUTOSAR path is the SHORT-NAMEs
 // of it and its referrable ancestors, `/Pkg/Sub/Name`. A variation point does not enter the path.
@@ -285,24 +286,71 @@ fn short_name_of(n flatxml.MNode, sn u32) string {
 // merge gives it one (`NAME[key]`); `#` and the elements from the root where no ancestor is
 // referrable.
 pub fn merged_path(n flatxml.MNode, ix &PathIndex) string {
-	mut inner := []string{}
+	// the nodes below the nearest referrable ancestor (or the root), n first; then the path
+	// written once into one builder, keys shown and escaped as they are written
+	mut chain := []u32{cap: 8}
 	mut cur := n
+	mut entry := u32(0) // 1 + the ancestor's entry, 0 for none
 	for cur.ok() {
-		if p := ix.path_of(cur.i) {
-			return join_path(p, inner)
+		if int(cur.i) < ix.at.len && ix.at[cur.i] != 0 {
+			entry = ix.at[cur.i]
+			break
 		}
-		k := cur.key()
-		inner << if flatxml.empty_key(k) || k == list_key(cur.name()) {
-			cur.name()
-		} else if k.starts_with(content_mark) {
-			// an item keyed by its content: by its place among its namesakes
-			'${cur.name()}[#${place_of(cur)}]'
-		} else {
-			'${cur.name()}[${escape_key(flatxml.show_key(k))}]'
-		}
+		chain << cur.i
 		cur = cur.parent()
 	}
-	return join_path('', inner)
+	mut sb := strings.new_builder(96)
+	if entry != 0 {
+		ix.write_path(mut sb, entry - 1)
+	}
+	if chain.len > 0 {
+		sb.write_u8(`#`)
+		for i := chain.len - 1; i >= 0; i-- {
+			if i < chain.len - 1 {
+				sb.write_u8(`/`)
+			}
+			write_segment(mut sb, ix.view.node(chain[i]))
+		}
+	}
+	return sb.str()
+}
+
+// write_segment writes a node below a referrable one as a path shows it: its name, and its key
+// where the merge gives it one (`NAME[key]`), an item keyed by its content by its place among
+// its namesakes (`NAME[#2]`).
+fn write_segment(mut sb strings.Builder, m flatxml.MNode) {
+	name := m.name()
+	sb.write_string(name)
+	k := m.key()
+	if flatxml.empty_key(k) || is_list_key(k, name) {
+		return
+	}
+	sb.write_u8(`[`)
+	if k.starts_with(content_mark) {
+		sb.write_u8(`#`)
+		sb.write_decimal(place_of(m))
+	} else {
+		// show_key then escape_key, a byte at a time
+		for c in k {
+			if c == flatxml.key_sep[0] {
+				sb.write_u8(`,`)
+			} else if c == flatxml.key_list_sep[0] {
+				sb.write_u8(`|`)
+			} else {
+				if c == `\\` || c == `[` || c == `]` {
+					sb.write_u8(`\\`)
+				}
+				sb.write_u8(c)
+			}
+		}
+	}
+	sb.write_u8(`]`)
+}
+
+// is_list_key reports whether k is list_key(name), without making it.
+fn is_list_key(k string, name string) bool {
+	return k.len == name.len + 1 && k[0] == flatxml.key_sep[0]
+		&& unsafe { C.memcmp(k.str + 1, name.str, name.len) } == 0
 }
 
 // escape_key is a key as a path shows it: its `\\`, `[` and `]` escaped with `\\`, so a path is

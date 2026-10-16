@@ -286,3 +286,13 @@ fn test_case_only_leaves_out_a_shelf_missing_its_key() {
 	assert co.len == 1 && co[0].message == 'short names that differ only in case: Fiction, fiction'
 	assert co[0].at.len == 2
 }
+
+fn test_content_key_writes_what_interpolation_does() {
+	for parent in ['', 'P', 'SOME-PARENT'] {
+		for h in [u64(0), 0xabcdef, 0xffffffffffffffff] {
+			for before in [0, 1, 9, 10, 123456] {
+				assert content_key(parent, h, before) == '${content_mark}${parent}\x1f${h:016x}\x1f${before}'
+			}
+		}
+	}
+}
