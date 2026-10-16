@@ -48,8 +48,11 @@ pub:
 // in `model.failed`, and the rest are opened all the same: whether that is an error is the
 // caller's to decide.
 pub fn open(paths []string, opts OpenOptions) !&Opened {
-	m := load(paths, jobs: opts.jobs, exclude: opts.exclude)!
-	return open_model(m, opts)
+	mut m := load(paths, jobs: opts.jobs, exclude: opts.exclude)!
+	return open_model(m, opts) or {
+		m.free()
+		return err
+	}
 }
 
 // open_sources opens documents given as bytes, in the order given: the order a merge keeps the
@@ -60,26 +63,35 @@ pub fn open_sources(srcs []Source, opts OpenOptions) !&Opened {
 	mut files := []string{cap: srcs.len}
 	mut bytes := i64(0)
 	for s in srcs {
-		mut d := flatxml.parse_bytes(s.data, s.path)!
+		mut d := flatxml.parse_bytes(s.data, s.path) or {
+			set.free()
+			return err
+		}
 		d.resolve_namespaces() or {
 			d.free()
+			set.free()
 			return error('${s.path}: ${err.msg()}')
 		}
 		set.add(mut d)
 		files << s.path
 		bytes += s.data.len
 	}
-	return open_model(&Model{
+	mut m := &Model{
 		set:   set
 		files: files
 		bytes: bytes
-	}, opts)
+	}
+	return open_model(m, opts) or {
+		m.free()
+		return err
+	}
 }
 
 // open_model merges a loaded model and indexes its paths: by a rules file, else by the schema
 // governing the files, else by the built-in identity rules. A schema directory given in which no
 // schema governs the files is an error, not a quiet fall back to other rules. The XML schema,
-// multiplicity and reference layers are not run: they are a check's, not a reader's.
+// multiplicity and reference layers are not run: they are a check's, not a reader's. The
+// findings are the policy's, its filters applied. On an error the model is the caller's to free.
 pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	p := named_policy(if opts.policy == '' { 'spec' } else { opts.policy })!
 	mut flat := Flat{}
@@ -111,11 +123,13 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		written_order: true
 		local_names:   true
 	}
-	c := check_typed(m, flat, name, st, p, CheckOptions{
+	copts := CheckOptions{
 		skip_xml:          true
 		skip_multiplicity: true
 		skip_references:   true
-	}, ty)!
+	}
+	mut c := check_typed(m, flat, name, st, p, copts, ty)!
+	c.filter(p, copts, m)
 	mut o := &Opened{
 		model:    m
 		view:     c.view
@@ -124,8 +138,9 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		notes:    notes
 		findings: c.findings
 	}
+	// by the id the merge names a node by: its local name's, in the document's namespace
 	for k in c.index.nodes {
-		o.by_kind[c.view.node(k).local_id()] << k
+		o.by_kind[c.view.node(k).tag()] << k
 	}
 	mut v := c.view
 	for i in 0 .. v.len() {

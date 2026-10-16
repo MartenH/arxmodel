@@ -57,6 +57,8 @@ pub mut:
 	problems []Problem
 mut:
 	rules  CompiledRules
+	// every document's namespaces were resolved when the view was made: what local names need
+	resolved bool
 	source []Rule // the rules as given, so a node can say which put it together
 	count u32 // merged nodes; the arrays below are allocated for as many as the set has nodes
 	// per merged node
@@ -147,6 +149,7 @@ pub fn (s &DocSet) merge(rules RuleSet) !&Merged {
 		kid_lo:  []u32{len: total + 1}
 		frags:   []Frag{len: total}
 	}
+	m.resolved = s.docs.all(it.ns.len == it.tag.len)
 	m.by_name.reserve(total / 8)
 	m.by_key.reserve(total / 8)
 	if s.docs.len > 0 {
@@ -194,11 +197,10 @@ fn (mut m Merged) fit() {
 	}
 }
 
-// name_of is the name id element i of d is merged by: its local name's with local names.
+// name_of is the name id element i of d is merged by: with local names, its local name's.
 @[inline]
 fn (m &Merged) name_of(d &Doc, i u32) u32 {
-	t := d.tag[i]
-	return if m.rules.local && t != text_tag { d.tab.local[t] } else { t }
+	return if m.rules.local { d.local_tag(i) } else { d.tag[i] }
 }
 
 // build makes the merged root, then the children of every merged node in turn.
@@ -959,17 +961,18 @@ pub fn (n MNode) name() string {
 	return if n.i == no_mnode { '' } else { n.m.set.tab.name(n.m.name[n.i]) }
 }
 
-// local_id is the name id of the node's local name: the same id for `ar:X` and `X`. Needs the
-// set's namespaces resolved; text_tag for none.
+// local_id is the name id of the node's local name: the same id for `ar:X` and `X`. Needs every
+// document's namespaces resolved; text_tag for none.
 pub fn (n MNode) local_id() u32 {
 	if n.i == no_mnode {
 		return text_tag
 	}
-	t := n.m.set.tab
-	if t.local.len != t.names.len {
-		panic('flatxml: local names need resolve_namespaces() to have run')
+	// every document of the set, not the shared table: resolving one document splits the
+	// table's names for all of them
+	if !n.m.resolved && !names_resolved(n.m) {
+		panic('flatxml: local names need resolve_namespaces() to have run on every document')
 	}
-	return t.local[n.m.name[n.i]]
+	return n.m.set.tab.local[n.m.name[n.i]]
 }
 
 // local_name is the node's name without its prefix; '' for none. Needs namespaces resolved.
@@ -1031,12 +1034,15 @@ pub fn (n MNode) parent() MNode {
 	return MNode{n.m, if n.i == no_mnode { no_mnode } else { n.m.parent[n.i] }}
 }
 
-// child is the child named name with key (with '' for a single child).
+// child is the child named name with key (with '' for a single child). With local names, name
+// is compared without its prefix too.
 pub fn (n MNode) child(name string, key string) MNode {
 	if n.i == no_mnode {
 		return n
 	}
-	id := n.m.set.tab.id(name) or { return MNode{n.m, no_mnode} }
+	id := n.m.set.tab.id(if n.m.rules.local { local_part(name) } else { name }) or {
+		return MNode{n.m, no_mnode}
+	}
 	return n.child_id(id, key)
 }
 

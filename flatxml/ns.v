@@ -175,6 +175,19 @@ fn (d &Doc) need_split() {
 	}
 }
 
+// local_tag is the name id element i is compared by when prefixes are ignored: its local name's
+// when it is in its document's namespace (the root element's), whatever prefix spells that, and
+// its name as written when it is in another, so `x` of a foreign namespace is not the
+// document's `x`. Needs namespaces resolved.
+@[inline]
+pub fn (d &Doc) local_tag(i u32) u32 {
+	t := d.tag[i]
+	if t == text_tag || d.ns[i] != d.ns[1] {
+		return t
+	}
+	return d.tab.local[t]
+}
+
 // ns_of is the namespace id of element i.
 @[inline]
 pub fn (d &Doc) ns_of(i u32) u32 {

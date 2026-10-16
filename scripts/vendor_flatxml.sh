@@ -13,9 +13,16 @@ trap 'rm -rf "$work"' EXIT
 git -C "$work" init -q
 git -C "$work" fetch -q --depth=1 "$src" "$commit"
 full=$(git -C "$work" rev-parse FETCH_HEAD)
-# a local checkout is recorded by its origin, never by its path on this machine
+# a local checkout is accepted only as a copy of the public repository, and recorded as that: a
+# path on this machine, or any other remote, never goes into VENDORED
+public=https://github.com/MartenH/flatxml
 if [ -d "$src" ]; then
-	src=$(git -C "$src" remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##')
+	origin=$(git -C "$src" remote get-url origin | sed -e 's#^git@github.com:#https://github.com/#' -e 's#\.git$##')
+	if [ "$origin" != "$public" ]; then
+		echo "$src: its origin is not $public; vendor from that URL instead" >&2
+		exit 1
+	fi
+	src=$public
 fi
 git -C "$work" checkout -q FETCH_HEAD -- flatxml
 find "$work/flatxml" -name '*_test.v' -delete

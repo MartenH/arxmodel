@@ -143,3 +143,86 @@ fn test_open_by_the_schema_the_files_declare() {
 	assert o.of_kind('BOOK').map(o.path_of(it)) == ['/Fiction/Dune']
 	assert o.of_kind('MAGAZINE').map(o.path_of(it)) == ['/Fiction/Analog']
 }
+
+fn ecuc(prefix string, values []string) string {
+	p := if prefix == '' { '' } else { prefix + ':' }
+	ns := if prefix == '' { 'xmlns="urn:m"' } else { 'xmlns:${prefix}="urn:m"' }
+	mut vs := ''
+	for v in values {
+		vs += '<${p}ECUC-NUMERICAL-PARAM-VALUE><${p}DEFINITION-REF>/D/p</${p}DEFINITION-REF><${p}VALUE>${v}</${p}VALUE></${p}ECUC-NUMERICAL-PARAM-VALUE>'
+	}
+	return '<${p}AUTOSAR ${ns}><${p}AR-PACKAGES><${p}AR-PACKAGE><${p}SHORT-NAME>P</${p}SHORT-NAME><${p}ELEMENTS>' +
+		'<${p}ECUC-CONTAINER-VALUE><${p}SHORT-NAME>C</${p}SHORT-NAME><${p}PARAMETER-VALUES>${vs}</${p}PARAMETER-VALUES></${p}ECUC-CONTAINER-VALUE>' +
+		'</${p}ELEMENTS></${p}AR-PACKAGE></${p}AR-PACKAGES></${p}AUTOSAR>'
+}
+
+fn named_count(o &Opened, local string) int {
+	mut n := 0
+	for i in 0 .. o.view.len() {
+		if o.view.node(u32(i)).local_name() == local {
+			n++
+		}
+	}
+	return n
+}
+
+fn test_values_of_a_definition_given_twice_merge_whatever_the_prefix() {
+	// a definition given twice is keyed by its values' content: the content's element names are
+	// local names, so a prefix does not keep one value apart from itself
+	mut o := open_sources([src('a.arxml', ecuc('', ['1', '2'])), src('b.arxml', ecuc('ar', ['1', '2']))])!
+	defer {
+		o.free()
+	}
+	assert named_count(o, 'ECUC-NUMERICAL-PARAM-VALUE') == 2
+	assert o.findings.len == 0
+}
+
+fn vk_setting_doc(prefix string, value string) string {
+	p := if prefix == '' { '' } else { prefix + ':' }
+	ns := if prefix == '' { 'xmlns="urn:arxmodel:test:lib"' } else { 'xmlns:${prefix}="urn:arxmodel:test:lib"' }
+	return '<?xml version="1.0" encoding="UTF-8"?>
+<${p}LIBRARY ${ns} xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd">
+<${p}SHELVES><${p}SHELF><${p}SHORT-NAME>Fiction</${p}SHORT-NAME><${p}SETTINGS><${p}SETTING><${p}DEFINITION-REF>/d/x</${p}DEFINITION-REF><${p}VALUE>${value}</${p}VALUE></${p}SETTING></${p}SETTINGS></${p}SHELF></${p}SHELVES>
+</${p}LIBRARY>'
+}
+
+fn open_policy_file(name string, text string) string {
+	path := os.join_path(os.temp_dir(), 'arxmodel_open_${os.getpid()}_${name}.toml')
+	os.write_file(path, text) or { panic(err) }
+	return path
+}
+
+fn test_by_the_schema_a_value_is_identified_by_its_definition_whatever_the_prefix() {
+	policy := open_policy_file('by_def', automat_policy_text.replace(open_identity_line,
+		'item_identity = { "Shelf.setting" = "definition" }'))
+	defer {
+		os.rm(policy) or {}
+	}
+	mut o := open_sources([src('a.arxml', vk_setting_doc('', '1')),
+		src('b.arxml', vk_setting_doc('l', '1'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
+	defer {
+		o.free()
+	}
+	assert o.rules == 'schema LIB_1.xsd'
+	assert named_count(o, 'SETTING') == 1
+}
+
+fn test_the_policy_filters_apply_to_what_open_found() {
+	// one definition, two values: a value that differs, which the filter makes an error
+	policy := open_policy_file('filter', automat_policy_text.replace(open_identity_line,
+		'item_identity = { "Shelf.setting" = "definition" }') +
+		'\n[[filter]]\nmatch = "merge.value_differs"\nseverity = "error"\n')
+	defer {
+		os.rm(policy) or {}
+	}
+	mut o := open_sources([src('a.arxml', vk_setting_doc('', '1')),
+		src('b.arxml', vk_setting_doc('', '2'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
+	defer {
+		o.free()
+	}
+	f := o.findings.filter(it.kind == 'value_differs')
+	assert f.len == 1
+	assert f[0].severity == .error && f[0].filter == 1
+}
+
+const open_identity_line = 'item_identity = { "EcucContainerValue.parameterValue" = "definition", "EcucContainerValue.referenceValue" = "definition" }'

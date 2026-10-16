@@ -470,7 +470,7 @@ fn (n Node) find_all_by(p Path, local bool) []Node {
 fn (d &Doc) find_local(i u32, ids []u32, k int) u32 {
 	mut c := d.first_child(i)
 	for c != no_node {
-		if d.tag[c] != text_tag && d.tab.local[d.tag[c]] == ids[k] {
+		if d.tag[c] != text_tag && d.local_tag(c) == ids[k] {
 			if k == ids.len - 1 {
 				return c
 			}
@@ -487,7 +487,7 @@ fn (d &Doc) find_local(i u32, ids []u32, k int) u32 {
 fn (d &Doc) collect_local(i u32, ids []u32, k int, mut out []Node) {
 	mut c := d.first_child(i)
 	for c != no_node {
-		if d.tag[c] != text_tag && d.tab.local[d.tag[c]] == ids[k] {
+		if d.tag[c] != text_tag && d.local_tag(c) == ids[k] {
 			if k == ids.len - 1 {
 				out << Node{d, c}
 			} else {

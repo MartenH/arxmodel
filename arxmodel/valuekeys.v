@@ -29,13 +29,14 @@ pub mut:
 	multi map[string]bool
 }
 
-// role_of is the identity role an element is an item of, by its name and its parent's.
+// role_of is the identity role an element is an item of, by its name and its parent's, each
+// compared without its prefix as the schema's role names are written.
 fn (vk &ValueKeys) role_of(n flatxml.Node) ?IdentityRole {
 	p := n.parent()
 	if !p.ok() {
 		return none
 	}
-	name, pname := n.name(), p.name()
+	name, pname := local_part(n.name()), local_part(p.name())
 	for r in vk.roles {
 		if r.parent == pname && name in r.items {
 			return r
@@ -90,14 +91,15 @@ pub fn (vk &ValueKeys) key(n flatxml.Node) ?string {
 	return k
 }
 
-// content_of is what an item holds besides its definition and label: each element's path and
-// text, in order.
+// content_of is what an item holds besides its definition and label: each element's path (of
+// local names, so a prefix does not tell two values apart) and text, in order.
 fn content_of(n flatxml.Node, r IdentityRole) string {
 	skip := [r.definition.all_before('/'), r.label.all_before('/')]
 	mut out := []string{}
 	for c in n.children() {
-		if local_part(c.name()) !in skip {
-			leaf_texts(c, c.name(), mut out)
+		local := local_part(c.name())
+		if local !in skip {
+			leaf_texts(c, local, mut out)
 		}
 	}
 	return out.join(flatxml.key_list_sep)
@@ -107,7 +109,7 @@ fn leaf_texts(n flatxml.Node, path string, mut out []string) {
 	mut any := false
 	for c in n.children() {
 		any = true
-		leaf_texts(c, '${path}/${c.name()}', mut out)
+		leaf_texts(c, '${path}/${local_part(c.name())}', mut out)
 	}
 	if !any {
 		out << '${path}=${n.text().trim_space()}'
