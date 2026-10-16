@@ -31,9 +31,7 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
    - **Done: load and rules.** `arxmodel load` reads every `.arxml` into one document set;
      `arxmodel rules` finds and compiles each declared schema once and reads its annotations into
      a rule per aggregation (key paths in XML, splittable, ordered, most), with every annotation
-     counted (README, *Rules from the schema*). Locally: 697 real files (184 MB) load in about
-     95 ms; four of the thirteen declared schemas are at hand, and each compiles and gives its
-     rules in 0.1–0.4 s.
+     counted (README, *Rules from the schema*).
    - **Done: decisions.** A split key naming the item itself identifies an item with children by
      its single-valued children; the newest release declared governs, falling back to the newest
      at hand (README, *Releases*).
@@ -42,8 +40,7 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      different types give different rules, and every problem with its positions. What
      flatxml's rule model cannot say yet is listed as requests in the PR (rules scoped by the
      parent's type, a key of every occurrence, a key whose parts are all absent).
-   - **Done: flatxml's rule extensions.** Each holder its own rule by a parent path (no conflict
-     left in the local files: ECUC container definitions are keyed and merged under their
+   - **Done: flatxml's rule extensions.** Each holder its own rule by a parent path (ECUC container definitions are keyed and merged under their
      module definition), keys of every occurrence (`+`) and the empty key for keyless items
      from flatxml; no key computed here. The known differences from the AUTOSAR specification
      are in the README.
@@ -66,24 +63,17 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      location for the model's namespace that of the release whose rules merged it;
      nothing written on errors unless `--force`. A parent's rules now follow its content model, and
      a child no role names gets a rule for its place, so the merged model is written in the
-     schema's order (before this, children went in the order of the roles across the whole schema:
-     173,610 elements out of place in the real model). Locally, the 697 files (184 MB, 1,853,442
-     elements, 1,475 errors as `check` finds them: 324 of the merge and XML schema layers, 1,151
-     unresolved or ambiguous references; so written with `--force`) write as one 171 MB ARXML in
-     0.8–0.9 s (4.3–4.4 s with loading, merging and all four layers, 0.77 GB at most; by the rules
-     file made from the schema, 1.5 s and 0.59 GB, the same bytes); read alone it is valid against
-     AUTOSAR_00052 (no XML schema finding; the inputs' 2, an element out of 00052's order in a file
-     declaring a later release, are in its order now), has nothing to merge, the same 110
-     multiplicity warnings and the same 1,151 reference errors, and its 1,709,633 elements have,
-     one for one and in order, the merged paths of the inputs' merged view.
+     schema's order (before this, children went in the order of the roles across the whole
+     schema). Read back alone, an export has nothing to merge, the same findings as its inputs, and
+     its elements have, one for one and in order, the merged paths of the inputs' merged view.
    - **Done: the policy in TOML.** `policy.toml` (tables `[merge]`, `[schema]`, `[references]`,
      `[severity]`), read by vlib's `toml`; every setting required and typed, anything unknown
      refused by name.
    - **Done: the specification's merge as the default policy.** policy.toml follows the Generic
      Structure Template (copied items and primitive values, keys as written with `case_only`,
      identical repetitions of non-splittable roles with `repeated_differs`, structured comments
-     not compared, the union of item types' keys, absent keys kept apart); automat's behaviour is
-     automat.policy.toml (`--policy automat`). policy.schema.json is generated from the code's one
+     not compared, the union of item types' keys, absent keys kept apart); automat.policy.toml is
+     the alternative (`--policy automat`). policy.schema.json is generated from the code's one
      list of settings; `arxmodel policy` shows a policy and `--diff` how two differ.
    - **Next, in this order** (arxmodel is used in ordinary flows elsewhere too: merging .arxml
      files in CI and in git merges):
@@ -148,5 +138,5 @@ whole. The steps come after the roadmap above, or between its steps as each beco
 
 - Synthetic schemas carrying the same kind of annotations, and synthetic split models, written
   here: one test per rule and per problem.
-- Locally: the real-world files against the real schemas, numbers only. A model split into files
+- Locally: real-world files against the real schemas, numbers only. A model split into files
   and merged back equals the model.

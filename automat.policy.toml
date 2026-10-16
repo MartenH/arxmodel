@@ -1,5 +1,5 @@
 #:schema ./policy.schema.json
-# arxmodel's merge policy as automat behaves (`--policy automat`): the automat profile. The
+# arxmodel's alternative merge policy (`--policy automat`). The
 # default, policy.toml, follows the AUTOSAR FO TPS Generic Structure Template (R24-11); each
 # setting here that differs from it says how, and which specification item it departs from.
 # TOML: every setting below must be given; policy.schema.json states what each takes.
@@ -36,8 +36,6 @@ repeated_content = "copy"
 abstract_items = "per_kind"
 
 # As in policy.toml, for the reason given there: an ECUC value is identified by its definition.
-# automat keys it by every single-valued child, the value included, so two files giving one
-# parameter different values make it two values; this profile does not follow automat there.
 item_identity = { "EcucContainerValue.parameterValue" = "definition", "EcucContainerValue.referenceValue" = "definition" }
 
 # As in policy.toml.

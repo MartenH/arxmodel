@@ -36,7 +36,7 @@
 //                                              the policy's settings, how two differ, its schema
 //
 // rules, check and merge take --policy: `spec` (policy.toml, the AUTOSAR specification's, built
-// in, the default), `automat` (automat.policy.toml, automat's) or a file.
+// in, the default), `automat` (automat.policy.toml) or a file.
 //
 // load and rules exit 1 when a file could not be read, or (rules) a schema was not declared, not
 // found or did not compile; check exits 1 on findings the policy calls errors (and on files that
@@ -123,7 +123,7 @@ const usage = 'usage:
       Schema of a policy file (policy.schema.json)
   --policy NAME|FILE (rules, check, merge, get, list, diff, merge3, policy): the merge policy:
       spec (policy.toml, as the AUTOSAR specification has it, the default), automat
-      (automat.policy.toml, as automat behaves), or a file
+      (automat.policy.toml), or a file
   <file|dir>...: the input set, for every command reading models: a file; a directory (every
       .arxml below it); a glob (`*`, `?` within a name, `**` any depth; one matching nothing is
       a warning); @FILE (the paths FILE lists, one a line, `#` comments, relative to FILE);

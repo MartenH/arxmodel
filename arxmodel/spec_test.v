@@ -4,8 +4,8 @@ import flatxml
 import flatxml.xsd
 import os
 
-// The specification's merge (the default policy) against automat's, each behaviour on synthetic
-// documents of the test schema.
+// The specification's merge (the default policy) against the automat profile, each behaviour on
+// synthetic documents of the test schema.
 
 // lib_files writes documents, each a library whose shelf Fiction holds `shelf` (written in the
 // shelf's content order) after `before` at the library's top, and loads them.
@@ -71,7 +71,7 @@ fn test_a_non_splittable_role_repeats_identically() {
 	twice := lib_files('twice', ['',
 		pallets('sand').replace('</PALLET>', '</PALLET><PALLET><CONTENTS><ITEM>sand</ITEM></CONTENTS></PALLET>')])
 	assert count_named(checked_by(twice, default_policy()), 'PALLET') == 2
-	// automat's: each kept, nothing said
+	// automat: each kept, nothing said
 	a := checked_by(differ, automat_policy())
 	assert !a.findings.any(it.kind == 'repeated_differs')
 }

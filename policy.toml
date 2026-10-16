@@ -2,7 +2,7 @@
 # arxmodel's merge policy, as the AUTOSAR specification has it: every choice that is arxmodel's and
 # not read from the AUTOSAR schema, made as the AUTOSAR FO TPS Generic Structure Template (R24-11)
 # makes it. Built in as the default (`--policy spec`); `--policy automat` reads
-# automat.policy.toml instead, automat's behaviour, and `--policy FILE` a file of one's own.
+# automat.policy.toml instead, and `--policy FILE` a file of one's own.
 # TOML: every setting below must be given, with a value this build supports; an unknown table or
 # key is refused. policy.schema.json (`arxmodel policy --schema`) states each setting, what it
 # takes and the specification item it concerns. Command-line flags override it.

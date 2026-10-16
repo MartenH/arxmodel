@@ -34,7 +34,7 @@ fn test_the_built_in_policies() {
 	assert p.ignore_declarations && p.item_itself == .copy && p.primitive_values == .copy
 	assert p.repeated_content == .identical && p.abstract_items == .@union && p.ignore_structured
 	assert p.repeated_choice_as_mixed && p.package_element == 'AR-PACKAGE'
-	// automat's
+	// automat
 	a := automat_policy()
 	assert a.absent_keys == .empty && a.fold && a.item_itself == .single_values
 	assert a.primitive_values == .merge_identical && a.repeated_content == .copy

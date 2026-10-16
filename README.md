@@ -16,6 +16,11 @@ split, which are ordered, how many children each allows) are read at load time f
 schema the user has, the one the files declare. Tests use synthetic schemas and documents
 written here. Runs against real schemas and files happen locally, and record numbers only.
 
+AUTOSAR is a registered trademark of the AUTOSAR development partnership. arxmodel is an
+independent project, not affiliated with or endorsed by AUTOSAR, and makes no claim of
+conformance to any AUTOSAR specification. Specification items are cited by their identifiers
+only, so a reader can look them up in the specifications AUTOSAR publishes.
+
 See [docs/plan.md](docs/plan.md).
 
 ## Three layers
@@ -29,7 +34,7 @@ A merge is made of three things, kept apart:
    is **never committed**.
 2. **Policy** ([policy.toml](policy.toml), committed): every choice that is arxmodel's and not the
    schema's, in TOML. The default follows the AUTOSAR specification (Generic Structure Template
-   R24-11); [automat.policy.toml](automat.policy.toml) is automat's behaviour (`--policy
+   R24-11); [automat.policy.toml](automat.policy.toml) is a second built-in profile (`--policy
    automat`), and `--policy FILE` reads one's own. Each setting has a comment saying why and the
    specification item it concerns: `[merge]` absent keys, the case of keys, attributes that may
    differ, items and primitive values named by their role alone, non-splittable repetitions,
@@ -279,7 +284,7 @@ keeps every one, in document order.
 **ECUC values by their definition.** The schema's split key for an ECUC parameter or reference
 value is the item itself (with its variation point's label). Copied, as the specification's
 `item_itself` has it, two files giving one parameter a value would give it two values; keyed by
-its single-valued children, as automat's has it, the value is part of the identity, and two files
+its single-valued children, as `single_values` has it, the value is part of the identity, and two files
 giving it different values would again be two values, two sides of a merge changing it keeping
 both. The policy's `item_identity` names the roles whose
 items are identified by one role of theirs instead (ECUC values by `definition`, and their
@@ -365,7 +370,7 @@ inside an input directory, is refused. Nothing is written where `check` would ex
 (findings the policy calls errors, files that could not be read or declare no schema), unless
 `--force`; `merge` says so.
 
-### The specification's merge, and the automat profile: differences
+### The specification's merge
 
 The default policy merges as the AUTOSAR FO TPS Generic Structure Template, R24-11, has it; what
 flatxml's merge does not do by itself is done here:
@@ -385,25 +390,7 @@ flatxml's merge does not do by itself is done here:
 - the items of a role of several item types are keyed by the union of their types' key parts
   ([TPS_GST_00416]).
 
-The automat profile ([automat.policy.toml](automat.policy.toml), `--policy automat`) differs from
-it in each of those, as automat does (`arxmodel policy --diff automat` lists them):
-
-1. **Items with every key part absent** share one empty key and merge (`absent_keys = "empty"`).
-2. **A split key naming only the role itself, on a multi-valued role**: items are keyed by their
-   single-valued element children and merged by that key (`item_itself = "single_values"`).
-3. **Case of keys**: compared ignoring ASCII case (`key_case = "ignore"`).
-4. **Multi-valued primitive values**: identical values merge into one
-   (`primitive_values = "merge_identical"`).
-5. **Non-splittable collections repeated across fragments**: an unkeyed one keeps each
-   occurrence, a keyed one reports a key met twice as a collision; nothing checks that
-   repetitions are identical (`repeated_content = "copy"`).
-6. **FILE-INFO-COMMENT** is compared like any other content (`file_info_comment = "compare"`).
-7. **Abstract item types**: each item kind is keyed by its own type's key
-   (`abstract_items = "per_kind"`).
-
-Both identify ECUC parameter and reference values by their definition (`item_identity`, below):
-the schema's split key for them is the item itself, which neither copying (two values for one
-parameter given by two files) nor single values (the value part of the identity) keys usefully.
+`arxmodel policy --diff automat` lists how the `automat` profile differs from it.
 
 ### Filters
 
@@ -506,3 +493,8 @@ version.
 flatxml is vendored in `flatxml/` (the library, without its tests) at the commit
 `flatxml/VENDORED` names, by `scripts/vendor_flatxml.sh <full commit sha>`; the copy is never
 edited.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). The vendored [flatxml](https://github.com/MartenH/flatxml) is MIT
+too, by the same author.
