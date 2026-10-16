@@ -151,6 +151,9 @@ fn (mut s DocSet) join(mut d Doc) {
 		for a in 0 .. d.attr_ns.len {
 			d.attr_ns[a] = uremap[d.attr_ns[a]]
 		}
+		for k, v in own.expanded {
+			t.expanded[u64(uremap[u32(k >> 32)]) << 32 | remap[u32(k)]] = remap[v]
+		}
 		t.split()
 	}
 	d.tab.free()

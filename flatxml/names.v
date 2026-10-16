@@ -18,6 +18,23 @@ mut:
 	local   []u32 // id -> its local name's id, once split
 	uris    []string // namespace id -> URI
 	uri_ids map[string]u32
+	// (namespace id, local name id) -> the id of the expanded name `{uri}local`, for every element
+	// and namespaced attribute of a resolved document (Doc.name_in, Doc.attr_id)
+	expanded map[u64]u32
+}
+
+// intern_expanded interns the expanded name `{uri}local` of namespace ns and local name id local
+// (once per pair) and records it: what tells a name of one namespace from another's spelled
+// alike. The caller splits the table afterwards.
+fn (mut t Names) intern_expanded(ns u32, local u32) u32 {
+	k := u64(ns) << 32 | local
+	if id := t.expanded[k] {
+		return id
+	}
+	name := '{${t.uris[ns]}}${t.names[local]}'
+	id := t.intern(name.str, name.len)
+	t.expanded[k] = id
+	return id
 }
 
 // Names.new is an empty table.
@@ -135,7 +152,9 @@ fn (mut t Names) split() {
 		id := u32(t.prefix.len)
 		name := t.names[id]
 		c := name.index_u8(`:`)
-		if c < 0 {
+		if c < 0 || name.starts_with('{') {
+			// no prefix: a plain name, or an expanded one (`{uri}local`), whose URI's colons
+			// are not a prefix's
 			t.prefix << 0
 			t.local << id
 			continue
@@ -174,6 +193,7 @@ fn (mut t Names) free() {
 		t.local.free()
 		t.uris.free()
 		t.uri_ids.free()
+		t.expanded.free()
 	}
 }
 

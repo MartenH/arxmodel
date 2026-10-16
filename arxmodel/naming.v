@@ -2,7 +2,7 @@ module arxmodel
 
 import flatxml
 
-// never_ns is a namespace id no element has: with it, Doc.name_in names every element as written.
+// never_ns is a namespace id no element has: a local namespace no document declares.
 const never_ns = u32(0xFFFF_FFFE)
 
 // Naming is how a merge names a document's elements (flatxml's Doc.name_in): by its local name
@@ -15,7 +15,7 @@ pub:
 	ns string // the local namespace's URI; '' for none
 mut:
 	tab voidptr // the name table `id` was read from
-	id  u32 = never_ns
+	id  u32 = flatxml.no_local
 }
 
 // naming is the naming of a model's documents by the local namespace ns: its id read once from
@@ -35,8 +35,10 @@ pub fn naming(ns string, models []&Model) Naming {
 	}
 }
 
+// ns_id_in is the local namespace's id for Doc.name_in: flatxml.no_local for none, an id no
+// element has for a URI no document declares (as flatxml's merge compiles it).
 fn ns_id_in(d &flatxml.Doc, ns string) u32 {
-	return if ns == '' { never_ns } else { d.ns_id(ns) or { never_ns } }
+	return if ns == '' { flatxml.no_local } else { d.ns_id(ns) or { never_ns } }
 }
 
 // tag is the name id element i of d is merged by.

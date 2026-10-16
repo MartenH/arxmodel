@@ -107,9 +107,12 @@ pub:
 	classify     ?ClassFn // the class of a parent, for rules that name one (`%class`)
 	// a namespace URI whose elements are named by their local name, whatever prefix a document
 	// spells it with: `<p:x xmlns:p="U">` and `<x xmlns="U">` are both `x`, to the merge, a rule,
-	// a key path and `MNode.child` alike. Every other element is named as written, as without it,
-	// and a document whose root is in another namespace is not merged with the others. Namespace
-	// declarations are not compared. '' for none; else the set's namespaces must be resolved.
+	// a key path and `MNode.child` alike. An element of any other namespace is named by its
+	// expanded name, `{V}x` (`{}x` for none), prefixed or not, so it is never taken for the
+	// namespace's `x`, nor for another namespace's spelled alike. A document whose root is in
+	// another namespace is not merged with the others, and namespace declarations are not
+	// compared. '' for none; else the set's namespaces must be resolved. (An attribute in a
+	// namespace is told by its expanded name with or without this: `Doc.attr_id`.)
 	local_ns string
 	// the identities of an aggregation in the order first written, as an ordered rule has them,
 	// without requiring an ordered rule's children to come from one document
@@ -292,8 +295,9 @@ fn (rs &RuleSet) compile(t &Names) !CompiledRules {
 	}
 }
 
-// no_local marks compiled rules with no local namespace.
-const no_local = u32(0xFFFF_FFFF)
+// no_local is the local namespace id of rules with none: Doc.name_in then names every element
+// as written.
+pub const no_local = u32(0xFFFF_FFFF)
 
 // local_ns_id is the id of the local namespace in the table: no_local for none, and for a URI no
 // document declares, an id no element has.
@@ -304,8 +308,13 @@ fn local_ns_id(t &Names, uri string) u32 {
 	return t.uri_ids[uri] or { no_local - 1 }
 }
 
-// local_part is a name without its prefix, sharing its bytes.
+// local_part is a name without its prefix, sharing its bytes; an expanded name's (`{uri}local`)
+// local name.
 fn local_part(name string) string {
+	if name.starts_with('{') {
+		e := name.index_u8(`}`)
+		return if e < 0 { name } else { unsafe { tos(name.str + e + 1, name.len - e - 1) } }
+	}
 	c := name.last_index_u8(`:`)
 	return if c < 0 { name } else { unsafe { tos(name.str + c + 1, name.len - c - 1) } }
 }
@@ -496,7 +505,7 @@ fn (p &KeyPart) read(c Node, local u32) ?string {
 			texts << if p.attr == no_name {
 				n.text()
 			} else {
-				n.doc.attr_by_id(n.i, p.attr) or { '' }
+				n.doc.attr_named(n.i, p.attr) or { '' }
 			}
 		}
 		return if texts.len == 0 { none } else { texts.join(key_list_sep) }
@@ -508,7 +517,7 @@ fn (p &KeyPart) read(c Node, local u32) ?string {
 	if p.attr == no_name {
 		return n.text()
 	}
-	return n.doc.attr_by_id(n.i, p.attr)
+	return n.doc.attr_named(n.i, p.attr)
 }
 
 // own_key_text is element c's own text as a key: its text when that is all it holds; beside
@@ -555,7 +564,18 @@ pub fn parse_rules(text string) !RuleSet {
 		if line == '' {
 			continue
 		}
-		words := line.fields()
+		mut words := line.fields()
+		// a namespace URI may hold `#` (`…/rdf-syntax-ns#`): read from the line as written, a
+		// comment after it set off by white space
+		if words[0] == '!local' {
+			words = raw.trim_space().fields()
+			for c, w in words {
+				if w.starts_with('#') {
+					words = words[..c].clone()
+					break
+				}
+			}
+		}
 		if words[0].starts_with('!') {
 			match words[0] {
 				'!fold' {
@@ -652,7 +672,9 @@ pub fn format_rules(rs RuleSet) !string {
 		lines << '!fold'
 	}
 	if rs.local_ns != '' {
-		check_rule_word(rs.local_ns, 'the local namespace')!
+		if rs.local_ns.contains_any(' \t\n\r') || rs.local_ns.starts_with('#') {
+			return error('the local namespace `${rs.local_ns}` cannot be written as rule text')
+		}
 		lines << '!local ${rs.local_ns}'
 	}
 	if rs.written_order {

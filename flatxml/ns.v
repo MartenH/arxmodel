@@ -140,6 +140,24 @@ fn (mut d Doc) resolve() ! {
 		}
 		d.check_expanded_attrs(i, lo, hi, attr_ns)!
 	}
+	// every element's and namespaced attribute's expanded name, so a merge with a local namespace
+	// (Doc.name_in, Doc.attr_id) reads the table and never writes it
+	mut last_tag := []u32{len: t.names.len, init: no_name}
+	mut last_ns := []u32{len: t.names.len}
+	for k in 1 .. d.tag.len {
+		tag := d.tag[k]
+		if tag == text_tag || (last_tag[tag] == tag && last_ns[tag] == ns[k]) {
+			continue
+		}
+		last_tag[tag], last_ns[tag] = tag, ns[k]
+		t.intern_expanded(ns[k], t.local[tag])
+	}
+	for a in 0 .. d.attr_tag.len {
+		if attr_ns[a] != no_ns && attr_ns[a] != xmlns_ns {
+			t.intern_expanded(attr_ns[a], t.local[d.attr_tag[a]])
+		}
+	}
+	t.split()
 	d.ns = ns
 	d.attr_ns = attr_ns
 }
@@ -177,14 +195,36 @@ fn (d &Doc) need_split() {
 
 // name_in is the name id element i is named by in a merge whose local namespace has id `local`
 // (`RuleSet.local_ns`): its local name's when it is in that namespace, whatever prefix spells
-// it, and its name as written otherwise (no_local: always as written).
+// it, and its expanded name (`{uri}x`, `{}x` for none) when it is in another, prefixed or not,
+// so it is never taken for the namespace's own `x`. no_local: always as written. Reads the table
+// only: the expanded names were made when the document was resolved.
 @[inline]
 pub fn (d &Doc) name_in(i u32, local u32) u32 {
 	t := d.tag[i]
-	if local == no_local || t == text_tag || d.ns[i] != local {
+	if local == no_local || t == text_tag {
 		return t
 	}
-	return d.tab.local[t]
+	l := d.tab.local[t]
+	if d.ns[i] == local {
+		return l
+	}
+	return d.tab.expanded[u64(d.ns[i]) << 32 | l] or { t }
+}
+
+// attr_id is what identifies attribute a: its name when it is in no namespace (or a namespace
+// declaration), its expanded name (`{uri}local`) when it is in one, so `p:id` and `q:id` with
+// p and q bound to one URI are one attribute. Before resolution, its name as written.
+@[inline]
+pub fn (d &Doc) attr_id(a u32) u32 {
+	t := d.attr_tag[a]
+	if int(a) >= d.attr_ns.len {
+		return t
+	}
+	ns := d.attr_ns[a]
+	if ns == no_ns || ns == xmlns_ns {
+		return t
+	}
+	return d.tab.expanded[u64(ns) << 32 | d.tab.local[t]] or { t }
 }
 
 // ns_of is the namespace id of element i.

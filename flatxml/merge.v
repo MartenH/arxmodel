@@ -713,7 +713,7 @@ fn (mut m Merged) differs(n u32) {
 		}
 		b_lo, b_hi := d.attr_range(f.i)
 		for b := b_lo; b < b_hi; b++ {
-			if d.attr_tag[b] in m.rules.ignore {
+			if d.attr_tag[b] in m.rules.ignore || d.attr_id(b) in m.rules.ignore {
 				continue
 			}
 			// with a local namespace, how a document spells a namespace is not its content
@@ -721,7 +721,7 @@ fn (mut m Merged) differs(n u32) {
 				continue
 			}
 			for a := a_lo; a < a_hi; a++ {
-				if d0.attr_tag[a] == d.attr_tag[b] {
+				if d0.attr_id(a) == d.attr_id(b) {
 					if d0.attr_value(a) != d.attr_value(b) {
 						m.problems << Problem{
 							kind: .value_differs

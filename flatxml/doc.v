@@ -323,6 +323,19 @@ pub fn (d &Doc) attr_by_id(i u32, tag u32) ?string {
 	return none
 }
 
+// attr_named is the value of node i's attribute with id `id`, as written or as its identity
+// (`attr_id`: `{uri}local` for one in a namespace), so a key names a namespaced attribute however
+// a document spells its prefix.
+pub fn (d &Doc) attr_named(i u32, id u32) ?string {
+	lo, hi := d.attr_range(i)
+	for a := lo; a < hi; a++ {
+		if d.attr_tag[a] == id || d.attr_id(a) == id {
+			return d.attr_value(a)
+		}
+	}
+	return none
+}
+
 // attr is the value of node i's attribute `name`.
 pub fn (d &Doc) attr(i u32, name string) ?string {
 	id := d.name_id(name) or { return none }

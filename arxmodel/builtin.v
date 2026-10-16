@@ -302,7 +302,7 @@ const identity_text = '# arxmodel\'s built-in identity rules: how the elements o
 	'# order counts: a reorder is reported. The order of named elements does not count.\n'
 
 // flatxml/VENDORED
-const flatxml_vendored_text = 'flatxml e5a75f6c1a8ea3d3069e39e79e81df783831c326\n' +
+const flatxml_vendored_text = 'flatxml 9ee366adb5ecb8996e0dd08360df26082d20a2f0\n' +
 	'source https://github.com/MartenH/flatxml\n' +
 	'The library folder at that commit, without its tests. Do not edit; re-vendor.\n'
 
