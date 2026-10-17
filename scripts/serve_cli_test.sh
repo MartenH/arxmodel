@@ -63,6 +63,26 @@ timeout 20 "$bin" values --socket s.sock '/**/Dim' > /dev/null 2>&1 || fail 'a s
 (( $(date +%s) - start < 10 )) || fail 'a silent client held the server up past the request timeout'
 kill $silent 2> /dev/null || true
 
+# a client that asks and does not read its answer holds no one up either: a model with an answer
+# larger than the socket's buffer, its own server
+python3 - > big.arxml <<'PY'
+print('<MODEL><PACKAGES><PACKAGE><SHORT-NAME>Big</SHORT-NAME><ELEMENTS><MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><PARAMETERS>')
+for k in range(40000):
+    print(f'<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Long_parameter_name_{k:06d}</DEFINITION-REF><VALUE>{k}</VALUE></NUMBER-PARAM-VALUE>')
+print('</PARAMETERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>')
+PY
+sleep 1.1
+"$bin" serve --socket b.sock big.arxml > big.log 2>&1 &
+for _ in $(seq 1 200); do [[ -S b.sock ]] && break; sleep 0.05; done
+python3 -c 'import socket, time; s = socket.socket(socket.AF_UNIX); s.connect("b.sock"); s.sendall(b"values\t/**\n"); time.sleep(25)' &
+reader=$!
+sleep 1
+start=$(date +%s)
+timeout 40 "$bin" values --socket b.sock '/Big/Cfg/Long_parameter_name_000001' > /dev/null 2>&1 || fail 'a client not reading held the server up'
+(( $(date +%s) - start < 20 )) || fail 'a client not reading held the server up past the answer deadline'
+kill $reader 2> /dev/null || true
+"$bin" serve --socket b.sock --stop > /dev/null 2>&1
+
 # the socket is its owner's only; the worker's is not beside it
 [[ $(stat -c %a s.sock) == 600 ]] || fail "socket mode $(stat -c %a s.sock)"
 ! ls s.sock.* > /dev/null 2>&1 || fail 'a worker socket beside the server socket'
