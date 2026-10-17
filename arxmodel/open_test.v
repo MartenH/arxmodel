@@ -1,5 +1,6 @@
 module arxmodel
 
+import flatxml
 import os
 
 fn src(path string, body string) Source {
@@ -298,4 +299,83 @@ fn test_an_element_of_no_namespace_is_no_value_of_the_model() {
 	x.observe([o.model])
 	facts := x.facts(o.model.set.docs[0].root_node()) or { panic('no facts') }
 	assert !facts.by_def[f]
+}
+
+fn frame_doc(length string) string {
+	return '<AUTOSAR xmlns="urn:m"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
+		'<CAN-FRAME><SHORT-NAME>F</SHORT-NAME><FRAME-LENGTH>${length}</FRAME-LENGTH></CAN-FRAME>' +
+		'</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
+}
+
+fn lengths_of(n flatxml.MNode) []flatxml.MNode {
+	mut out := []flatxml.MNode{}
+	for c in n.children() {
+		if c.local_name() == 'FRAME-LENGTH' {
+			out << c
+		}
+	}
+	return out
+}
+
+fn test_files_giving_one_element_two_values_say_so() {
+	// the one FRAME-LENGTH of a frame in each file is one FRAME-LENGTH, the first file's value
+	mut o := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('12'))])!
+	defer {
+		o.free()
+	}
+	f := o.at('/P/F')
+	lengths := lengths_of(f)
+	assert lengths.len == 1 && lengths[0].text() == '8'
+	d := o.findings.filter(it.kind == 'value_differs')
+	assert d.len == 1 && d[0].path.starts_with('/P/F'), d.str()
+	// the same value in both is one, said nowhere
+	mut same := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('8'))])!
+	defer {
+		same.free()
+	}
+	assert same.findings.len == 0, same.findings.str()
+	assert lengths_of(same.at('/P/F')).len == 1
+}
+
+fn test_open_says_which_files_the_rules_came_from() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_rule_files_${os.getpid()}')
+	os.mkdir_all(os.join_path(dir, 'xsd', 'sub')) or { panic(err) }
+	os.mkdir_all(os.join_path(dir, 'outside')) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	// the schema, its extension in another case, imports one outside the schema directory
+	lib := os.read_file(os.join_path(@VMODROOT, 'testdata', 'schemas', 'LIB_1', 'LIB_1.xsd'))!
+	head := 'elementFormDefault="qualified">'
+	os.write_file(os.join_path(dir, 'xsd', 'sub', 'LIB_1.Xsd'), lib.replace(head, head +
+		'<xsd:import namespace="urn:other" schemaLocation="../../outside/O.xsd"/>'))!
+	other := os.join_path(dir, 'outside', 'O.xsd')
+	os.write_file(other, '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:other"/>')!
+	files := [os.join_path(@VMODROOT, 'testdata', 'model', 'a.arxml')]
+	mut o := open(files, schema_dir: os.join_path(dir, 'xsd'))!
+	defer {
+		o.free()
+	}
+	assert o.rules == 'schema LIB_1.xsd'
+	assert o.rule_files.map(os.real_path(it)) == [os.real_path(os.join_path(dir, 'xsd', 'sub', 'LIB_1.Xsd')),
+		os.real_path(other)]
+	// by a rules file, that file
+	rules := os.join_path(dir, 'lib.rules.txt')
+	mut m := load(files)!
+	sc := compile_schemas(m, os.join_path(dir, 'xsd'), policy: named_policy('spec')!)
+	flat, name := governing_flat(sc)!
+	u := sc.uses.filter(it.name == name)[0]
+	os.write_file(rules, format_rules(flat, provenance(u, sc.policy), sc.policy.settings())!)!
+	m.free()
+	mut r := open(files, rules_file: rules)!
+	defer {
+		r.free()
+	}
+	assert r.rule_files == [rules]
+	// and by the built-in rules, none
+	mut b := open(files)!
+	defer {
+		b.free()
+	}
+	assert b.rule_files.len == 0
 }

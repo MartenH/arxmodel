@@ -53,7 +53,7 @@ fn test_the_built_in_identity() {
 }
 
 fn test_keys_by_the_built_in_identity() {
-	mut d := flatxml.parse_string('<R><L><X><SHORT-NAME>A</SHORT-NAME><VARIATION-POINT><SHORT-LABEL>v</SHORT-LABEL></VARIATION-POINT></X><Y><SHORT-NAME>B</SHORT-NAME></Y></L><P><N-PARAM-VALUE><DEFINITION-REF>/d/x</DEFINITION-REF><VARIATION-POINT><SHORT-LABEL>w</SHORT-LABEL></VARIATION-POINT></N-PARAM-VALUE><N-PARAM-VALUE><DEFINITION-REF>/d/m</DEFINITION-REF><VALUE>1</VALUE></N-PARAM-VALUE><N-PARAM-VALUE><DEFINITION-REF>/d/m</DEFINITION-REF><VALUE>2</VALUE></N-PARAM-VALUE></P><T>t</T><M><T>1</T><Y><SHORT-NAME>C</SHORT-NAME></Y></M><E/></R>') or {
+	mut d := flatxml.parse_string('<R><L><X><SHORT-NAME>A</SHORT-NAME><VARIATION-POINT><SHORT-LABEL>v</SHORT-LABEL></VARIATION-POINT></X><Y><SHORT-NAME>B</SHORT-NAME></Y></L><P><N-PARAM-VALUE><DEFINITION-REF>/d/x</DEFINITION-REF><VARIATION-POINT><SHORT-LABEL>w</SHORT-LABEL></VARIATION-POINT></N-PARAM-VALUE><N-PARAM-VALUE><DEFINITION-REF>/d/m</DEFINITION-REF><VALUE>1</VALUE></N-PARAM-VALUE><N-PARAM-VALUE><DEFINITION-REF>/d/m</DEFINITION-REF><VALUE>2</VALUE></N-PARAM-VALUE></P><T>t</T><M><T>1</T><Y><SHORT-NAME>C</SHORT-NAME></Y></M><E/><U>1</U><U>2</U></R>') or {
 		panic(err)
 	}
 	mut m := empty_model()
@@ -77,9 +77,17 @@ fn test_keys_by_the_built_in_identity() {
 		}
 	}
 	assert x.key(ms[0])? == '/d/m${s}${s}VALUE=1' && x.key(ms[1])? == '/d/m${s}${s}VALUE=2'
-	// a list of named elements is one list; anything else is matched by its place
+	// a list of named elements is one list, and so is the one element of its name among its
+	// siblings; elements of a name repeated are matched by their place
 	assert x.key(r.at('L'))? == '${s}L' && x.key(r.at('P'))? == '${s}P'
-	assert x.key(r.at('T')) == none && x.key(r.at('M')) == none
+	assert x.key(r.at('T'))? == '${s}T' && x.key(r.at('M'))? == '${s}M'
+	mut us := []flatxml.Node{}
+	for c in r.children() {
+		if c.name() == 'U' {
+			us << c
+		}
+	}
+	assert us.len == 2 && x.key(us[0]) == none && x.key(us[1]) == none
 	// an element named like a list another document holds is the list, even when empty
 	x.lists['E'] = true
 	assert x.key(r.at('E'))? == '${s}E'

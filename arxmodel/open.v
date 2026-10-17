@@ -14,12 +14,15 @@ import os
 @[heap]
 pub struct Opened {
 pub mut:
-	model    &Model          = unsafe { nil }
-	view     &flatxml.Merged = unsafe { nil }
-	index    &PathIndex      = unsafe { nil }
-	rules    string    // what the files were merged by: a schema's name, a rules file, or the built-in rules
-	notes    []string  // what choosing the rules had to say (a rules file made for another release)
-	findings []Finding // what the merge found, with the policy's severities
+	model &Model          = unsafe { nil }
+	view  &flatxml.Merged = unsafe { nil }
+	index &PathIndex      = unsafe { nil }
+	rules string   // what the files were merged by: a schema's name, a rules file, or the built-in rules
+	notes []string // what choosing the rules had to say (a rules file made for another release)
+	// the files the rules were read from: the rules file, or every schema document the files
+	// declare that was found, with what they import (inside the schema directory or not)
+	rule_files []string
+	findings   []Finding // what the merge found, with the policy's severities
 	// the elements one file describes more than once (a key repeated among siblings), merged
 	// into one as the identity rules merge any: `path: file:line, file:line`
 	repeated []string
@@ -35,6 +38,8 @@ pub:
 	schema_dir string   // where the schemas the files declare are; '' for none
 	rules_file string   // a rules file to merge by instead of a schema (`arxmodel rules --emit`)
 	policy     string   // `spec` (the default), `automat`, or a policy file
+	// the configuration file schema_dir was read from (`configured_schema_dir`); '' for none
+	config string
 }
 
 // Source is a document given as bytes, named by its path: for a caller that has read it already.
@@ -99,6 +104,7 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	mut name := ''
 	mut notes := []string{}
 	mut ty := &Typing(unsafe { nil })
+	mut rule_files := []string{}
 	if opts.rules_file != '' {
 		text := os.read_file(opts.rules_file) or { return error('${opts.rules_file}: ${err.msg()}') }
 		f, pv, fst := parse_rules_file(text) or { return error('${opts.rules_file}: ${err.msg()}') }
@@ -106,8 +112,10 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 			return error('${opts.rules_file}: ${err.msg()}')
 		}
 		flat, st, name = f, fst, 'rules file ${os.file_name(opts.rules_file)} (${pv.schema})'
+		rule_files << opts.rules_file
 	} else if opts.schema_dir != '' {
 		sc := compile_schemas(m, opts.schema_dir, policy: p)
+		rule_files = sc.files()
 		why := 'merging by the schemas in ${opts.schema_dir}'
 		f, gname := governing_flat(sc) or { return error('${why}: ${err.msg()}') }
 		gov := governing_use(sc) or { return error('${why}: ${err.msg()}') }
@@ -131,12 +139,13 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	mut c := check_typed(m, flat, name, st, p, copts, ty)!
 	c.filter(p, copts, m)
 	mut o := &Opened{
-		model:    m
-		view:     c.view
-		index:    c.index
-		rules:    name
-		notes:    notes
-		findings: c.findings
+		model:      m
+		view:       c.view
+		index:      c.index
+		rules:      name
+		notes:      notes
+		rule_files: rule_files
+		findings:   c.findings
 	}
 	// by the id the merge names a node by: its local name's, in the document's namespace
 	for k in c.index.nodes {

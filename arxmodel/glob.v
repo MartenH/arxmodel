@@ -27,12 +27,15 @@ pub:
 	abs bool
 }
 
-// compile_file_glob compiles a file glob.
+// compile_file_glob compiles a file glob. An absolute one is normalized as the absolute path it
+// is matched against is (`a/../b` is `b`).
 pub fn compile_file_glob(glob string) FileGlob {
+	abs := os.is_abs_path(glob)
+	src := if abs { os.norm_path(glob) } else { glob }
 	return FileGlob{
 		src: glob
-		pat: glob.replace('\\', '/').split('/').filter(it != '' && it != '.')
-		abs: os.is_abs_path(glob)
+		pat: src.replace('\\', '/').split('/').filter(it != '' && it != '.')
+		abs: abs
 	}
 }
 

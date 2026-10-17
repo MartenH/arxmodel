@@ -190,6 +190,11 @@ fn test_an_exclude_matches_any_spelling_of_a_file() {
 		exclude: ['**/two/../one/x.arxml']
 	)!
 	assert !f.files.any(it.ends_with('x.arxml'))
+	// an absolute exclude is the path it spells, as the files are
+	g := find_arxml([os.join_path(root, 'one')],
+		exclude: [os.join_path(root, 'two', '..', 'one', 'x.arxml')]
+	)!
+	assert !g.files.any(it.ends_with('x.arxml'))
 }
 
 fn test_the_set_knows_where_its_files_came_from() {
@@ -318,4 +323,30 @@ fn test_an_empty_path_is_no_such_file() {
 		return
 	}
 	assert false
+}
+
+fn test_a_model_file_says_which_configuration_named_its_schemas() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_mfcfg_${os.getpid()}')
+	os.mkdir_all(os.join_path(dir, 'arxmodel')) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	cfg := os.join_path(dir, 'arxmodel', 'config.toml')
+	os.write_file(cfg, 'schema_dir = "/opt/schemas"\n')!
+	old_env, old_xdg := os.getenv('ARXMODEL_SCHEMA_DIR'), os.getenv('XDG_CONFIG_HOME')
+	os.setenv('ARXMODEL_SCHEMA_DIR', '', true)
+	os.setenv('XDG_CONFIG_HOME', dir, true)
+	defer {
+		os.setenv('ARXMODEL_SCHEMA_DIR', old_env, true)
+		os.setenv('XDG_CONFIG_HOME', old_xdg, true)
+	}
+	mf := parse_model_file('paths = ["a.arxml"]', os.join_path(dir, 'm.arxmodel.toml'))!
+	o := mf.options()!
+	assert o.schema_dir == '/opt/schemas' && o.config == cfg
+	// from the environment, or the model file's own, no file
+	os.setenv('ARXMODEL_SCHEMA_DIR', '/env/schemas', true)
+	e := mf.options()!
+	assert e.schema_dir == '/env/schemas' && e.config == ''
+	own := parse_model_file('paths = ["a.arxml"]\nschema_dir = "/own"', os.join_path(dir, 'm.arxmodel.toml'))!
+	assert own.options()!.config == ''
 }

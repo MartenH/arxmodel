@@ -298,8 +298,10 @@ const identity_text = '# arxmodel\'s built-in identity rules: how the elements o
 	'\n' +
 	'# An element with neither, every child element of which is named (a list, such as AR-PACKAGES\n' +
 	'# or ELEMENTS), is one list with its namesakes under one parent, so the lists of several files\n' +
-	'# merge. Any other element is matched by its name and its place among its siblings, and its\n' +
-	'# order counts: a reorder is reported. The order of named elements does not count.\n'
+	'# merge. Any other element is matched by its name and its place among its siblings: the one\n' +
+	'# element of its name under a parent (a frame\'s FRAME-LENGTH) is that element in every file, so\n' +
+	'# files giving it different values are reported. Where a name repeats, order counts: a reorder is\n' +
+	'# reported. The order of named elements does not count.\n'
 
 // flatxml/VENDORED
 const flatxml_vendored_text = 'flatxml c3cd8a75ec691f5c72a003a35f8b83a87fec5be7\n' +
