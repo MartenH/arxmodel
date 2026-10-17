@@ -1116,7 +1116,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	}
 	// keys that differ only in case, where keys are compared as written; repeated roles
 	if !fold {
-		findings << case_only_findings(mut view, index, flat.rules, p)
+		findings << case_only_findings(mut view, index, flat.rules, p, flat.ignored_content)
 	}
 	findings << repeated_findings(mut view, index, flat.rules, flat.repeat_rules, mut ch, p)
 	mut times := map[string]time.Duration{}

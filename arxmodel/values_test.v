@@ -128,3 +128,42 @@ fn test_an_element_a_key_reads_is_always_compared() {
 	flat.ignore_content(['SHORT-NAME', 'NOTES'])
 	assert 'NOTES' in flat.ignored_content && 'SHORT-NAME' !in flat.ignored_content
 }
+
+fn test_the_value_of_an_item_split_over_files() {
+	// one file gives the item a part, another its value: the value is the value
+	dir := os.join_path(os.temp_dir(), 'arxmodel_values_${os.getpid()}', 'split_item')
+	os.mkdir_all(dir) or { panic(err) }
+	for name, part in {
+		'a': '<IS-AUTO>true</IS-AUTO>'
+		'b': '<VALUE>3</VALUE>'
+	} {
+		os.write_file(os.join_path(dir, '${name}.arxml'), '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>
+<MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><PARAMETERS>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Level</DEFINITION-REF>${part}</NUMBER-PARAM-VALUE>
+</PARAMETERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>') or {
+			panic(err)
+		}
+	}
+	m := load([dir]) or { panic(err) }
+	assert values_by(m, '/P/**', []) == ['/P/Cfg/Level#IS-AUTO = "true"', '/P/Cfg/Level = "3"']
+}
+
+fn test_two_files_giving_an_item_its_value() {
+	// by the built-in rules each file's value is a child of its own: the first file's is the value
+	dir := os.join_path(os.temp_dir(), 'arxmodel_values_${os.getpid()}', 'two_values')
+	os.mkdir_all(dir) or { panic(err) }
+	for name, value in {
+		'a': '2'
+		'b': '3'
+	} {
+		os.write_file(os.join_path(dir, '${name}.arxml'), '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>
+<MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><PARAMETERS>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Level</DEFINITION-REF><VALUE>${value}</VALUE></NUMBER-PARAM-VALUE>
+</PARAMETERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>') or {
+			panic(err)
+		}
+	}
+	m := load([dir]) or { panic(err) }
+	vals := values_by(m, '/P/**', [])
+	assert '/P/Cfg/Level = "2"' in vals && vals.len == 2, vals.str()
+}

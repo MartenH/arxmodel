@@ -306,6 +306,8 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 	mut removals := []flatxml.MNode{}
 	mut kept := map[u32]bool{}
 	ignored := r.flat.ignored_content
+	// the content of an addition, without what is not compared (made only when wanted)
+	mut ch := &ContentHashes(unsafe { nil })
 	for c in m3.conflicts {
 		if c.kind == .attr && c.name in r.ignore {
 			continue
@@ -315,6 +317,20 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 		if ignored.len > 0 && (in_ignored(c.node, ignored)
 			|| (c.kind == .added && in_ignored(c.ours.new, ignored))) {
 			continue
+		}
+		if ignored.len > 0 && c.kind == .added {
+			// both sides added one node, differing only in content not compared: ours is it
+			if ch == unsafe { nil } {
+				ch = new_content_hashes(r.ignore, naming(r.flat.rules.local_ns, [
+					ours.model,
+					theirs.model,
+				]))
+				ch.observe_ignored([ours.model, theirs.model])
+				ch.skip_elements(ignored)
+			}
+			if same_content(mut ch, c.ours.new, c.theirs.new) {
+				continue
+			}
 		}
 		if ignored.len > 0 && c.kind == .removed {
 			if c.ours.kind == .removed && change_in_ignored(c.theirs, ignored) {
@@ -365,6 +381,20 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 		m3:        m3
 		conflicts: out
 	}
+}
+
+// same_content reports whether two merged nodes hold the same content, fragment by fragment, as
+// the content hashes see it (what is not compared left out).
+fn same_content(mut ch ContentHashes, a flatxml.MNode, b flatxml.MNode) bool {
+	if !a.ok() || !b.ok() || a.fragment_count() != b.fragment_count() {
+		return false
+	}
+	for k in 0 .. a.fragment_count() {
+		if ch.hash(a.fragment(k)) != ch.hash(b.fragment(k)) {
+			return false
+		}
+	}
+	return true
 }
 
 // change_in_ignored reports whether a change lies in content not compared.

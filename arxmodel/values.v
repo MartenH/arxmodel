@@ -112,6 +112,11 @@ mut:
 	ref_s0 int
 	ref_s1 int
 	out    []Value
+	// terminal's scratch, kept between items: an item's parts, where a fragment writes each, and
+	// whether a fragment writes another part after it
+	parts    []u32
+	at       []u32
+	followed []bool
 }
 
 // values are the values a path pattern wants, in the order of the merged view (see above).
@@ -269,7 +274,7 @@ fn (w &ValueWalk) identity_of(n flatxml.MNode) int {
 // item_parts collects an item's values: its value (terminal) at the item's path when it holds
 // text only and is compared; the rest after `#`. The definition is its name, not a value.
 fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
-	last := terminal(n, id)
+	last := w.terminal(n, id)
 	for c in n.children() {
 		if !w.is_part(c, id) {
 			continue
@@ -284,33 +289,67 @@ fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
 	}
 }
 
-// terminal is the merged child that is an item's value: the last element (after its definition)
-// that the item's first fragment holding any writes, as the file has it and whatever is ignored,
-// so neither the merge's order nor an ignored value makes another part the value. No node where
-// no fragment holds one.
-fn terminal(n flatxml.MNode, id ItemIdentity) u32 {
+// terminal is the merged child that is an item's value: of its parts (every element but its
+// definition, ignored ones too), one that no fragment writes another part after (the value comes
+// last in such an item); of several, the last in the merged view (in its rules' order), and of
+// several copies of that element (from different files) the first, the first file's. So neither
+// the merge's order, nor an ignored value, nor a fragment holding only some of the parts makes
+// another part the value. No node where it has no part.
+fn (mut w ValueWalk) terminal(n flatxml.MNode, id ItemIdentity) u32 {
+	none_ := u32(0xFFFF_FFFF)
+	w.parts.clear()
+	w.followed.clear()
+	for c in n.children() {
+		tag := c.tag()
+		if tag != flatxml.text_tag && !(id.def.len > 0 && tag == id.def[0]) {
+			w.parts << c.i
+			w.followed << false
+		}
+	}
+	if w.parts.len == 0 {
+		return none_
+	}
+	v := n.m
 	for k in 0 .. n.fragment_count() {
 		f := n.fragment(k)
-		mut best := u32(0xFFFF_FFFF)
-		mut at := u32(0)
-		for c in n.children() {
-			tag := c.tag()
-			if tag == flatxml.text_tag || (id.def.len > 0 && tag == id.def[0]) {
-				continue
-			}
+		w.at.clear()
+		for p in w.parts {
+			c := v.node(p)
+			mut at := none_
 			for j in 0 .. c.fragment_count() {
 				cf := c.fragment(j)
-				if voidptr(cf.doc) == voidptr(f.doc) && cf.parent().i == f.i
-					&& (best == u32(0xFFFF_FFFF) || cf.i > at) {
-					best, at = c.i, cf.i
+				if voidptr(cf.doc) == voidptr(f.doc) && cf.parent().i == f.i {
+					at = cf.i
+					break
+				}
+			}
+			w.at << at
+		}
+		for a in 0 .. w.parts.len {
+			if w.at[a] == none_ {
+				continue
+			}
+			for b in 0 .. w.parts.len {
+				if w.at[b] != none_ && w.at[b] > w.at[a] {
+					w.followed[a] = true
+					break
 				}
 			}
 		}
-		if best != u32(0xFFFF_FFFF) {
-			return best
+	}
+	// the last part no fragment writes another after; of several of its name (copies of the
+	// value, from different files), the first: the first file's, as the merge keeps a value
+	for a := w.parts.len - 1; a >= 0; a-- {
+		if !w.followed[a] {
+			tag := v.node(w.parts[a]).tag()
+			for b in 0 .. a + 1 {
+				if !w.followed[b] && v.node(w.parts[b]).tag() == tag {
+					return w.parts[b]
+				}
+			}
 		}
 	}
-	return u32(0xFFFF_FFFF)
+	return none_
 }
 
 // is_part reports whether a child of an item is one of its values' parts: an element, not its

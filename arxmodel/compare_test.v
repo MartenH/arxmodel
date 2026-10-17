@@ -299,3 +299,23 @@ fn test_merge3_a_removal_meets_a_change_not_compared() {
 	assert o.conflicts == []
 	assert !o.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
 }
+
+fn test_merge3_takes_one_addition_differing_only_in_content_not_compared() {
+	cfg := '<SHORT-NAME>LampCfg</SHORT-NAME>'
+	added := fn [cfg] (note string) string {
+		return '<LAMP><SHORT-NAME>Side</SHORT-NAME><NOTES><NOTE>${note}</NOTE></NOTES><WATTS>3</WATTS></LAMP><MODULE-VALUES>' +
+			cfg
+	}
+	base := version_of('add_base')
+	ours := version_of('add_ours', '<MODULE-VALUES>\n          ${cfg}', added('a'))
+	theirs := version_of('add_theirs', '<MODULE-VALUES>\n          ${cfg}', added('b'))
+	r, v := builtin_versions(base, ours, theirs)
+	assert r.merge3(&v[0], &v[1], &v[2])!.conflicts.len > 0
+	ri := ruling_builtin([base, ours, theirs], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	b, o, t := ri.read(base)!, ri.read(ours)!, ri.read(theirs)!
+	mut m := ri.merge3(&b, &o, &t)!
+	assert m.conflicts == []
+	assert m.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Side</SHORT-NAME>')
+}

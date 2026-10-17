@@ -393,7 +393,7 @@ fn key_part(key string, part int) string {
 	return if k == part { unsafe { tos(key.str + start, key.len - start) } } else { '' }
 }
 
-fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet, p Policy) []Finding {
+fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet, p Policy, ignored []string) []Finding {
 	parts := short_name_parts(rules)
 	mut out := []Finding{}
 	// one node's short names, their children and their order ignoring case: lists kept
@@ -458,6 +458,9 @@ fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet
 				continue
 			}
 			group := (at_of[low] or { []u32{} }).map(v.node(it))
+			if ignored.len > 0 && in_ignored(group[0], ignored) {
+				continue // content not compared
+			}
 			mut at := []string{}
 			for c in group {
 				at << c.fragments().map(v.pos(it))
@@ -527,7 +530,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 		mut rules_seen := []int{}
 		for c in n.children() {
 			k := c.rule_number() or { continue }
-			if !is_repeat[k] {
+			if !is_repeat[k] || ch.not_compared(c) {
 				continue
 			}
 			if k !in rules_seen {

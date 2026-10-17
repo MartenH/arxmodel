@@ -348,3 +348,50 @@ fn test_an_ignored_item_is_no_difference_of_a_repetition() {
 	assert !d.findings.any(it.layer == .merge), d.findings.map('${it.layer}.${it.kind} ${it.path} ${it.what}').str()
 	assert count_named(d, 'PALLET') == 1
 }
+
+fn test_ignored_items_are_no_part_of_a_repetition() {
+	// one fragment one pallet, another two: pallets not compared, nothing said
+	one := '<PALLET><CONTENTS><ITEM>a</ITEM></CONTENTS></PALLET>'
+	pallets := fn (p string) string {
+		return '<ITEMS><BOOK><SHORT-NAME>Dune</SHORT-NAME><PALLETS>${p}</PALLETS></BOOK></ITEMS>'
+	}
+	m := lib_files('ignored_count', ['', pallets(one)], ['', pallets(one + one)])
+	sc := compile_schemas(m, os.join_path(@VMODROOT, 'testdata', 'schemas'),
+		policy: default_policy()
+	)
+	c := check(m, sc, skip_xml: true, skip_references: true, skip_multiplicity: true)!
+	assert c.findings.any(it.kind == 'repeated_differs')
+	d := check(m, sc,
+		skip_xml:          true
+		skip_references:   true
+		skip_multiplicity: true
+		ignore_elements:   [
+			'PALLET',
+		]
+	)!
+	assert !d.findings.any(it.layer == .merge), d.findings.map(it.str()).str()
+}
+
+fn test_case_only_says_nothing_in_content_not_compared() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_spec_${os.getpid()}', 'cases_ignored')
+	os.mkdir_all(dir)!
+	os.write_file(os.join_path(dir, 'a.arxml'), '<?xml version="1.0" encoding="UTF-8"?>
+<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:lib LIB_1.xsd">
+<SHELVES><SHELF><SHORT-NAME>Fiction</SHORT-NAME></SHELF><SHELF><SHORT-NAME>fiction</SHORT-NAME></SHELF></SHELVES>
+</LIBRARY>')!
+	m := load([dir])!
+	sc := compile_schemas(m, os.join_path(@VMODROOT, 'testdata', 'schemas'),
+		policy: default_policy()
+	)
+	c := check(m, sc, skip_xml: true, skip_references: true, skip_multiplicity: true)!
+	assert c.findings.any(it.kind == 'case_only')
+	d := check(m, sc,
+		skip_xml:          true
+		skip_references:   true
+		skip_multiplicity: true
+		ignore_elements:   [
+			'SHELVES',
+		]
+	)!
+	assert !d.findings.any(it.kind == 'case_only')
+}
