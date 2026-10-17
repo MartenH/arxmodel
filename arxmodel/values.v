@@ -199,7 +199,8 @@ fn (mut w ValueWalk) visit(n flatxml.MNode, inner bool, below bool) {
 		w.ref_lo, w.ref_hi, w.ref_s0, w.ref_s1 = ref_lo, ref_hi, ref_s0, ref_s1
 	}
 	entry := if int(n.i) < w.ix.at.len { w.ix.at[n.i] } else { u32(0) }
-	ident := w.identity_of(n)
+	// an element with a path of its own (a container named by its short name too) is no item
+	ident := if entry != 0 { -1 } else { w.identity_of(n) }
 	mut now_inner := inner
 	if entry != 0 {
 		w.from_ref()
@@ -243,8 +244,8 @@ fn (mut w ValueWalk) visit(n flatxml.MNode, inner bool, below bool) {
 	}
 }
 
-// identity_of is the item identity n is named by, or -1: not for an element that has a path of
-// its own (a container named by its short name too).
+// identity_of is the item identity n is named by, or -1: none where n gives no definition, as
+// the merge then does not name it by one.
 fn (w &ValueWalk) identity_of(n flatxml.MNode) int {
 	tag := n.tag()
 	if int(tag) >= w.item_of.len || w.item_of[tag] == 0 {
@@ -252,6 +253,9 @@ fn (w &ValueWalk) identity_of(n flatxml.MNode) int {
 	}
 	k := w.item_of[tag] - 1
 	if w.idents[k].parent != any_parent && n.parent().tag() != w.idents[k].parent {
+		return -1
+	}
+	if path_text(n, w.idents[k].def) == '' {
 		return -1
 	}
 	return k

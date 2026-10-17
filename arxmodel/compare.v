@@ -82,7 +82,7 @@ pub fn new_ruling(flat0 Flat, name string, st Settings, ty &Typing, models []&Mo
 	}
 	mut flat := flat0
 	flat.ignore_content(opts.ignore_elements)
-	flat.rules = with_settings(flat0.rules, r.fold, r.ignore)
+	flat.rules = with_settings(flat.rules, r.fold, r.ignore)
 	mut ch := new_content_hashes(r.ignore, naming(flat.rules.local_ns, models))
 	ch.observe_ignored(models)
 	ch.skip_elements(flat.ignored_content)
@@ -304,8 +304,10 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 		if c.kind == .attr && c.name in r.ignore {
 			continue
 		}
-		// structured comments are not compared, by the policy: ours is kept
-		if r.flat.ignored_content.len > 0 && in_ignored(c.node, r.flat.ignored_content) {
+		// content not compared (structured comments by the policy, ignored elements): ours is
+		// kept; for two additions the node is the base's parent, so the added nodes say
+		if r.flat.ignored_content.len > 0 && (in_ignored(c.node, r.flat.ignored_content)
+			|| (c.kind == .added && in_ignored(c.ours.new, r.flat.ignored_content))) {
 			continue
 		}
 		if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {

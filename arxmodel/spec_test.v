@@ -326,3 +326,25 @@ fn test_an_ignored_element_is_no_difference_of_a_repetition() {
 	assert !d.findings.any(it.layer == .merge)
 	assert count_named(d, 'PALLET') == 1
 }
+
+fn test_an_ignored_item_is_no_difference_of_a_repetition() {
+	// the repeated role's item itself ignored: its content tells no repetitions apart
+	pallets := fn (what string) string {
+		return '<ITEMS><BOOK><SHORT-NAME>Dune</SHORT-NAME><PALLETS><PALLET><CONTENTS><ITEM>${what}</ITEM></CONTENTS></PALLET></PALLETS></BOOK></ITEMS>'
+	}
+	m := lib_files('ignored_item', ['', pallets('sand')], ['', pallets('spice')])
+	p := default_policy()
+	sc := compile_schemas(m, os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: p)
+	c := check(m, sc, skip_xml: true, skip_references: true, skip_multiplicity: true)!
+	assert c.findings.any(it.kind == 'repeated_differs')
+	d := check(m, sc,
+		skip_xml:          true
+		skip_references:   true
+		skip_multiplicity: true
+		ignore_elements:   [
+			'PALLET',
+		]
+	)!
+	assert !d.findings.any(it.layer == .merge), d.findings.map('${it.layer}.${it.kind} ${it.path} ${it.what}').str()
+	assert count_named(d, 'PALLET') == 1
+}

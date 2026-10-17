@@ -112,6 +112,11 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 		return ch.hashes[k][i]
 	}
 	mut h := mix(u64(0xcbf29ce484222325), ch.name_hash(d, i))
+	if ch.skip.len > 0 && ch.nm.name(d, i) in ch.skip {
+		// content not compared: an ignored element (a repeated role's item itself) is its name
+		ch.hashes[k][i] = h | 1
+		return h | 1
+	}
 	// attributes, sorted by name
 	lo, hi := d.attr_range(i)
 	if hi > lo {
@@ -299,6 +304,12 @@ pub fn with_repeat_keys(rs flatxml.RuleSet, repeat []int, mut ch ContentHashes) 
 pub fn (f &Flat) merge_rules(models []&Model, mut ch ContentHashes) flatxml.RuleSet {
 	return with_repeat_keys(with_value_keys(f.rules, f.value_keys(models)), f.repeat_rules, mut
 		ch)
+}
+
+// not_compared reports whether a merged node is, or lies in, an element whose content the merge
+// does not compare (skip_elements).
+fn (ch &ContentHashes) not_compared(n flatxml.MNode) bool {
+	return ch.skip.len > 0 && in_ignored(n, ch.skip)
 }
 
 // ignored_problem reports whether a merge problem lies in content the merge does not compare.
@@ -493,7 +504,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 					continue
 				}
 				k := c.rule_number() or { continue }
-				if is_repeat[k] {
+				if is_repeat[k] && !ch.not_compared(c) {
 					out << collision_finding(mut v, ix, c, p)
 				}
 			}
@@ -508,7 +519,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 				}
 			}
 		}
-		if !any {
+		if !any || ch.not_compared(n) {
 			continue
 		}
 		// per repeated rule and fragment of n (its document and node): the hashes of its items

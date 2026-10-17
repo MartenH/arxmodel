@@ -65,7 +65,9 @@ pub mut:
 }
 
 // ignore_content adds elements whose content the merge does not compare: their differences are
-// no finding, no change and no conflict, and no part of what tells two values apart.
+// no finding, no change and no conflict, and no part of what tells two values apart. Called
+// before the rules are applied (with_settings, merge_rules): with the built-in identity rules it
+// makes their rule anew.
 pub fn (mut f Flat) ignore_content(names []string) {
 	for name in names {
 		if name !in f.ignored_content {
@@ -73,8 +75,14 @@ pub fn (mut f Flat) ignore_content(names []string) {
 		}
 	}
 	if f.identified != unsafe { nil } {
-		mut x := f.identified
-		x.ignored = f.ignored_content.clone()
+		// this Flat's own copy, its rule's keys bound to it: Flat is a value, and the Flat it was
+		// copied from (and its keys) keep what they had
+		f.identified = f.identified.with_ignored(f.ignored_content)
+		rs := f.rules
+		f.rules = flatxml.RuleSet{
+			...rs
+			rules: identity_rules(f.identified)
+		}
 	}
 }
 
@@ -1003,7 +1011,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
 	flat.ignore_content(opts.ignore_elements)
-	flat.rules = with_settings(flat0.rules, fold, ignore)
+	flat.rules = with_settings(flat.rules, fold, ignore)
 	mut ch := new_content_hashes(ignore, naming(flat.rules.local_ns, [m]))
 	ch.observe_ignored([m])
 	ch.skip_elements(flat.ignored_content)

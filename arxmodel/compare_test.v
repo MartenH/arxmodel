@@ -232,3 +232,47 @@ fn test_ignored_elements_are_no_change() {
 	a, b := ri.read(old)!, ri.read(new)!
 	assert ri.diff(&a, &b) == []
 }
+
+fn test_merge3_takes_ignored_content_added_on_both_sides() {
+	// both sides add an element of one identity (its short name), differently: for an
+	// addition the conflict's node is the base's parent, which is not ignored
+	cfg := '<SHORT-NAME>LampCfg</SHORT-NAME>'
+	added := fn [cfg] (note string) string {
+		return cfg + '<NOTES><SHORT-NAME>n</SHORT-NAME><NOTE>${note}</NOTE></NOTES>'
+	}
+	base := version_of('ig3_base')
+	ours := version_of('ig3_ours', cfg, added('a'))
+	theirs := version_of('ig3_theirs', cfg, added('b'))
+	r, v := builtin_versions(base, ours, theirs)
+	assert r.merge3(&v[0], &v[1], &v[2])!.conflicts.len > 0
+	ri := ruling_builtin([base, ours, theirs], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	a, b, c := ri.read(base)!, ri.read(ours)!, ri.read(theirs)!
+	assert ri.merge3(&a, &b, &c)!.conflicts == []
+}
+
+fn test_each_ruling_keeps_its_own_ignored_elements() {
+	sig_a := '<VALUE-REF DEST="SIGNAL">/Sig/A</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	two := fn [sig_a] (note string) string {
+		return sig_a + '
+            <SIGNAL-REFERENCE-VALUE>${note}
+              <DEFINITION-REF DEST="REF-DEF">/Defs/Lamp/Signal</DEFINITION-REF>
+              <VALUE-REF DEST="SIGNAL">/Sig/B</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	}
+	old := version_of('own_old', sig_a, two(''))
+	new := version_of('own_new', sig_a, two('<NOTES><NOTE>derived</NOTE></NOTES>'))
+	// two rulings from one built-in Flat: the second's settings do not reach the first's keys
+	flat := identity_flat(builtin_identity(), [old, new])
+	st := automat_policy().settings()
+	r1 := new_ruling(flat, 'built-in identity rules', st, unsafe { nil }, [old, new], CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	r2 := new_ruling(flat, 'built-in identity rules', st, unsafe { nil }, [old, new], CheckOptions{})
+	a, b := r1.read(old)!, r1.read(new)!
+	assert r1.diff(&a, &b) == []
+	c, d := r2.read(old)!, r2.read(new)!
+	assert r2.diff(&c, &d).len > 0
+}

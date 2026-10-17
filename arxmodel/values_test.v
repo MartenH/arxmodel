@@ -87,3 +87,22 @@ fn test_a_value_is_one_line() {
 		text: 'a"b\\c\nd\te\x01'
 	}.line() == '/P/X = "a\\"b\\\\c\\nd\\te\\u0001"'
 }
+
+fn test_a_container_is_no_item_and_an_item_needs_its_definition() {
+	// by the built-in rules a container is named by its definition and by its short name: its
+	// short name is its path, not a value; an item giving no definition is not named by one
+	m := values_model('container', '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>
+<MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><CONTAINERS>
+<ECUC-CONTAINER-VALUE><SHORT-NAME>C</SHORT-NAME><DEFINITION-REF>/Defs/C</DEFINITION-REF><PARAMETER-VALUES>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/C/Level</DEFINITION-REF><VALUE>1</VALUE></NUMBER-PARAM-VALUE>
+<NUMBER-PARAM-VALUE><DEFINITION-REF></DEFINITION-REF><VALUE>5</VALUE></NUMBER-PARAM-VALUE>
+</PARAMETER-VALUES></ECUC-CONTAINER-VALUE>
+</CONTAINERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>')
+	vals := values_by(m, '/P/**', [])
+	assert '/P/Cfg/C/Level = "1"' in vals
+	assert '/P/Cfg/C#DEFINITION-REF = "/Defs/C"' in vals
+	assert !vals.any(it.contains('SHORT-NAME'))
+	assert !vals.any(it.contains('/ = ') || it.contains('C/#'))
+	assert vals.any(it.starts_with('/P/Cfg/C#PARAMETER-VALUES/NUMBER-PARAM-VALUE')
+		&& it.ends_with('/VALUE = "5"'))
+}
