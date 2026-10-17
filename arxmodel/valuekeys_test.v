@@ -103,3 +103,75 @@ fn test_a_rules_file_keeps_the_identity_roles() {
 	back, _, _ := parse_rules_file(text)!
 	assert back.identity_roles == flat.identity_roles
 }
+
+fn test_values_by_the_schemas_identity_roles() {
+	p := vk_policy('{ "Shelf.setting" = "definition" }')
+	// the label after the value (SETTING writes VARIATION-POINT last): the value stays the value
+	labelled := '<SETTING><DEFINITION-REF>/d/x</DEFINITION-REF><VALUE>1</VALUE><VARIATION-POINT><SHORT-LABEL>v1</SHORT-LABEL></VARIATION-POINT></SETTING>'
+	m := vk_model('labelled', labelled)
+	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	vals := c.values('/Fiction/**').map(it.line())
+	assert vals == ['/Fiction/x[v1] = "1"', '/Fiction/x[v1]#VARIATION-POINT/SHORT-LABEL = "v1"'], vals.str()
+	// each_value gives what values gives, one at a time
+	mut seen := &[]string{}
+	n := c.each_value('/Fiction/**', fn [mut seen] (v Value) {
+		seen << v.line()
+	})
+	assert n == 2 && *seen == vals
+}
+
+fn test_values_of_a_role_with_no_wrapper() {
+	// the policy identifies a role written in its holder, with no wrapper, by its definition
+	dir := os.join_path(os.temp_dir(), 'arxmodel_vk_${os.getpid()}', 'direct')
+	os.mkdir_all(dir)!
+	os.write_file(os.join_path(dir, 'a.arxml'), '<?xml version="1.0" encoding="UTF-8"?>
+<DEPOT xmlns="urn:arxmodel:test:direct" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:direct DIRECT_1.xsd">
+<STORES><STORE><SHORT-NAME>Main</SHORT-NAME><OPTION><DEFINITION-REF>/d/x</DEFINITION-REF><VALUE>1</VALUE></OPTION><OPTION><DEFINITION-REF>/d/y</DEFINITION-REF><VALUE>2</VALUE></OPTION></STORE></STORES>
+</DEPOT>')!
+	m := load([dir])!
+	p := vk_policy('{ "Store.option" = "definition" }')
+	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	assert c.values('/Main/**').map(it.line()) == ['/Main/x = "1"', '/Main/y = "2"']
+	// through a rules file, the same: the file records the role
+	sc := vk_schemas(m, p)
+	flat, _ := governing_flat(sc)!
+	text := format_rules(flat, provenance(governing_use(sc)!, p), p.settings())!
+	assert text.contains('\n# direct-identity: OPTION DEFINITION-REF')
+	g, _, st := parse_rules_file(text)!
+	assert g.direct_identities.len == 1
+	d := check_with(m, g, 'rules file', st, p, skip_xml: true, skip_references: true)!
+	assert d.values('/Main/**').map(it.line()) == ['/Main/x = "1"', '/Main/y = "2"']
+}
+
+fn test_values_of_a_role_keyed_by_another_part_first() {
+	// the split key gives a kind before the item itself: the identity is the definition still
+	dir := os.join_path(os.temp_dir(), 'arxmodel_vk_${os.getpid()}', 'direct_kind')
+	os.mkdir_all(dir)!
+	os.write_file(os.join_path(dir, 'a.arxml'), '<?xml version="1.0" encoding="UTF-8"?>
+<DEPOT xmlns="urn:arxmodel:test:direct" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:direct DIRECT_1.xsd">
+<STORES><STORE><SHORT-NAME>Main</SHORT-NAME><CHOICE><KIND>k</KIND><DEFINITION-REF>/d/z</DEFINITION-REF><VALUE>3</VALUE></CHOICE></STORE></STORES>
+</DEPOT>')!
+	m := load([dir])!
+	p := vk_policy('{ "Store.choice" = "definition" }')
+	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	vals := c.values('/Main/**').map(it.line())
+	assert '/Main/z = "3"' in vals, vals.str()
+	assert !vals.any(it.starts_with('/Main/k')), vals.str()
+}
+
+fn test_values_of_an_attribute_identity_and_a_wrapper_keyed_by_another_part_first() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_vk_${os.getpid()}', 'direct_attr')
+	os.mkdir_all(dir)!
+	os.write_file(os.join_path(dir, 'a.arxml'), '<?xml version="1.0" encoding="UTF-8"?>
+<DEPOT xmlns="urn:arxmodel:test:direct" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:direct DIRECT_1.xsd">
+<STORES><STORE><SHORT-NAME>Main</SHORT-NAME><FLAG NAME="/f/on"><VALUE>yes</VALUE></FLAG><ENTRIES><ENTRY><KIND>k</KIND><DEFINITION-REF>/d/w</DEFINITION-REF><VALUE>4</VALUE></ENTRY></ENTRIES></STORE></STORES>
+</DEPOT>')!
+	m := load([dir])!
+	p := vk_policy('{ "Store.flag" = "name", "Store.entry" = "definition" }')
+	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	vals := c.values('/Main/**').map(it.line())
+	// an identity read from an attribute; a wrapper role named by its definition, not its kind
+	assert '/Main/on = "yes"' in vals, vals.str()
+	assert '/Main/w = "4"' in vals, vals.str()
+	assert !vals.any(it.starts_with('/Main/k')), vals.str()
+}

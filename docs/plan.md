@@ -75,6 +75,9 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
      not compared, the union of item types' keys, absent keys kept apart); automat.policy.toml is
      the alternative (`--policy automat`). policy.schema.json is generated from the code's one
      list of settings; `arxmodel policy` shows a policy and `--diff` how two differ.
+   - **Done: values.** `values PATTERN` prints every value a path glob wants as `path = "text"`
+     lines, a value named by its definition at its container's path and the definition's last
+     name (the form an edit script would take, step 3 below).
    - **Next, in this order** (arxmodel is used in ordinary flows elsewhere too: merging .arxml
      files in CI and in git merges):
      1. *CI and git:*

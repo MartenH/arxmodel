@@ -63,6 +63,7 @@ arxmodel check --rules autosar.rules.txt <file|dir>...                         #
 arxmodel check --schema-dir DIR --format json <file|dir>... > check.json        # or junit: for machines
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
+arxmodel values --schema-dir DIR '/Pkg/**/Name' <file|dir>...  # every value there, `path = "text"`
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
 arxmodel diff A B                                   # what changed, by AUTOSAR path (no schema needed)
 arxmodel merge3 BASE OURS THEIRS -o OUT             # a three-way merge (no schema needed)
@@ -350,6 +351,35 @@ children (where an element name is declared with several types, one order all of
 scoped rule beside its unscoped counterpart, and a child element no role names, under a parent that
 has rules, gets a rule of the kind no rule gives (each its own) for its place. A merged model is
 then written in the order its schema requires.
+
+## Values (`values`)
+
+`values PATTERN <file|dir>...` merges the files as `get` does and prints every value whose path
+the pattern matches, or lies below a path it matches, one a line, `path = "text"` (the text a TOML
+basic string), in the order of the merged view:
+
+```text
+/Pkg/LampCfg/Dim = "10"
+/Pkg/LampCfg/Signal = "/Sig/A"
+/Pkg/Head#WATTS = "55"
+```
+
+A value is an element holding text and no element. One the merge names by its definition (an
+item of the policy's `item_identity` roles, or of the built-in rules' `by_definition`: ECUC
+parameter and reference values) is named by it: its container's path, `/`, and the definition's
+last name, with its variation point's label as a key where it has one (`Dim[v1]`). Of such an
+item, its last element, when that holds text only, is the value itself (the value comes last in
+such an item); its other parts follow a `#` (`/Pkg/LampCfg/Dim#IS-AUTO-VALUE`). Any other value
+is named as findings name elements: its nearest referrable ancestor's path, `#`, and the elements
+below it with their keys. A referrable element's SHORT-NAME is its path, not a value; attributes
+are not values; what the merge does not compare (structured comments) is left out. Where fragments give a value differently, the first file's is printed, as `merge` writes it
+(`check` reports the difference).
+
+The pattern is a path glob, as the policy's filters take them: `*` one segment or part of one,
+`**` any segments, `#` matched only by itself or `**`, a keyed segment matched by its name unless
+the pattern gives the key. `/Pkg/**/Dim` finds a definition's value wherever it is; `/Pkg/LampCfg`
+gives every value of that container and its subcontainers; `/**` every value. A pattern that is a
+file or directory is refused (the pattern comes first). Exit 1 when no value matches.
 
 ## Export (`merge`)
 
