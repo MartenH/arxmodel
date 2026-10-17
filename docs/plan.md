@@ -78,6 +78,10 @@ Each step needs the matching part of flatxml first (its `docs/documents.md`):
    - **Done: values.** `values PATTERN` prints every value a path glob wants as `path = "text"`
      lines, a value named by its definition at its container's path and the definition's last
      name (the form an edit script would take, step 3 below).
+   - **Done: a model kept loaded.** `serve --socket PATH` reads and merges once and answers
+     `get`, `list` and `values` (`--socket PATH` on those) in milliseconds, reading again in a new
+     worker process when any file changed, so answers are never from changed files and memory
+     is one model's.
    - **Next, in this order** (arxmodel is used in ordinary flows elsewhere too: merging .arxml
      files in CI and in git merges):
      1. *CI and git:*
