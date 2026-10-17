@@ -132,4 +132,13 @@ fn test_values_of_a_role_with_no_wrapper() {
 	p := vk_policy('{ "Store.option" = "definition" }')
 	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
 	assert c.values('/Main/**').map(it.line()) == ['/Main/x = "1"', '/Main/y = "2"']
+	// through a rules file, the same: the file records the role
+	sc := vk_schemas(m, p)
+	flat, _ := governing_flat(sc)!
+	text := format_rules(flat, provenance(governing_use(sc)!, p), p.settings())!
+	assert text.contains('\n# direct-identity: OPTION DEFINITION-REF')
+	g, _, st := parse_rules_file(text)!
+	assert g.direct_identities.len == 1
+	d := check_with(m, g, 'rules file', st, p, skip_xml: true, skip_references: true)!
+	assert d.values('/Main/**').map(it.line()) == ['/Main/x = "1"', '/Main/y = "2"']
 }
