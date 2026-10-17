@@ -106,3 +106,25 @@ fn test_a_container_is_no_item_and_an_item_needs_its_definition() {
 	assert vals.any(it.starts_with('/P/Cfg/C#PARAMETER-VALUES/NUMBER-PARAM-VALUE')
 		&& it.ends_with('/VALUE = "5"'))
 }
+
+fn test_the_root_pattern_and_an_ignored_value() {
+	m := load([vdata('compare')]) or { panic(err) }
+	// `/` is the root: every value
+	assert values_by(m, '/', []) == values_by(m, '/**', [])
+	assert values_by(m, '/', []).len == 8
+	parts := values_model('ignored_value', '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>
+<MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><PARAMETERS>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Level</DEFINITION-REF><IS-AUTO>true</IS-AUTO><VALUE>3</VALUE></NUMBER-PARAM-VALUE>
+</PARAMETERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>')
+	// the value itself ignored: no other part takes its place
+	assert values_by(parts, '/P/**', ['VALUE']) == ['/P/Cfg/Level#IS-AUTO = "true"']
+}
+
+fn test_an_element_a_key_reads_is_always_compared() {
+	m := load([vdata('compare')]) or { panic(err) }
+	mut flat := identity_flat(builtin_identity(), [m])
+	keys := flat.key_elements()
+	assert 'SHORT-NAME' in keys && 'DEFINITION-REF' in keys && 'SHORT-LABEL' in keys
+	flat.ignore_content(['SHORT-NAME', 'NOTES'])
+	assert 'NOTES' in flat.ignored_content && 'SHORT-NAME' !in flat.ignored_content
+}

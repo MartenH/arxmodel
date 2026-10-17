@@ -26,6 +26,12 @@ grep -q '^1 value$' dim.log || { cat dim.log; fail 'values does not count what i
 "$bin" values --ignore-element NOTES /Body/Head "$model" > head2.txt 2> /dev/null
 [[ "$(cat head2.txt)" == '/Body/Head#WATTS = "55"' ]] || { cat head2.txt; fail 'values --ignore-element'; }
 
+# an element a key reads cannot be left out: exit 2
+set +e
+"$bin" values --ignore-element SHORT-NAME /Body/Head "$model" > /dev/null 2> key.log
+[[ $? == 2 ]] && grep -q 'a key reads it' key.log || { cat key.log; fail '--ignore-element SHORT-NAME not refused'; }
+set -e
+
 # nothing matching: exit 1; no path pattern: exit 2
 set +e
 "$bin" values '/Nowhere/**' "$model" > /dev/null 2>&1

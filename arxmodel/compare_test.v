@@ -276,3 +276,26 @@ fn test_each_ruling_keeps_its_own_ignored_elements() {
 	c, d := r2.read(old)!, r2.read(new)!
 	assert r2.diff(&c, &d).len > 0
 }
+
+fn test_merge3_a_removal_meets_a_change_not_compared() {
+	text := os.read_file(cdata('compare', 'base.arxml'))!
+	tail := text[text.index('        <LAMP UUID="u2">')?..text.index('</LAMP>\n        <MODULE-VALUES>')? + '</LAMP>\n'.len]
+	note := ['<WATTS>5</WATTS>', '<NOTES><NOTE>x</NOTE></NOTES><WATTS>5</WATTS>']
+	base := version_of('rm_base')
+	removed := version_of('rm_removed', tail, '')
+	noted := version_of('rm_noted', ...note)
+	r, v := builtin_versions(base, removed, noted)
+	assert r.merge3(&v[0], &v[2], &v[1])!.conflicts.len > 0
+	ri := ruling_builtin([base, removed, noted], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	b, rm, nt := ri.read(base)!, ri.read(removed)!, ri.read(noted)!
+	// theirs removed the lamp, ours only changed content not compared in it: removed
+	mut a := ri.merge3(&b, &nt, &rm)!
+	assert a.conflicts == []
+	assert !a.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+	// ours removed it: removed, as ours is kept
+	mut o := ri.merge3(&b, &rm, &nt)!
+	assert o.conflicts == []
+	assert !o.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+}

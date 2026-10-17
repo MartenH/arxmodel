@@ -64,13 +64,42 @@ pub mut:
 	identified &Identified = unsafe { nil }
 }
 
+// key_elements are the elements a key reads: the merge names elements by their text (a short
+// name, a definition, a label), so their content cannot go uncompared.
+pub fn (f &Flat) key_elements() []string {
+	mut out := []string{}
+	mut paths := []string{}
+	for r in f.rules.rules {
+		paths << r.key
+	}
+	for r in f.identity_roles {
+		paths << [r.definition, r.label]
+	}
+	if f.identified != unsafe { nil } {
+		paths << f.identified.id.name
+		paths << f.identified.id.definition
+	}
+	for p in paths {
+		for step in p.split('/') {
+			name := step.trim_right('+')
+			if name != '' && !name.starts_with('@') && name !in out {
+				out << name
+			}
+		}
+	}
+	return out
+}
+
 // ignore_content adds elements whose content the merge does not compare: their differences are
 // no finding, no change and no conflict, and no part of what tells two values apart. Called
 // before the rules are applied (with_settings, merge_rules): with the built-in identity rules it
 // makes their rule anew.
 pub fn (mut f Flat) ignore_content(names []string) {
+	keys := f.key_elements()
 	for name in names {
-		if name !in f.ignored_content {
+		// what names an element (a key reads it) is compared whatever is asked: the command
+		// refuses such a name (key_elements)
+		if name !in f.ignored_content && name !in keys {
 			f.ignored_content << name
 		}
 	}

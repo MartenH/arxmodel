@@ -119,3 +119,16 @@ fn test_an_ignored_element_tells_no_values_apart() {
 	vals.sort()
 	assert vals == ['/Fiction/m = "1"', '/Fiction/m = "2"']
 }
+
+fn test_item_names_two_roles_share() {
+	// another role holding the same item name under another parent: both roles name their items
+	m := vk_model('shared_items', setting('/d/x', '1'))
+	p := vk_policy('{ "Shelf.setting" = "definition" }')
+	mut c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	c.flat.identity_roles << IdentityRole{
+		parent:     'OTHER-SETTINGS'
+		items:      ['SETTING']
+		definition: 'DEFINITION-REF'
+	}
+	assert c.values('/Fiction/**').map(it.line()) == ['/Fiction/x = "1"']
+}

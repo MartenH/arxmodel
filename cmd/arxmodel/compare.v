@@ -41,6 +41,7 @@ fn versions(o Opts, paths []string, quiet bool) !(arxmodel.Ruling, []arxmodel.Ve
 		models << read_version(o, p, quiet)!
 	}
 	ch := choose(o, models, load_policy(o))!
+	ch.check_ignored(o)!
 	if !quiet {
 		eprintln(rules_line(o, ch.name))
 	}

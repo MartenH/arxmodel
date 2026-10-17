@@ -95,8 +95,9 @@ struct ItemIdentity {
 struct ValueWalk {
 	ix  &PathIndex
 	pat []string // the pattern's segments
-	// per name id of the set's table: 1 + the item identity of elements of that name, 0 for none
-	item_of []int
+	// per name id of the set's table: the item identities of elements of that name (several
+	// roles may share an item name, under different parents)
+	item_of [][]int
 	idents  []ItemIdentity
 	skip    []bool // per name id: content the merge does not compare
 mut:
@@ -127,7 +128,7 @@ pub fn (c &Checked) values(pattern string) []Value {
 			skip[id] = true
 		}
 	}
-	mut item_of := []int{len: n}
+	mut item_of := [][]int{len: n}
 	mut idents := []ItemIdentity{}
 	for r in c.flat.identity_roles {
 		parent := tab.id(r.parent) or { continue }
@@ -138,7 +139,7 @@ pub fn (c &Checked) values(pattern string) []Value {
 		}
 		for item in r.items {
 			if id := tab.id(item) {
-				item_of[id] = idents.len
+				item_of[id] << idents.len - 1
 			}
 		}
 	}
@@ -152,15 +153,19 @@ pub fn (c &Checked) values(pattern string) []Value {
 		}
 		for k in 2 .. n {
 			name := tab.name(u32(k))
-			if item_of[k] == 0 && !name.contains_u8(`:`) && !name.starts_with('{')
+			if !name.contains_u8(`:`) && !name.starts_with('{')
 				&& id.by_definition.any(glob(it, name)) {
-				item_of[k] = idents.len
+				item_of[k] << idents.len - 1
 			}
 		}
 	}
+	mut pat := segments(pattern)
+	if pat.len == 0 {
+		pat = ['**'] // `/`: the root, so every value
+	}
 	mut w := ValueWalk{
 		ix:      c.index
-		pat:     segments(pattern)
+		pat:     pat
 		item_of: item_of
 		idents:  idents
 		skip:    skip
@@ -248,28 +253,23 @@ fn (mut w ValueWalk) visit(n flatxml.MNode, inner bool, below bool) {
 // the merge then does not name it by one.
 fn (w &ValueWalk) identity_of(n flatxml.MNode) int {
 	tag := n.tag()
-	if int(tag) >= w.item_of.len || w.item_of[tag] == 0 {
+	if int(tag) >= w.item_of.len {
 		return -1
 	}
-	k := w.item_of[tag] - 1
-	if w.idents[k].parent != any_parent && n.parent().tag() != w.idents[k].parent {
-		return -1
-	}
-	if path_text(n, w.idents[k].def) == '' {
-		return -1
-	}
-	return k
-}
-
-// item_parts collects an item's values: its last element, when that holds text only, at the
-// item's path; the rest after `#`. The definition is its name, not a value.
-fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
-	mut last := u32(0xFFFF_FFFF)
-	for c in n.children() {
-		if w.is_part(c, id) {
-			last = c.i
+	for k in w.item_of[tag] {
+		id := w.idents[k]
+		if (id.parent == any_parent || n.parent().tag() == id.parent)
+			&& path_text(n, id.def) != '' {
+			return k
 		}
 	}
+	return -1
+}
+
+// item_parts collects an item's values: its value (terminal) at the item's path when it holds
+// text only and is compared; the rest after `#`. The definition is its name, not a value.
+fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
+	last := terminal(n, id)
 	for c in n.children() {
 		if !w.is_part(c, id) {
 			continue
@@ -282,6 +282,35 @@ fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
 		}
 		w.visit(c, false, all)
 	}
+}
+
+// terminal is the merged child that is an item's value: the last element (after its definition)
+// that the item's first fragment holding any writes, as the file has it and whatever is ignored,
+// so neither the merge's order nor an ignored value makes another part the value. No node where
+// no fragment holds one.
+fn terminal(n flatxml.MNode, id ItemIdentity) u32 {
+	for k in 0 .. n.fragment_count() {
+		f := n.fragment(k)
+		mut best := u32(0xFFFF_FFFF)
+		mut at := u32(0)
+		for c in n.children() {
+			tag := c.tag()
+			if tag == flatxml.text_tag || (id.def.len > 0 && tag == id.def[0]) {
+				continue
+			}
+			for j in 0 .. c.fragment_count() {
+				cf := c.fragment(j)
+				if voidptr(cf.doc) == voidptr(f.doc) && cf.parent().i == f.i
+					&& (best == u32(0xFFFF_FFFF) || cf.i > at) {
+					best, at = c.i, cf.i
+				}
+			}
+		}
+		if best != u32(0xFFFF_FFFF) {
+			return best
+		}
+	}
+	return u32(0xFFFF_FFFF)
 }
 
 // is_part reports whether a child of an item is one of its values' parts: an element, not its

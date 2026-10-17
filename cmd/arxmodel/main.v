@@ -771,6 +771,10 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 		eprintln(err.msg())
 		exit(2)
 	}
+	ch.check_ignored(o) or {
+		eprintln(err.msg())
+		exit(2)
+	}
 	sc := ch.sc
 	print_undeclared(out, m, sc)
 	if ch.typing == unsafe { nil } {

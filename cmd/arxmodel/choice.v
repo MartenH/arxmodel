@@ -81,6 +81,17 @@ fn choose(o Opts, models []&arxmodel.Model, policy arxmodel.Policy) !Chosen {
 	}
 }
 
+// check_ignored refuses an element to leave uncompared that a key reads: the merge names
+// elements by its text (a short name, a definition), so it is always compared.
+fn (ch &Chosen) check_ignored(o Opts) ! {
+	keys := ch.flat.key_elements()
+	for name in o.ignore_el {
+		if name in keys {
+			return error('--ignore-element ${name}: the merge names elements by it (a key reads it), so it is always compared')
+		}
+	}
+}
+
 // check_by checks a model by the rules chosen for it (the model they were chosen for): every
 // layer with a schema, the merge and references otherwise.
 fn check_by(ch &Chosen, m &arxmodel.Model, policy arxmodel.Policy, opts arxmodel.CheckOptions) !arxmodel.Checked {
