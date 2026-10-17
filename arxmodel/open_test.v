@@ -374,6 +374,20 @@ fn test_files_giving_one_element_two_values_say_so() {
 		deep.free()
 	}
 	assert deep.findings.map(it.path) == ['/P/F#DESC']
+	// text is never taken for structure, and a CDATA boundary is no difference
+	text_or := fn (body string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><DESC>${body}</DESC>')
+	}
+	mut lit := open_sources([src('a.arxml', text_or('&lt;L-2&gt;hello')), src('b.arxml', text_or('<L-2>hello</L-2>'))])!
+	defer {
+		lit.free()
+	}
+	assert lit.findings.map(it.path) == ['/P/F#DESC']
+	mut cdata := open_sources([src('a.arxml', text_or('a <![CDATA[b]]>')), src('b.arxml', text_or('a b'))])!
+	defer {
+		cdata.free()
+	}
+	assert cdata.findings.len == 0, cdata.findings.str()
 	// nor is a name one file repeats: those are matched by place
 	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
 	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!

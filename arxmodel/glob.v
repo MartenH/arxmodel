@@ -1,6 +1,5 @@
 module arxmodel
 
-import math
 import os
 
 // File globs, one matcher for the input set's globs and excludes and the filters' `file`: `*`
@@ -36,15 +35,15 @@ pub fn compile_file_glob(glob string) FileGlob {
 	segs := norm.split('/').filter(it != '' && it != '.')
 	// the volume an absolute path is on (a drive, or a UNC share's server and share), which `..`
 	// never leaves: at the root it stays there, as the file system has it
-	unc := $if windows { norm.starts_with('//') } $else { false }
-	volume := if !abs || segs.len == 0 {
-		0
-	} else if unc {
-		math.min(2, segs.len)
-	} else if segs[0].ends_with(':') {
-		1
-	} else {
-		0
+	mut volume := 0
+	$if windows {
+		if abs && segs.len > 0 {
+			if norm.starts_with('//') {
+				volume = if segs.len < 2 { segs.len } else { 2 }
+			} else if segs[0].len == 2 && segs[0][1] == `:` && segs[0][0].is_letter() {
+				volume = 1
+			}
+		}
 	}
 	mut pat := []string{cap: segs.len}
 	for seg in segs {

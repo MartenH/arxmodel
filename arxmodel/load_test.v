@@ -201,6 +201,10 @@ fn test_an_exclude_matches_any_spelling_of_a_file() {
 	assert compile_file_glob('a/../b').pat == ['a', '..', 'b']
 	// and never past the root, or the volume it is on
 	assert compile_file_glob('/../a/*.arxml').pat == ['a', '*.arxml']
+	$if !windows {
+		// where a drive is no volume, a name ending in a colon is a name
+		assert compile_file_glob('/cache:/../model/a.arxml').pat == ['model', 'a.arxml']
+	}
 	$if windows {
 		assert compile_file_glob('C:/../**/*.arxml').pat == ['C:', '**', '*.arxml']
 		assert compile_file_glob('//srv/share/../../x.arxml').pat == ['srv', 'share', 'x.arxml']

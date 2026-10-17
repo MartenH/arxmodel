@@ -145,7 +145,7 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	if opts.rules_file == '' && opts.schema_dir == '' {
 		nm := naming(flat.rules.local_ns, [m])
 		_, ignored := st.apply(m, copts)
-		mut ignore := map[string]bool{}
+		mut ignore := ignored_identities(ignored, [m])
 		for a in ignored {
 			ignore[a] = true
 		}
@@ -194,7 +194,8 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 // its place, each file's apart; so under a merged element, the children of one name and
 // attributes that each file gives once (a frame's FRAME-LENGTH) are one element of the model,
 // read from the first file, and content in which they differ is a finding, as the merge makes
-// one. Attributes the merge ignores (ignore) are no part of either.
+// one. Attributes the merge ignores (ignore: by name, and by the identity any document gives a
+// name ignored) are no part of either.
 fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, nm &Naming, ignore map[string]bool) []Finding {
 	mut out := []Finding{}
 	mut slots := map[voidptr]int{}
@@ -261,9 +262,10 @@ fn doc_number(mut slots map[voidptr]int, d &flatxml.Doc) int {
 }
 
 // write_open writes an element's name and attributes, as the merge names them, the attributes
-// sorted (their order tells nothing apart) and those in ignore left out.
+// sorted (their order tells nothing apart) and those in ignore left out; each part
+// length-prefixed, so no text can pass for a part.
 fn write_open(mut sb strings.Builder, n flatxml.Node, nm &Naming, ignore map[string]bool) {
-	sb.write_string(nm.node_name(n))
+	write_part(mut sb, nm.node_name(n))
 	lo, hi := n.doc.attr_range(n.i)
 	mut attrs := []string{}
 	for a := lo; a < hi; a++ {
@@ -274,17 +276,26 @@ fn write_open(mut sb strings.Builder, n flatxml.Node, nm &Naming, ignore map[str
 		if id in ignore || n.doc.attr_name(a) in ignore {
 			continue
 		}
-		attrs << '${id}=${n.doc.attr_value(a)}'
+		mut ab := strings.new_builder(id.len + 16)
+		write_part(mut ab, id)
+		write_part(mut ab, n.doc.attr_value(a))
+		attrs << ab.str()
 	}
 	attrs.sort()
+	sb.write_string('${attrs.len}@')
 	for x in attrs {
-		sb.write_string(flatxml.key_sep)
 		sb.write_string(x)
 	}
 }
 
+fn write_part(mut sb strings.Builder, s string) {
+	sb.write_string('${s.len}:')
+	sb.write_string(s)
+}
+
 // canonical is an element's whole content, as one string: its name and attributes (write_open),
-// its own text runs trimmed, and its children so, in document order.
+// its own text in each slot among its children (the runs of one slot joined, then trimmed) and
+// its children so, in document order.
 fn canonical(n flatxml.Node, nm &Naming, ignore map[string]bool) string {
 	mut sb := strings.new_builder(64)
 	write_canonical(mut sb, n, nm, ignore)
@@ -294,23 +305,28 @@ fn canonical(n flatxml.Node, nm &Naming, ignore map[string]bool) string {
 fn write_canonical(mut sb strings.Builder, n flatxml.Node, nm &Naming, ignore map[string]bool) {
 	sb.write_u8(`<`)
 	write_open(mut sb, n, nm, ignore)
-	sb.write_u8(`>`)
 	runs := n.text_runs()
 	mut r := 0
 	mut slot := 0
+	mut kids := []flatxml.Node{}
 	for c in n.children() {
+		kids << c
+	}
+	for {
+		mut text := strings.new_builder(16)
 		for r < runs.len && runs[r].slot == slot {
-			sb.write_string(runs[r].text.trim_space())
+			text.write_string(runs[r].text)
 			r++
 		}
-		write_canonical(mut sb, c, nm, ignore)
+		t := text.str()
+		write_part(mut sb, t.trim_space())
+		if slot >= kids.len {
+			break
+		}
+		write_canonical(mut sb, kids[slot], nm, ignore)
 		slot++
 	}
-	for r < runs.len {
-		sb.write_string(runs[r].text.trim_space())
-		r++
-	}
-	sb.write_string('</>')
+	sb.write_u8(`>`)
 }
 
 // model_namespace is the namespace a model is in: the one most of its documents' roots are in,
