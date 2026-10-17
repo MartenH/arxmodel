@@ -513,16 +513,19 @@ fn cmd_serve(o Opts) {
 		eprintln('serve: ${err.msg()}')
 		exit(2)
 	}
+	// removed on every way out: exit does not run a function's defers
 	defer {
 		os.rmdir_all(dir) or {}
 	}
 	mut started := 1
 	mut w := start_worker(o, worker_socket(dir, started)) or {
+		os.rmdir_all(dir) or {}
 		eprintln('serve: ${err.msg()}')
 		exit(2)
 	}
 	mut l := listen_private(o.socket) or {
 		w.stop()
+		os.rmdir_all(dir) or {}
 		eprintln('serve: ${o.socket}: ${err.msg()}')
 		exit(2)
 	}

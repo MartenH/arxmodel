@@ -56,6 +56,7 @@ module main
 
 import arxmodel
 import os
+import strconv
 import strings
 import time
 
@@ -481,7 +482,12 @@ fn parse_opts(args []string) !Opts {
 					'--format' { o.format = v }
 					'--diff' { o.diff = v }
 					'--socket' { o.socket = v }
-					'--idle' { o.idle = v.int() }
+					'--idle' {
+						o.idle = strconv.atoi(v) or { -2 }
+						if o.idle < 0 {
+							return error('--idle takes minutes, a whole number of 0 or more (0: never), not ${v}')
+						}
+					}
 					else { o.dump = v }
 				}
 				k += 2

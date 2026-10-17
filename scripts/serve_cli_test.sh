@@ -102,6 +102,17 @@ set +e
 set -e
 [[ "$(cat notasocket)" == keep ]] || fail 'a file at --socket was removed'
 
+# --idle takes a whole number; a server that cannot start leaves no directory behind
+set +e
+timeout 10 "$bin" serve --socket x.sock --idle 6O m.arxml > /dev/null 2> idle.log
+[[ $? == 2 ]] && grep -q 'idle takes minutes' idle.log || { cat idle.log; fail '--idle 6O'; }
+before=$(ls -d "${TMPDIR:-/tmp}"/arxmodel-* 2> /dev/null | wc -l)
+echo '<MODEL><broken' > broken.arxml
+timeout 20 "$bin" serve --socket x.sock broken.arxml > /dev/null 2>&1
+[[ $? == 2 ]] || fail 'a server on a broken file started'
+[[ $(ls -d "${TMPDIR:-/tmp}"/arxmodel-* 2> /dev/null | wc -l) == "$before" ]] || fail 'a failed start left its directory'
+set -e
+
 # --reload; a second server at the socket; asking with files
 "$bin" serve --socket s.sock --reload 2> reload.log || { cat reload.log; fail '--reload'; }
 grep -q 'read again: ' reload.log || { cat reload.log; fail '--reload not said'; }
