@@ -15,7 +15,7 @@ cleanup() {
 	cd / && rm -rf "$work"
 }
 trap cleanup EXIT
-unset ARXMODEL_SCHEMA_DIR
+unset ARXMODEL_SCHEMA_DIR XDG_RUNTIME_DIR # the workers' directory in TMPDIR, looked for there
 export XDG_CONFIG_HOME="$work/config"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 cp "$root/testdata/compare/base.arxml" m.arxml
@@ -94,6 +94,14 @@ set +e
 [[ $? == 2 ]] && grep -q 'takes no --policy' opt.log || { cat opt.log; fail 'a model option with --socket'; }
 set -e
 
+# --verbose with --socket: refused too; a pattern that is a path here is the server's still
+set +e
+"$bin" values --socket s.sock --verbose '/**/Dim' > /dev/null 2> verb.log
+[[ $? == 2 ]] && grep -q 'takes no --verbose' verb.log || { cat verb.log; fail '--verbose with --socket'; }
+"$bin" values --socket s.sock /tmp > /dev/null 2> tmp.log
+[[ $? == 1 ]] || { cat tmp.log; fail 'a pattern naming a local path refused with --socket'; }
+set -e
+
 # a file at the socket path of another server is not removed
 echo keep > notasocket
 set +e
@@ -132,6 +140,13 @@ dirs_before=$(ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* 2> /dev/null | wc -l)
 kill -9 "$killed"
 for _ in $(seq 1 160); do ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/null 2>&1 || break; sleep 0.1; done
 ! ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/null 2>&1 || fail 'an orphaned worker left its directory'
+# its socket is left, and not taken for stale: said, not removed
+[[ -S k.sock ]] || fail 'the killed server socket gone'
+set +e
+"$bin" serve --socket k.sock m.arxml > /dev/null 2> stale.log
+[[ $? == 2 ]] && grep -q 'remove it if a server was killed' stale.log || { cat stale.log; fail 'a stale socket'; }
+set -e
+[[ -S k.sock ]] || fail 'a stale socket removed'
 rm -f k.sock
 
 # a long TMPDIR: the workers' sockets go where their paths fit
@@ -144,6 +159,18 @@ for _ in $(seq 1 200); do [[ -S l.sock ]] && break; sleep 0.05; done
 "$bin" values --socket l.sock '/**/Dim' > /dev/null 2>&1 || fail 'no answer with a long TMPDIR'
 "$bin" serve --socket l.sock --stop > /dev/null 2>&1
 for _ in $(seq 1 100); do kill -0 $longserver 2> /dev/null || break; sleep 0.05; done
+
+# a base others may rename in (not sticky, not this user's alone): refused; XDG_RUNTIME_DIR used
+mkdir -p open && chmod 777 open
+set +e
+TMPDIR="$work/open" timeout 20 "$bin" serve --socket o.sock m.arxml > /dev/null 2> open.log
+[[ $? == 2 ]] && grep -q 'not sticky' open.log || { cat open.log; fail 'a worker directory in a shared, not sticky, directory'; }
+set -e
+mkdir -p run && chmod 700 run
+XDG_RUNTIME_DIR="$work/run" "$bin" serve --socket r.sock m.arxml > run.log 2>&1 &
+for _ in $(seq 1 200); do [[ -S r.sock ]] && break; sleep 0.05; done
+ls -d run/arxmodel-* > /dev/null 2>&1 || { cat run.log; fail 'XDG_RUNTIME_DIR not used'; }
+"$bin" serve --socket r.sock --stop > /dev/null 2>&1
 
 # --idle takes a whole number; a server that cannot start leaves no directory behind
 set +e

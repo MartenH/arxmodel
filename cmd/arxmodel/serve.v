@@ -43,26 +43,36 @@ fn (a Answer) emit() {
 	exit(a.code)
 }
 
-// values_pattern_error is why a pattern is none, or none.
-fn values_pattern_error(pattern string) ?string {
+// values_pattern_error is why a pattern is none, or none. Read locally (files given), a path that
+// is a file here is a file put first; asked of a server, no file here is one of its.
+fn values_pattern_error(pattern string, local bool) ?string {
 	if (!pattern.starts_with('/') && !pattern.starts_with('#') && !pattern.starts_with('**'))
-		|| (pattern != '/' && os.exists(pattern)) {
+		|| (local && pattern != '/' && os.exists(pattern)) {
 		return 'values: ${pattern} is no path pattern (/Pkg/Name, /Pkg/**/Name, ...): the pattern comes before the files'
 	}
 	return none
 }
 
+// Written is an answer's text as it is written, shared with the function writing it.
+@[heap]
+struct Written {
+mut:
+	sb strings.Builder
+}
+
 // answer_values is every value a path pattern wants, one a line: `path = "text"`.
 fn answer_values(c &arxmodel.Checked, pattern string) Answer {
-	vals := c.values(pattern)
-	mut sb := strings.new_builder(vals.len * 64 + 16)
-	for v in vals {
-		sb.writeln(v.line())
+	// each value written as found: no list of them beside the answer
+	mut o := &Written{
+		sb: strings.new_builder(4096)
 	}
+	n := c.each_value(pattern, fn [mut o] (v arxmodel.Value) {
+		o.sb.writeln(v.line())
+	})
 	return Answer{
-		out:  sb.str()
-		err:  '${plural(vals.len, 'value')}\n'
-		code: if vals.len == 0 { 1 } else { 0 }
+		out:  o.sb.str()
+		err:  '${plural(n, 'value')}\n'
+		code: if n == 0 { 1 } else { 0 }
 	}
 }
 
@@ -210,6 +220,18 @@ fn is_socket(path string) bool {
 }
 
 fn C.umask(mask u32) u32
+
+fn C.dup2(oldfd int, newfd int) int
+
+// worker_error is why a worker stopped, from what it wrote on the way out: its last lines, the
+// reading's progress before them left out.
+fn worker_error(text string) ?string {
+	lines := text.split_into_lines().map(it.trim_space()).filter(it != '')
+	if lines.len == 0 {
+		return none
+	}
+	return lines[if lines.len > 2 { lines.len - 2 } else { 0 }..].join('; ')
+}
 
 // listen_private listens at a socket only its owner can use: made so (umask) and kept so (chmod),
 // or refused. Not on Windows, where a socket takes its directory's access list, which may let
@@ -376,7 +398,9 @@ fn start_worker(o Opts, socket string) !Worker {
 			p.wait()
 			code := p.code
 			p.close()
-			why := os.read_file('${socket}.err') or { 'exit ${code}; the server log says why' }
+			why := worker_error(os.read_file('${socket}.err') or { '' }) or {
+				'exit ${code}; the server log says why'
+			}
 			os.rm('${socket}.err') or {}
 			return error(why)
 		}
@@ -427,13 +451,26 @@ fn worker_socket(dir string, n int) string {
 
 // private_dir makes a directory for the workers' sockets that only this user can enter: not the
 // server's own directory, which others may write in (/tmp), where one could take a worker's path.
+// In XDG_RUNTIME_DIR where there is one (this user's own), else the temporary directory; either
+// must keep others from renaming what it holds (this user's alone, or sticky like /tmp).
 fn private_dir() !string {
 	name := 'arxmodel-${os.getpid()}-${time.now().unix_milli()}'
-	mut dir := os.join_path(os.temp_dir(), name)
-	// a socket path is at most about 100 bytes (104 on some systems): a long TMPDIR is not used
-	if worker_socket(dir, 99999).len >= 100 {
-		dir = os.join_path('/tmp', name)
+	mut base := os.getenv('XDG_RUNTIME_DIR')
+	// a socket path is at most about 100 bytes (104 on some systems): a long base is not used
+	if base == '' || !os.is_abs_path(base) || worker_socket(os.join_path(base, name), 99999).len >= 100 {
+		base = os.temp_dir()
 	}
+	if worker_socket(os.join_path(base, name), 99999).len >= 100 {
+		base = '/tmp'
+	}
+	$if !windows {
+		st := os.stat(base)!
+		mine := st.uid == u32(os.getuid()) && st.mode & 0o022 == 0
+		if !mine && st.mode & 0o1000 == 0 {
+			return error('${base}: others may rename what it holds (not sticky): set TMPDIR to a directory of your own')
+		}
+	}
+	dir := os.join_path(base, name)
 	os.mkdir(dir, mode: 0o700)!
 	$if !windows {
 		st := os.stat(dir)!
@@ -450,18 +487,27 @@ fn private_dir() !string {
 fn serve_worker(o Opts) {
 	// the server, recorded before reading: gone while this reads, the worker is someone else's child
 	parent := os.getppid()
+	// what the reading says on the way out (a file gone, a schema not found) is the server's to
+	// answer with: stderr goes to a file beside the socket until the worker listens
+	errs := '${o.socket}.err'
+	$if !windows {
+		if f := os.open_file(errs, 'w', 0o600) {
+			C.dup2(f.fd, 2)
+		}
+	}
 	m, _, c, _ := merged(o, Out{
 		err: true
 	}, read_options(o))
 	if m.failed.len > 0 {
 		// no answer from a part of the files: the server says why, from this file
-		os.write_file('${o.socket}.err', m.failed.map(it.msg).join('; ')) or {}
+		os.write_file(errs, m.failed.map(it.msg).join('; ')) or {}
 		exit(1)
 	}
 	mut l := listen_private(o.socket) or {
 		eprintln('serve: ${o.socket}: ${err.msg()}')
 		exit(2)
 	}
+	os.rm(errs) or {}
 	l.set_accept_timeout(5 * time.second)
 	mut orphan := false
 	for {
@@ -514,10 +560,14 @@ fn serve_worker(o Opts) {
 	}
 	l.close() or {}
 	if orphan {
-		// the server died without removing its workers' directory: this worker does
+		// the server died without removing its workers' directory: this worker does, where it is
+		// the one that server made (named by its pid), and only what the workers put there; a
+		// directory holding anything else is left
 		dir := os.dir(o.socket)
-		if os.file_name(dir).starts_with('arxmodel-') {
-			os.rmdir_all(dir) or {}
+		if os.file_name(dir).starts_with('arxmodel-${parent}-') {
+			os.rm(o.socket) or {}
+			os.rm('${o.socket}.err') or {}
+			os.rmdir(dir) or {}
 		}
 	}
 }
@@ -543,17 +593,23 @@ fn cmd_serve(o Opts) {
 		eprintln('serve needs the files to serve')
 		exit(2)
 	}
+	$if windows {
+		eprintln('serve: not offered on Windows: a socket there is not made its owner alone')
+		exit(2)
+	}
 	if os.exists(o.socket) {
 		if mut conn := unix.connect_stream(o.socket) {
 			conn.close() or {}
 			eprintln('serve: a server answers at ${o.socket} already')
 			exit(2)
 		}
-		if !is_socket(o.socket) {
-			eprintln('serve: ${o.socket} is there and is no socket: not removed (another --socket?)')
-			exit(2)
-		}
-		os.rm(o.socket) or {} // a server that stopped without removing it
+		// not removed: whether it is a stale server's or another program's cannot be told safely
+		eprintln('serve: ${o.socket} is there and no server answers at it: not removed (${if is_socket(o.socket) {
+			'remove it if a server was killed'
+		} else {
+			'it is no socket: another --socket?'
+		}})')
+		exit(2)
 	}
 	dir := private_dir() or {
 		eprintln('serve: ${err.msg()}')
@@ -576,9 +632,8 @@ fn cmd_serve(o Opts) {
 		exit(2)
 	}
 	idle := if o.idle < 0 { 60 } else { o.idle }
-	if idle > 0 {
-		l.set_accept_timeout(idle * time.minute)
-	}
+	// idle minutes count from the last request: a connection asking nothing does not count
+	mut last := time.now()
 	eprintln('serving ${plural(w.files, 'file')} at ${o.socket}${if idle > 0 {
 		', stopping after ${idle} idle minutes'
 	} else {
@@ -586,7 +641,13 @@ fn cmd_serve(o Opts) {
 	}}')
 	for {
 		if idle > 0 {
-			// the listener blocks, so accept alone waits for ever: wait the idle time first
+			// the listener blocks, so accept alone waits for ever: wait the idle time left first
+			left := idle * time.minute - time.since(last)
+			if left <= 0 {
+				eprintln('serve: idle for ${idle} minutes, stopping')
+				break
+			}
+			l.set_accept_timeout(left)
 			l.wait_for_accept() or {
 				eprintln('serve: idle for ${idle} minutes, stopping')
 				break
@@ -601,6 +662,7 @@ fn cmd_serve(o Opts) {
 			conn.close() or {} // nothing asked in time
 			continue
 		}
+		last = time.now()
 		cmd, arg := req.all_before('\t'), req.all_after('\t')
 		if cmd == 'stop' {
 			send(mut conn, Answer{

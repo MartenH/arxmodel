@@ -854,7 +854,7 @@ fn cmd_get(o Opts) {
 // cmd_values prints every value a path pattern wants, one a line: `path = "text"` (answer_values).
 fn cmd_values(o Opts) {
 	if o.paths.len > 0 {
-		if why := values_pattern_error(o.paths[0]) {
+		if why := values_pattern_error(o.paths[0], o.socket == '') {
 			eprintln(why)
 			exit(2)
 		}
@@ -884,7 +884,8 @@ fn cmd_list(o Opts) {
 // or, with --socket, the answer of the server there, printed (and exit).
 fn read_for(o Opts, cmd string, what string) (string, arxmodel.Checked) {
 	if o.socket != '' {
-		for a in ['--schema-dir', '--rules', '--no-schema', '--policy', '--jobs', '--exclude'] {
+		for a in ['--schema-dir', '--rules', '--no-schema', '--policy', '--jobs', '--exclude',
+			'--verbose'] {
 			if a in o.given {
 				eprintln('${cmd} --socket takes no ${a}: the server reads by the options it was started with')
 				exit(2)
