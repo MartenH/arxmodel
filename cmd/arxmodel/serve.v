@@ -1,6 +1,7 @@
 module main
 
 import arxmodel
+import net
 import net.unix
 import os
 import strings
@@ -191,6 +192,10 @@ fn read_request(mut conn unix.StreamConn) string {
 
 const request_timeout = 5 * time.second
 
+// answer_timeout is how long an answer is written for: arxmodel reads an answer whole before it
+// prints it, so only a client that does not read takes it.
+const answer_timeout = 10 * time.second
+
 // is_socket reports whether path is a socket: only a socket left behind is removed, never a file
 // a mistyped --socket names.
 fn is_socket(path string) bool {
@@ -220,8 +225,12 @@ fn listen_private(socket string) !&unix.StreamListener {
 	}
 }
 
-// send writes an answer.
+// send writes an answer within one deadline (answer_timeout), the socket made not to block so the
+// deadline holds: a client that asks and does not read holds no one up.
 fn send(mut conn unix.StreamConn, a Answer) {
+	net.set_blocking(conn.sock.handle, false) or {}
+	conn.set_write_timeout(0)
+	conn.set_write_deadline(time.now().add(answer_timeout))
 	conn.write_string('${a.code} ${a.out.len} ${a.err.len}\n${a.out}${a.err}') or {}
 }
 
