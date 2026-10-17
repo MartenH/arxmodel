@@ -305,3 +305,24 @@ fn test_key_part_is_what_split_gives() {
 	}
 	assert fold_cmp('Abc', 'aBC') == 0 && fold_cmp('a', 'B') < 0 && fold_cmp('b', 'A') > 0
 }
+
+fn test_an_ignored_element_is_no_difference_of_a_repetition() {
+	pallet := fn (label string) string {
+		return '<ITEMS><BOOK><SHORT-NAME>Dune</SHORT-NAME><PALLETS><PALLET>${label}<CONTENTS><ITEM>sand</ITEM></CONTENTS></PALLET></PALLETS></BOOK></ITEMS>'
+	}
+	m := lib_files('ignored', ['', pallet('')], ['', pallet('<LABEL>x</LABEL>')])
+	p := default_policy()
+	sc := compile_schemas(m, os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: p)
+	c := check(m, sc, skip_xml: true, skip_references: true, skip_multiplicity: true)!
+	assert c.findings.any(it.kind == 'repeated_differs')
+	d := check(m, sc,
+		skip_xml:          true
+		skip_references:   true
+		skip_multiplicity: true
+		ignore_elements:   [
+			'LABEL',
+		]
+	)!
+	assert !d.findings.any(it.layer == .merge)
+	assert count_named(d, 'PALLET') == 1
+}

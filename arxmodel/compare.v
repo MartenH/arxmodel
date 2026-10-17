@@ -81,9 +81,11 @@ pub fn new_ruling(flat0 Flat, name string, st Settings, ty &Typing, models []&Mo
 		}
 	}
 	mut flat := flat0
+	flat.ignore_content(opts.ignore_elements)
 	flat.rules = with_settings(flat0.rules, r.fold, r.ignore)
 	mut ch := new_content_hashes(r.ignore, naming(flat.rules.local_ns, models))
 	ch.observe_ignored(models)
+	ch.skip_elements(flat.ignored_content)
 	flat.rules = flat.merge_rules(models, mut ch)
 	r.flat = flat
 	for k, rule in flat.rules.rules {

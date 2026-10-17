@@ -83,6 +83,9 @@ pub mut:
 	lists map[string]bool // element names some document holds as a list of named elements
 	// `definition sep label` of values given more than once under one parent
 	multi map[string]bool
+	// elements whose content the merge does not compare (Flat.ignore_content): no part of a
+	// value's content
+	ignored []string
 mut:
 	// per name table seen by `observe`, what depends only on names, decided once; keys are
 	// read for every element, so they read these instead of matching and looking up strings
@@ -206,7 +209,7 @@ fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 			return none
 		}
 		if first == '' && k in x.multi {
-			return k + flatxml.key_sep + content_of(n, x.id.value_role(), x.nm)
+			return k + flatxml.key_sep + content_of(n, x.id.value_role(), x.nm, x.ignored)
 		}
 		return first + flatxml.key_sep + k
 	}
@@ -318,5 +321,6 @@ pub fn (x &Identified) flat() Flat {
 		}
 		described:         ['built-in identity']
 		unkeyed_by_design: true
+		identified:        x
 	}
 }

@@ -32,6 +32,8 @@ mut:
 	names    map[voidptr][]u64 // per name table: each name's hash, 0 until computed
 	// repeat_key's scratch, kept between parents: one parent's items, (hash, position) each
 	sibs []HashAt
+	// elements whose content the merge does not compare, by name: no part of a hash
+	skip []string
 }
 
 // HashAt is an item's content hash and its place among its parent's children.
@@ -53,6 +55,11 @@ pub fn new_content_hashes(ignore []string, nm Naming) &ContentHashes {
 		ignore: ignore.clone()
 		nm:     nm
 	}
+}
+
+// skip_elements leaves elements whose content the merge does not compare out of every hash.
+pub fn (mut ch ContentHashes) skip_elements(names []string) {
+	ch.skip = names.clone()
 }
 
 // observe_ignored records, in every document of the models, the identity of each attribute
@@ -132,7 +139,7 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 	for c != flatxml.no_node {
 		if d.is_text(c) {
 			h = mix_text(h, slot, d, c)
-		} else if d.is_element(c) {
+		} else if d.is_element(c) && (ch.skip.len == 0 || ch.nm.name(d, c) !in ch.skip) {
 			slot++
 			h = mix(h, ch.hash_at(k, d, c))
 		}

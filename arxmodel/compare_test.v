@@ -206,3 +206,29 @@ fn test_an_emptied_list_is_the_list() {
 	r, v := builtin_versions(base, empty)
 	assert change_lines(r.diff(&v[0], &v[1])) == ['- /Body/Head', '- /Body/LampCfg', '- /Body/Tail']
 }
+
+fn test_ignored_elements_are_no_change() {
+	sig_a := '<VALUE-REF DEST="SIGNAL">/Sig/A</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	// a reference given two values (a set, its values told apart by their content)
+	two := fn [sig_a] (note string) string {
+		return sig_a + '
+            <SIGNAL-REFERENCE-VALUE>${note}
+              <DEFINITION-REF DEST="REF-DEF">/Defs/Lamp/Signal</DEFINITION-REF>
+              <VALUE-REF DEST="SIGNAL">/Sig/B</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	}
+	note := '<NOTES><NOTE>derived</NOTE></NOTES>'
+	old := version_of('ig_old', sig_a, two(''))
+	// the same values, a note added to one of the set and to a value of one definition
+	new := version_of('ig_new', sig_a, two(note), '<VALUE>10</VALUE>', '${note}<VALUE>10</VALUE>')
+	r, v := builtin_versions(old, new)
+	compared := change_lines(r.diff(&v[0], &v[1]))
+	assert compared.any(it.starts_with('- /Body/LampCfg#REFERENCES/SIGNAL-REFERENCE-VALUE'))
+	assert compared.any(it.contains('/NOTES'))
+	ri := ruling_builtin([old, new], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	a, b := ri.read(old)!, ri.read(new)!
+	assert ri.diff(&a, &b) == []
+}

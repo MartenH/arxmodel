@@ -57,8 +57,25 @@ pub mut:
 	identity_roles []IdentityRole
 	// rules of non-splittable roles allowed in several fragments only as identical repetitions
 	repeat_rules []int
-	// elements whose content a merge does not compare (structured comments, by the policy)
+	// elements whose content a merge does not compare (structured comments, by the policy; and
+	// those CheckOptions.ignore_elements names)
 	ignored_content []string
+	// the built-in identity rules' keys, which read ignored_content too; nil for a schema's rules
+	identified &Identified = unsafe { nil }
+}
+
+// ignore_content adds elements whose content the merge does not compare: their differences are
+// no finding, no change and no conflict, and no part of what tells two values apart.
+pub fn (mut f Flat) ignore_content(names []string) {
+	for name in names {
+		if name !in f.ignored_content {
+			f.ignored_content << name
+		}
+	}
+	if f.identified != unsafe { nil } {
+		mut x := f.identified
+		x.ignored = f.ignored_content.clone()
+	}
 }
 
 // Conflict is an element pair under a parent path that roles of different holders still give
@@ -750,6 +767,10 @@ pub:
 	case_sensitive    bool     // keys compared as written, whatever the settings say
 	ignore_attrs      []string // attributes that may differ, besides the settings'
 	compare_attrs     []string // attributes the settings let differ that are compared after all
+	// elements whose content is not compared, besides the policy's structured comments
+	// (ANNOTATIONS, ADMIN-DATA): their differences are no finding, no change and no conflict, and
+	// no part of what tells two values apart
+	ignore_elements []string
 }
 
 // Settings are a merge's case and attribute settings: the policy's when the rules come from the
@@ -981,9 +1002,11 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
+	flat.ignore_content(opts.ignore_elements)
 	flat.rules = with_settings(flat0.rules, fold, ignore)
 	mut ch := new_content_hashes(ignore, naming(flat.rules.local_ns, [m]))
 	ch.observe_ignored([m])
+	ch.skip_elements(flat.ignored_content)
 	flat.rules = flat.merge_rules([m], mut ch)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
