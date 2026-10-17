@@ -195,6 +195,10 @@ fn test_an_exclude_matches_any_spelling_of_a_file() {
 		exclude: [os.join_path(root, 'two', '..', 'one', 'x.arxml')]
 	)!
 	assert !g.files.any(it.ends_with('x.arxml'))
+	// where `..` follows a wildcard, nothing is cancelled: it matches no file, as before
+	assert compile_file_glob('/data/a/../b/*.arxml').pat == ['data', 'b', '*.arxml']
+	assert compile_file_glob('/data/**/../x.arxml').pat == ['data', '**', '..', 'x.arxml']
+	assert compile_file_glob('a/../b').pat == ['a', '..', 'b']
 }
 
 fn test_the_set_knows_where_its_files_came_from() {
@@ -349,4 +353,9 @@ fn test_a_model_file_says_which_configuration_named_its_schemas() {
 	assert e.schema_dir == '/env/schemas' && e.config == ''
 	own := parse_model_file('paths = ["a.arxml"]\nschema_dir = "/own"', os.join_path(dir, 'm.arxmodel.toml'))!
 	assert own.options()!.config == ''
+	// and a configuration that names no directory names none
+	os.setenv('ARXMODEL_SCHEMA_DIR', '', true)
+	os.write_file(cfg, '# nothing yet\n')!
+	none_named := mf.options()!
+	assert none_named.schema_dir == '' && none_named.config == ''
 }

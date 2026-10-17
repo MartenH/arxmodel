@@ -28,13 +28,21 @@ pub:
 }
 
 // compile_file_glob compiles a file glob. An absolute one is normalized as the absolute path it
-// is matched against is (`a/../b` is `b`).
+// is matched against is: `a/../b` is `b`, where a is a name and not a wildcard.
 pub fn compile_file_glob(glob string) FileGlob {
 	abs := os.is_abs_path(glob)
-	src := if abs { os.norm_path(glob) } else { glob }
+	segs := glob.replace('\\', '/').split('/').filter(it != '' && it != '.')
+	mut pat := []string{cap: segs.len}
+	for seg in segs {
+		if abs && seg == '..' && pat.len > 0 && pat.last() != '..' && !pat.last().contains_any('*?') {
+			pat.delete_last()
+		} else {
+			pat << seg
+		}
+	}
 	return FileGlob{
 		src: glob
-		pat: src.replace('\\', '/').split('/').filter(it != '' && it != '.')
+		pat: pat
 		abs: abs
 	}
 }

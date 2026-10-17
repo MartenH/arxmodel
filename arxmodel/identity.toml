@@ -19,7 +19,5 @@ definition = "DEFINITION-REF"
 
 # An element with neither, every child element of which is named (a list, such as AR-PACKAGES
 # or ELEMENTS), is one list with its namesakes under one parent, so the lists of several files
-# merge. Any other element is matched by its name and its place among its siblings: the one
-# element of its name under a parent (a frame's FRAME-LENGTH) is that element in every file, so
-# files giving it different values are reported. Where a name repeats, order counts: a reorder is
-# reported. The order of named elements does not count.
+# merge. Any other element is matched by its name and its place among its siblings, and its
+# order counts: a reorder is reported. The order of named elements does not count.

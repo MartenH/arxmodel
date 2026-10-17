@@ -89,10 +89,6 @@ mut:
 	tabs []&TabFacts
 	// per depth of observe_node, one parent's value keys (see ValueKeys.keys_at)
 	keys_at [][]string
-	// per depth of observe_node, one parent's unnamed children: name id << 32 | node index
-	unnamed_at [][]u64
-	// per document, a bit per node: an unnamed element the only one of its name among its siblings
-	single map[voidptr][]u64
 }
 
 // TabFacts is what the identity rules say about the names of one name table (one document set).
@@ -244,10 +240,8 @@ pub fn (mut x Identified) observe(models []&Model) {
 fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts, depth int) {
 	for x.keys_at.len <= depth {
 		x.keys_at << []string{}
-		x.unnamed_at << []u64{}
 	}
 	x.keys_at[depth].clear()
-	x.unnamed_at[depth].clear()
 	mut any := false
 	mut all_named := true
 	for c in n.children() {
@@ -260,13 +254,9 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts, depth int) {
 		} else if !named && !by_def {
 			all_named = false
 		}
-		if !named && !(by_def && ids_text(c, f.def, x.nm) != '') {
-			x.unnamed_at[depth] << (u64(tag) << 32 | u64(c.i))
-		}
 		x.observe_node(c, f, depth + 1)
 	}
 	note_repeats(mut x.keys_at[depth], mut x.multi)
-	x.note_singles(n.doc, mut x.unnamed_at[depth])
 	if any && all_named {
 		name := x.nm.node_name(n)
 		if name !in x.lists {
@@ -275,41 +265,15 @@ fn (mut x Identified) observe_node(n flatxml.Node, f &TabFacts, depth int) {
 	}
 }
 
-// note_singles marks, of one parent's unnamed children, each the only one of its name.
-fn (mut x Identified) note_singles(d &flatxml.Doc, mut kids []u64) {
-	if kids.len == 0 {
-		return
-	}
-	kids.sort()
-	mut bits := x.single[voidptr(d)] or { []u64{len: (d.len() + 63) / 64} }
-	for k, v in kids {
-		if (k > 0 && kids[k - 1] >> 32 == v >> 32) || (k + 1 < kids.len && kids[k + 1] >> 32 == v >> 32) {
-			continue
-		}
-		i := u32(v)
-		bits[i / 64] |= u64(1) << (i % 64)
-	}
-	x.single[voidptr(d)] = bits
-}
-
-// is_single reports whether n is an unnamed element the only one of its name among its siblings.
-@[inline]
-fn (x &Identified) is_single(n flatxml.Node) bool {
-	bits := x.single[voidptr(n.doc)] or { return false }
-	return bits[n.i / 64] & (u64(1) << (n.i % 64)) != 0
-}
-
 // key is an element's key by these rules: its name; for a list (an element name some document
 // holds as a list of named elements, so an emptied one is still the list), its element name
-// (list_key), the one key of its namesakes, and so for an unnamed element the only one of its
-// name among its siblings: a file's one FRAME-LENGTH of a frame is another's, and where they
-// differ the merge says so; else none (matched by place).
+// (list_key), the one key of its namesakes; else none (matched by place).
 pub fn (x &Identified) key(n flatxml.Node) ?string {
 	if k := x.named(n) {
 		return k
 	}
 	name := x.nm.node_name(n)
-	return if name in x.lists || x.is_single(n) { list_key(name) } else { none }
+	return if name in x.lists { list_key(name) } else { none }
 }
 
 // list_key is the key of a list: its element name, after a separator no text can hold, so it is

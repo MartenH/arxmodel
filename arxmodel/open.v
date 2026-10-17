@@ -19,8 +19,9 @@ pub mut:
 	index &PathIndex      = unsafe { nil }
 	rules string   // what the files were merged by: a schema's name, a rules file, or the built-in rules
 	notes []string // what choosing the rules had to say (a rules file made for another release)
-	// the files the rules were read from: the rules file, or every schema document the files
-	// declare that was found, with what they import (inside the schema directory or not)
+	// the files the rules were read from: the rules file; or the configuration file that named
+	// the schema directory (OpenOptions.config) and every schema document the files declare that
+	// was found, with what they import (inside the schema directory or not)
 	rule_files []string
 	findings   []Finding // what the merge found, with the policy's severities
 	// the elements one file describes more than once (a key repeated among siblings), merged
@@ -115,7 +116,10 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		rule_files << opts.rules_file
 	} else if opts.schema_dir != '' {
 		sc := compile_schemas(m, opts.schema_dir, policy: p)
-		rule_files = sc.files()
+		if opts.config != '' {
+			rule_files << opts.config
+		}
+		rule_files << sc.files()
 		why := 'merging by the schemas in ${opts.schema_dir}'
 		f, gname := governing_flat(sc) or { return error('${why}: ${err.msg()}') }
 		gov := governing_use(sc) or { return error('${why}: ${err.msg()}') }
@@ -137,6 +141,10 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		skip_references:   true
 	}
 	mut c := check_typed(m, flat, name, st, p, copts, ty)!
+	if opts.rules_file == '' && opts.schema_dir == '' {
+		nm := naming(flat.rules.local_ns, [m])
+		c.findings << singles_differ(mut c.view, c.index, p, &nm)
+	}
 	c.filter(p, copts, m)
 	mut o := &Opened{
 		model:      m
@@ -174,6 +182,80 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		}
 	}
 	return o
+}
+
+// singles_differ are what the built-in rules' merge cannot say. They match an unnamed element by
+// its place, each file's apart; so under a merged element, the children of one name and
+// attributes that each file gives once (a frame's FRAME-LENGTH) are one element of the model,
+// read from the first file, and a value in which they differ is a finding, as the merge makes one.
+fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, nm &Naming) []Finding {
+	mut out := []Finding{}
+	for i in 0 .. v.len() {
+		n := v.node(u32(i))
+		if n.fragment_count() < 2 {
+			continue
+		}
+		mut groups := map[string][]flatxml.MNode{}
+		mut order := []string{}
+		mut repeated := map[string]bool{}
+		for ch in n.children() {
+			if ch.keyed() || ch.fragment_count() != 1 {
+				continue
+			}
+			f := ch.fragment(0)
+			id := element_identity(f, nm)
+			mut g := groups[id] or {
+				order << id
+				[]flatxml.MNode{}
+			}
+			if g.any(voidptr(it.fragment(0).doc) == voidptr(f.doc)) {
+				repeated[id] = true
+			}
+			g << ch
+			groups[id] = g
+		}
+		for id in order {
+			g := groups[id] or { continue }
+			if g.len < 2 || id in repeated {
+				continue
+			}
+			first := subtree_text(g[0].fragment(0), nm)
+			if g[1..].all(subtree_text(it.fragment(0), nm) == first) {
+				continue
+			}
+			what := nm.node_name(g[0].fragment(0))
+			out << Finding{
+				layer:    .merge
+				kind:     'value_differs'
+				what:     what
+				severity: p.merge_severity('value_differs', what, false)
+				path:     merged_path(g[0], index)
+				message:  '${what} differs between the files; the first is read'
+				at:       g.map(v.pos(it.fragment(0)))
+			}
+		}
+	}
+	return out
+}
+
+// element_identity is an element's name and attributes, as the merge names them.
+fn element_identity(n flatxml.Node, nm &Naming) string {
+	mut parts := [nm.node_name(n)]
+	lo, hi := n.doc.attr_range(n.i)
+	for a := lo; a < hi; a++ {
+		if int(a) < n.doc.attr_ns.len && n.doc.attr_ns[a] == flatxml.xmlns_ns {
+			continue
+		}
+		parts << '${n.doc.tab.name(n.doc.attr_id(a))}=${n.doc.attr_value(a)}'
+	}
+	return parts.join(flatxml.key_sep)
+}
+
+// subtree_text is an element's leaves, each as its path and trimmed text, in document order.
+fn subtree_text(n flatxml.Node, nm &Naming) string {
+	mut out := []string{}
+	leaf_texts(n, nm.node_name(n), nm, mut out)
+	return out.join(flatxml.key_list_sep)
 }
 
 // model_namespace is the namespace a model is in: the one most of its documents' roots are in,

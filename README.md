@@ -448,7 +448,12 @@ built-in identity rules, which key every named element by its SHORT-NAME; `rules
 read by. Either way element names are compared without their prefix, so a file binding the
 AUTOSAR namespace to `ar:` merges with one that does not, and siblings are read in the order
 first written. What the merge found is in `findings`, and what one file describes twice in
-`repeated`.
+`repeated`. The built-in rules match an unnamed element by its place, so where two files each give
+a merged element one child of a name (a frame's `FRAME-LENGTH`), both are kept and the first is
+the one read; if they differ, that is a `merge.value_differs` finding. `rule_files` lists the
+files the rules were read from: the rules file, or each schema found and what it imports, and the
+configuration file that named the schema directory (`OpenOptions.config`). A program that caches
+what it opened can count them among its inputs.
 
 A **model file** (`<name>.arxmodel.toml`) states a model once, beside it, for a program that
 opens it by name:

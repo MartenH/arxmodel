@@ -318,23 +318,47 @@ fn lengths_of(n flatxml.MNode) []flatxml.MNode {
 }
 
 fn test_files_giving_one_element_two_values_say_so() {
-	// the one FRAME-LENGTH of a frame in each file is one FRAME-LENGTH, the first file's value
+	// the one FRAME-LENGTH of a frame in each file is one element of the model: the first file's
+	// is read, and that the second gives another is said
 	mut o := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('12'))])!
 	defer {
 		o.free()
 	}
-	f := o.at('/P/F')
-	lengths := lengths_of(f)
-	assert lengths.len == 1 && lengths[0].text() == '8'
+	assert lengths_of(o.at('/P/F'))[0].text() == '8'
 	d := o.findings.filter(it.kind == 'value_differs')
-	assert d.len == 1 && d[0].path.starts_with('/P/F'), d.str()
-	// the same value in both is one, said nowhere
+	assert d.len == 1 && d[0].path == '/P/F#FRAME-LENGTH' && d[0].at.len == 2, d.str()
+	assert d[0].at[0].starts_with('a.arxml:') && d[0].at[1].starts_with('b.arxml:')
+	// the same value in both, or the same element told apart by an attribute, is no finding
 	mut same := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('8'))])!
 	defer {
 		same.free()
 	}
 	assert same.findings.len == 0, same.findings.str()
-	assert lengths_of(same.at('/P/F')).len == 1
+	// so is an element of the model a file gives other content: the second file's is not read
+	desc := fn (l string, t string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><DESC><L-2 L="${l}">${t}</L-2></DESC>')
+	}
+	mut langs := open_sources([src('a.arxml', desc('EN', 'hello')), src('b.arxml', desc('DE', 'hallo'))])!
+	defer {
+		langs.free()
+	}
+	assert langs.findings.map(it.path) == ['/P/F#DESC']
+	// but elements told apart by an attribute are two
+	label := fn (l string, t string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><L-2 L="${l}">${t}</L-2>')
+	}
+	mut labels := open_sources([src('a.arxml', label('EN', 'hello')), src('b.arxml', label('DE', 'hallo'))])!
+	defer {
+		labels.free()
+	}
+	assert labels.findings.len == 0, labels.findings.str()
+	// nor is a name one file repeats: those are matched by place
+	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
+	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!
+	defer {
+		rep.free()
+	}
+	assert rep.findings.filter(it.kind == 'value_differs').len == 0
 }
 
 fn test_open_says_which_files_the_rules_came_from() {
@@ -352,13 +376,14 @@ fn test_open_says_which_files_the_rules_came_from() {
 	other := os.join_path(dir, 'outside', 'O.xsd')
 	os.write_file(other, '<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" targetNamespace="urn:other"/>')!
 	files := [os.join_path(@VMODROOT, 'testdata', 'model', 'a.arxml')]
-	mut o := open(files, schema_dir: os.join_path(dir, 'xsd'))!
+	cfg := os.join_path(dir, 'config.toml')
+	mut o := open(files, schema_dir: os.join_path(dir, 'xsd'), config: cfg)!
 	defer {
 		o.free()
 	}
 	assert o.rules == 'schema LIB_1.xsd'
-	assert o.rule_files.map(os.real_path(it)) == [os.real_path(os.join_path(dir, 'xsd', 'sub', 'LIB_1.Xsd')),
-		os.real_path(other)]
+	assert o.rule_files.map(os.real_path(it)) == [os.real_path(cfg),
+		os.real_path(os.join_path(dir, 'xsd', 'sub', 'LIB_1.Xsd')), os.real_path(other)]
 	// by a rules file, that file
 	rules := os.join_path(dir, 'lib.rules.txt')
 	mut m := load(files)!

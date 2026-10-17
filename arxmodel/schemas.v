@@ -148,7 +148,8 @@ pub:
 }
 
 // files are the schema documents read for the uses: each found schema and every document it
-// imports, read or not (one that failed to compile is its own file alone), in the order read.
+// imports (one that failed to compile is its own file alone), in the order read, a document
+// reached by several spellings once.
 pub fn (s &Schemas) files() []string {
 	mut out := []string{}
 	mut seen := map[string]bool{}
@@ -158,8 +159,9 @@ pub fn (s &Schemas) files() []string {
 		}
 		read := if u.schema != unsafe { nil } { u.schema.files } else { [u.path] }
 		for f in read {
-			if f !in seen {
-				seen[f] = true
+			real := os.real_path(f)
+			if real !in seen {
+				seen[real] = true
 				out << f
 			}
 		}

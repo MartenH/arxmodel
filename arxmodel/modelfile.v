@@ -91,7 +91,7 @@ pub fn (mf ModelFile) options() !OpenOptions {
 	if dir == '' && mf.rules == '' {
 		mut from := ''
 		dir, from = configured_schema_dir()!
-		if from != schema_dir_env {
+		if dir != '' && from != schema_dir_env {
 			config = from
 		}
 	}
