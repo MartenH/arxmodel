@@ -32,6 +32,8 @@ mut:
 	names    map[voidptr][]u64 // per name table: each name's hash, 0 until computed
 	// repeat_key's scratch, kept between parents: one parent's items, (hash, position) each
 	sibs []HashAt
+	// elements whose content the merge does not compare, by name: no part of a hash
+	skip []string
 }
 
 // HashAt is an item's content hash and its place among its parent's children.
@@ -53,6 +55,11 @@ pub fn new_content_hashes(ignore []string, nm Naming) &ContentHashes {
 		ignore: ignore.clone()
 		nm:     nm
 	}
+}
+
+// skip_elements leaves elements whose content the merge does not compare out of every hash.
+pub fn (mut ch ContentHashes) skip_elements(names []string) {
+	ch.skip = names.clone()
 }
 
 // observe_ignored records, in every document of the models, the identity of each attribute
@@ -105,6 +112,11 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 		return ch.hashes[k][i]
 	}
 	mut h := mix(u64(0xcbf29ce484222325), ch.name_hash(d, i))
+	if ch.skip.len > 0 && ch.nm.name(d, i) in ch.skip {
+		// content not compared: an ignored element (a repeated role's item itself) is its name
+		ch.hashes[k][i] = h | 1
+		return h | 1
+	}
 	// attributes, sorted by name
 	lo, hi := d.attr_range(i)
 	if hi > lo {
@@ -132,7 +144,7 @@ fn (mut ch ContentHashes) hash_at(k int, d &flatxml.Doc, i u32) u64 {
 	for c != flatxml.no_node {
 		if d.is_text(c) {
 			h = mix_text(h, slot, d, c)
-		} else if d.is_element(c) {
+		} else if d.is_element(c) && (ch.skip.len == 0 || ch.nm.name(d, c) !in ch.skip) {
 			slot++
 			h = mix(h, ch.hash_at(k, d, c))
 		}
@@ -294,6 +306,12 @@ pub fn (f &Flat) merge_rules(models []&Model, mut ch ContentHashes) flatxml.Rule
 		ch)
 }
 
+// not_compared reports whether a merged node is, or lies in, an element whose content the merge
+// does not compare (skip_elements).
+fn (ch &ContentHashes) not_compared(n flatxml.MNode) bool {
+	return ch.skip.len > 0 && in_ignored(n, ch.skip)
+}
+
 // ignored_problem reports whether a merge problem lies in content the merge does not compare.
 fn ignored_problem(v &flatxml.Merged, pr flatxml.Problem, ignored []string) bool {
 	if ignored.len == 0 {
@@ -375,7 +393,7 @@ fn key_part(key string, part int) string {
 	return if k == part { unsafe { tos(key.str + start, key.len - start) } } else { '' }
 }
 
-fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet, p Policy) []Finding {
+fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet, p Policy, ignored []string) []Finding {
 	parts := short_name_parts(rules)
 	mut out := []Finding{}
 	// one node's short names, their children and their order ignoring case: lists kept
@@ -440,6 +458,9 @@ fn case_only_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet
 				continue
 			}
 			group := (at_of[low] or { []u32{} }).map(v.node(it))
+			if ignored.len > 0 && in_ignored(group[0], ignored) {
+				continue // content not compared
+			}
 			mut at := []string{}
 			for c in group {
 				at << c.fragments().map(v.pos(it))
@@ -486,7 +507,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 					continue
 				}
 				k := c.rule_number() or { continue }
-				if is_repeat[k] {
+				if is_repeat[k] && !ch.not_compared(c) {
 					out << collision_finding(mut v, ix, c, p)
 				}
 			}
@@ -501,7 +522,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 				}
 			}
 		}
-		if !any {
+		if !any || ch.not_compared(n) {
 			continue
 		}
 		// per repeated rule and fragment of n (its document and node): the hashes of its items
@@ -509,7 +530,7 @@ fn repeated_findings(mut v flatxml.Merged, ix &PathIndex, rules flatxml.RuleSet,
 		mut rules_seen := []int{}
 		for c in n.children() {
 			k := c.rule_number() or { continue }
-			if !is_repeat[k] {
+			if !is_repeat[k] || ch.not_compared(c) {
 				continue
 			}
 			if k !in rules_seen {

@@ -28,6 +28,8 @@ pub mut:
 	nm    Naming // how the merge names the documents' elements
 	// `definition sep label` given more than once under one parent: a set
 	multi map[string]bool
+	// elements whose content the merge does not compare: no part of a value's content
+	ignored []string
 mut:
 	// per depth of observe_node, the keys of one parent's children: kept between parents, so
 	// the walk makes no list or map per node
@@ -104,30 +106,34 @@ pub fn (vk &ValueKeys) key(n flatxml.Node) ?string {
 		return none
 	}
 	if k in vk.multi {
-		return k + flatxml.key_sep + content_of(n, r, vk.nm)
+		return k + flatxml.key_sep + content_of(n, r, vk.nm, vk.ignored)
 	}
 	return k
 }
 
 // content_of is what an item holds besides its definition and label: each element's path (of
-// names as the merge names them, so a prefix does not tell two values apart) and text, in order.
-fn content_of(n flatxml.Node, r IdentityRole, nm &Naming) string {
+// names as the merge names them, so a prefix does not tell two values apart) and text, in order;
+// the elements ignored (whose content the merge does not compare) left out.
+fn content_of(n flatxml.Node, r IdentityRole, nm &Naming, ignored []string) string {
 	skip := [r.definition.all_before('/'), r.label.all_before('/')]
 	mut out := []string{}
 	for c in n.children() {
 		name := nm.node_name(c)
-		if name !in skip {
-			leaf_texts(c, name, nm, mut out)
+		if name !in skip && name !in ignored {
+			leaf_texts(c, name, nm, ignored, mut out)
 		}
 	}
 	return out.join(flatxml.key_list_sep)
 }
 
-fn leaf_texts(n flatxml.Node, path string, nm &Naming, mut out []string) {
+fn leaf_texts(n flatxml.Node, path string, nm &Naming, ignored []string, mut out []string) {
 	mut any := false
 	for c in n.children() {
 		any = true
-		leaf_texts(c, '${path}/${nm.node_name(c)}', nm, mut out)
+		name := nm.node_name(c)
+		if name !in ignored {
+			leaf_texts(c, '${path}/${name}', nm, ignored, mut out)
+		}
 	}
 	if !any {
 		out << '${path}=${n.text().trim_space()}'
@@ -176,8 +182,9 @@ pub fn with_value_keys(rs flatxml.RuleSet, vk &ValueKeys) flatxml.RuleSet {
 // value_keys is the value keys of a set of flat rules, seen in the models.
 pub fn (f &Flat) value_keys(models []&Model) &ValueKeys {
 	mut vk := &ValueKeys{
-		roles: f.identity_roles
-		nm:    naming(f.rules.local_ns, models)
+		roles:   f.identity_roles
+		nm:      naming(f.rules.local_ns, models)
+		ignored: f.ignored_content
 	}
 	vk.observe(models)
 	return vk

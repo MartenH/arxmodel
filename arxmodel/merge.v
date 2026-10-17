@@ -57,8 +57,62 @@ pub mut:
 	identity_roles []IdentityRole
 	// rules of non-splittable roles allowed in several fragments only as identical repetitions
 	repeat_rules []int
-	// elements whose content a merge does not compare (structured comments, by the policy)
+	// elements whose content a merge does not compare (structured comments, by the policy; and
+	// those CheckOptions.ignore_elements names)
 	ignored_content []string
+	// the built-in identity rules' keys, which read ignored_content too; nil for a schema's rules
+	identified &Identified = unsafe { nil }
+}
+
+// key_elements are the elements a key reads: the merge names elements by their text (a short
+// name, a definition, a label), so their content cannot go uncompared.
+pub fn (f &Flat) key_elements() []string {
+	mut out := []string{}
+	mut paths := []string{}
+	for r in f.rules.rules {
+		paths << r.key
+	}
+	for r in f.identity_roles {
+		paths << [r.definition, r.label]
+	}
+	if f.identified != unsafe { nil } {
+		paths << f.identified.id.name
+		paths << f.identified.id.definition
+	}
+	for p in paths {
+		for step in p.split('/') {
+			name := step.trim_right('+')
+			if name != '' && !name.starts_with('@') && name !in out {
+				out << name
+			}
+		}
+	}
+	return out
+}
+
+// ignore_content adds elements whose content the merge does not compare: their differences are
+// no finding, no change and no conflict, and no part of what tells two values apart. Called
+// before the rules are applied (with_settings, merge_rules): with the built-in identity rules it
+// makes their rule anew.
+pub fn (mut f Flat) ignore_content(names []string) {
+	keys := f.key_elements()
+	for name in names {
+		// what names an element (a key reads it) is compared whatever is asked: the command
+		// refuses such a name (key_elements)
+		if name !in f.ignored_content && name !in keys {
+			f.ignored_content << name
+		}
+	}
+	if f.identified != unsafe { nil } {
+		// this Flat's own copy, its rule's keys bound to it: Flat is a value, and the Flat it was
+		// copied from (and its keys) keep what they had
+		f.identified = f.identified.with_ignored(f.ignored_content)
+		rs := f.rules
+		f.rules = flatxml.RuleSet{
+			...rs
+			rules: identity_rules(f.identified)
+		}
+	}
 }
 
 // Conflict is an element pair under a parent path that roles of different holders still give
@@ -750,6 +804,10 @@ pub:
 	case_sensitive    bool     // keys compared as written, whatever the settings say
 	ignore_attrs      []string // attributes that may differ, besides the settings'
 	compare_attrs     []string // attributes the settings let differ that are compared after all
+	// elements whose content is not compared, besides the policy's structured comments
+	// (ANNOTATIONS, ADMIN-DATA): their differences are no finding, no change and no conflict, and
+	// no part of what tells two values apart
+	ignore_elements []string
 }
 
 // Settings are a merge's case and attribute settings: the policy's when the rules come from the
@@ -981,9 +1039,11 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	sw := time.new_stopwatch()
 	fold, ignore := st.apply(m, opts)
 	mut flat := flat0
-	flat.rules = with_settings(flat0.rules, fold, ignore)
+	flat.ignore_content(opts.ignore_elements)
+	flat.rules = with_settings(flat.rules, fold, ignore)
 	mut ch := new_content_hashes(ignore, naming(flat.rules.local_ns, [m]))
 	ch.observe_ignored([m])
+	ch.skip_elements(flat.ignored_content)
 	flat.rules = flat.merge_rules([m], mut ch)
 	flat.place(m)
 	mut view := m.set.merge(flat.rules)!
@@ -1056,7 +1116,7 @@ fn check_typed(m &Model, flat0 Flat, source string, st Settings, p Policy, opts 
 	}
 	// keys that differ only in case, where keys are compared as written; repeated roles
 	if !fold {
-		findings << case_only_findings(mut view, index, flat.rules, p)
+		findings << case_only_findings(mut view, index, flat.rules, p, flat.ignored_content)
 	}
 	findings << repeated_findings(mut view, index, flat.rules, flat.repeat_rules, mut ch, p)
 	mut times := map[string]time.Duration{}

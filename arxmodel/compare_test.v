@@ -206,3 +206,116 @@ fn test_an_emptied_list_is_the_list() {
 	r, v := builtin_versions(base, empty)
 	assert change_lines(r.diff(&v[0], &v[1])) == ['- /Body/Head', '- /Body/LampCfg', '- /Body/Tail']
 }
+
+fn test_ignored_elements_are_no_change() {
+	sig_a := '<VALUE-REF DEST="SIGNAL">/Sig/A</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	// a reference given two values (a set, its values told apart by their content)
+	two := fn [sig_a] (note string) string {
+		return sig_a + '
+            <SIGNAL-REFERENCE-VALUE>${note}
+              <DEFINITION-REF DEST="REF-DEF">/Defs/Lamp/Signal</DEFINITION-REF>
+              <VALUE-REF DEST="SIGNAL">/Sig/B</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	}
+	note := '<NOTES><NOTE>derived</NOTE></NOTES>'
+	old := version_of('ig_old', sig_a, two(''))
+	// the same values, a note added to one of the set and to a value of one definition
+	new := version_of('ig_new', sig_a, two(note), '<VALUE>10</VALUE>', '${note}<VALUE>10</VALUE>')
+	r, v := builtin_versions(old, new)
+	compared := change_lines(r.diff(&v[0], &v[1]))
+	assert compared.any(it.starts_with('- /Body/LampCfg#REFERENCES/SIGNAL-REFERENCE-VALUE'))
+	assert compared.any(it.contains('/NOTES'))
+	ri := ruling_builtin([old, new], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	a, b := ri.read(old)!, ri.read(new)!
+	assert ri.diff(&a, &b) == []
+}
+
+fn test_merge3_takes_ignored_content_added_on_both_sides() {
+	// both sides add an element of one identity (its short name), differently: for an
+	// addition the conflict's node is the base's parent, which is not ignored
+	cfg := '<SHORT-NAME>LampCfg</SHORT-NAME>'
+	added := fn [cfg] (note string) string {
+		return cfg + '<NOTES><SHORT-NAME>n</SHORT-NAME><NOTE>${note}</NOTE></NOTES>'
+	}
+	base := version_of('ig3_base')
+	ours := version_of('ig3_ours', cfg, added('a'))
+	theirs := version_of('ig3_theirs', cfg, added('b'))
+	r, v := builtin_versions(base, ours, theirs)
+	assert r.merge3(&v[0], &v[1], &v[2])!.conflicts.len > 0
+	ri := ruling_builtin([base, ours, theirs], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	a, b, c := ri.read(base)!, ri.read(ours)!, ri.read(theirs)!
+	assert ri.merge3(&a, &b, &c)!.conflicts == []
+}
+
+fn test_each_ruling_keeps_its_own_ignored_elements() {
+	sig_a := '<VALUE-REF DEST="SIGNAL">/Sig/A</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	two := fn [sig_a] (note string) string {
+		return sig_a + '
+            <SIGNAL-REFERENCE-VALUE>${note}
+              <DEFINITION-REF DEST="REF-DEF">/Defs/Lamp/Signal</DEFINITION-REF>
+              <VALUE-REF DEST="SIGNAL">/Sig/B</VALUE-REF>
+            </SIGNAL-REFERENCE-VALUE>'
+	}
+	old := version_of('own_old', sig_a, two(''))
+	new := version_of('own_new', sig_a, two('<NOTES><NOTE>derived</NOTE></NOTES>'))
+	// two rulings from one built-in Flat: the second's settings do not reach the first's keys
+	flat := identity_flat(builtin_identity(), [old, new])
+	st := automat_policy().settings()
+	r1 := new_ruling(flat, 'built-in identity rules', st, unsafe { nil }, [old, new], CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	r2 := new_ruling(flat, 'built-in identity rules', st, unsafe { nil }, [old, new], CheckOptions{})
+	a, b := r1.read(old)!, r1.read(new)!
+	assert r1.diff(&a, &b) == []
+	c, d := r2.read(old)!, r2.read(new)!
+	assert r2.diff(&c, &d).len > 0
+}
+
+fn test_merge3_a_removal_meets_a_change_not_compared() {
+	text := os.read_file(cdata('compare', 'base.arxml'))!
+	tail := text[text.index('        <LAMP UUID="u2">')?..text.index('</LAMP>\n        <MODULE-VALUES>')? + '</LAMP>\n'.len]
+	note := ['<WATTS>5</WATTS>', '<NOTES><NOTE>x</NOTE></NOTES><WATTS>5</WATTS>']
+	base := version_of('rm_base')
+	removed := version_of('rm_removed', tail, '')
+	noted := version_of('rm_noted', ...note)
+	r, v := builtin_versions(base, removed, noted)
+	assert r.merge3(&v[0], &v[2], &v[1])!.conflicts.len > 0
+	ri := ruling_builtin([base, removed, noted], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	b, rm, nt := ri.read(base)!, ri.read(removed)!, ri.read(noted)!
+	// theirs removed the lamp, ours only changed content not compared in it: removed
+	mut a := ri.merge3(&b, &nt, &rm)!
+	assert a.conflicts == []
+	assert !a.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+	// ours removed it: removed, as ours is kept
+	mut o := ri.merge3(&b, &rm, &nt)!
+	assert o.conflicts == []
+	assert !o.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+}
+
+fn test_merge3_takes_one_addition_differing_only_in_content_not_compared() {
+	cfg := '<SHORT-NAME>LampCfg</SHORT-NAME>'
+	added := fn [cfg] (note string) string {
+		return '<LAMP><SHORT-NAME>Side</SHORT-NAME><NOTES><NOTE>${note}</NOTE></NOTES><WATTS>3</WATTS></LAMP><MODULE-VALUES>' +
+			cfg
+	}
+	base := version_of('add_base')
+	ours := version_of('add_ours', '<MODULE-VALUES>\n          ${cfg}', added('a'))
+	theirs := version_of('add_theirs', '<MODULE-VALUES>\n          ${cfg}', added('b'))
+	r, v := builtin_versions(base, ours, theirs)
+	assert r.merge3(&v[0], &v[1], &v[2])!.conflicts.len > 0
+	ri := ruling_builtin([base, ours, theirs], automat_policy().settings(), CheckOptions{
+		ignore_elements: ['NOTES']
+	})
+	b, o, t := ri.read(base)!, ri.read(ours)!, ri.read(theirs)!
+	mut m := ri.merge3(&b, &o, &t)!
+	assert m.conflicts == []
+	assert m.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Side</SHORT-NAME>')
+}

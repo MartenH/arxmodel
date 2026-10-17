@@ -20,6 +20,9 @@
 //   arxmodel list (--schema-dir DIR | --rules FILE) <ELEMENT> <file|dir>...
 //                                              the merged element at an AUTOSAR path; the paths
 //                                              of every referrable element of a name
+//   arxmodel values (--schema-dir DIR | --rules FILE) <pattern> <file|dir>...
+//                                              every value a path pattern wants, one a line:
+//                                              `path = "text"`
 //   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
 //                  -o OUT|- <file|dir>...      merge and check them as check does (the summary
 //                                              on standard error), and write the merged model
@@ -91,6 +94,13 @@ const usage = 'usage:
       every element holding it, where the merge keeps two apart
   arxmodel list (--schema-dir DIR | --rules FILE) [--jobs N] <ELEMENT-NAME> <file|dir>...
       the AUTOSAR path of every referrable element of that name
+  arxmodel values (--schema-dir DIR | --rules FILE) [--jobs N] <pattern> <file|dir>...
+      every value whose path a path pattern matches, or lies below a path it matches (`*` one
+      segment or part of one, `**` any: /Pkg/**/Name), one a line: `path = "text"`. A value the
+      merge names by its definition (an ECUC parameter or reference value) is the path of its
+      container and the last name of the definition (/Pkg/Cfg/Param = "3"); any other value is
+      the path of its referrable element, `#` and the elements below it (/Pkg/Elem#LENGTH = "8").
+      Exit 1 when no value matches
   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
                  -o OUT|- <file|dir>...
       merge and check the files as check does, the summary going to standard error, and write
@@ -121,9 +131,13 @@ const usage = 'usage:
       every setting of the policy with the values it takes, its value and the specification item
       it concerns, then the severities; --diff, how another policy differs; --schema, the JSON
       Schema of a policy file (policy.schema.json)
-  --policy NAME|FILE (rules, check, merge, get, list, diff, merge3, policy): the merge policy:
-      spec (policy.toml, as the AUTOSAR specification has it, the default), automat
+  --policy NAME|FILE (rules, check, merge, get, list, values, diff, merge3, policy): the merge
+      policy: spec (policy.toml, as the AUTOSAR specification has it, the default), automat
       (automat.policy.toml), or a file
+  --ignore-element NAME (check, merge, get, list, values, diff, merge3, git-diff), repeatable: an
+      element whose content is not compared, as structured comments are not (the bookkeeping of
+      a tool: ANNOTATIONS, ADMIN-DATA): its differences are no finding, no change and no
+      conflict, it tells no two values apart, and values leaves it out
   <file|dir>...: the input set, for every command reading models: a file; a directory (every
       .arxml below it); a glob (`*`, `?` within a name, `**` any depth; one matching nothing is
       a warning); @FILE (the paths FILE lists, one a line, `#` comments, relative to FILE);
@@ -140,6 +154,7 @@ mut:
 	all        bool     // check: every problem, not the first of each kind
 	exact      bool     // check: keys compared as written
 	ignore     []string // check: attributes whose values may differ between fragments
+	ignore_el  []string // elements whose content is not compared
 	exclude    []string // file globs left out of the input set
 	verbose    bool     // list every file of the input set
 	compare    []string // check: attributes ignored by default that are compared after all
@@ -229,25 +244,28 @@ fn main() {
 		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
 			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
-				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
-				'--skip-multiplicity', '--skip-references', '--refs-from', '--format']
+				'--case-sensitive', '--ignore-attr', '--check-attr', '--ignore-element', '--policy',
+				'--skip-xml', '--skip-multiplicity', '--skip-references', '--refs-from', '--format']
 		}
-		'get', 'list' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
+		'get', 'list', 'values' {
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--ignore-element']
+		}
 		'merge' {
 			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
-				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
-				'--skip-multiplicity', '--skip-references', '--refs-from', '--out', '--force']
+				'--case-sensitive', '--ignore-attr', '--check-attr', '--ignore-element', '--policy',
+				'--skip-xml', '--skip-multiplicity', '--skip-references', '--refs-from', '--out',
+				'--force']
 		}
 		'diff', 'merge3', 'git-diff' {
 			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--case-sensitive',
-				'--ignore-attr', '--check-attr', '--out']
+				'--ignore-attr', '--check-attr', '--ignore-element', '--out']
 		}
 		'git-setup' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
 		'policy' { ['--policy', '--schema', '--diff', '--out'] }
 		else { []string{} }
 	}
 	// the input set: every command reading models takes excludes, and lists its files
-	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'merge', 'diff', 'merge3'] {
+	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'values', 'merge', 'diff', 'merge3'] {
 		allowed << ['--exclude', '--verbose']
 	}
 	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy'] {
@@ -265,13 +283,13 @@ fn main() {
 			exit(2)
 		}
 	}
-	if args[0] in ['check', 'merge', 'get', 'list', 'diff', 'merge3', 'git-diff', 'git-setup']
+	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'diff', 'merge3', 'git-diff', 'git-setup']
 		&& opts.schema_dir != '' && opts.rules_file != '' {
 		eprintln('${args[0]} takes --schema-dir or --rules, not both')
 		exit(2)
 	}
 	// git-setup records only what it is given: the drivers resolve the rest when they run
-	if args[0] in ['check', 'merge', 'get', 'list', 'diff', 'merge3', 'git-diff', 'rules'] {
+	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'diff', 'merge3', 'git-diff', 'rules'] {
 		resolve_rules(mut opts) or {
 			// git's diff driver always answers, with a text diff where it cannot read models
 			if args[0] != 'git-diff' {
@@ -290,6 +308,9 @@ fn main() {
 		}
 		'list' {
 			cmd_list(opts)
+		}
+		'values' {
+			cmd_values(opts)
 		}
 		'check' {
 			if opts.format != 'text' && opts.format !in arxmodel.report_formats {
@@ -360,13 +381,14 @@ fn parse_opts(args []string) !Opts {
 			o.given << a
 		}
 		match a {
-			'--ignore-attr', '--check-attr', '--exclude' {
+			'--ignore-attr', '--check-attr', '--exclude', '--ignore-element' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
 				match a {
 					'--ignore-attr' { o.ignore << args[k + 1] }
 					'--check-attr' { o.compare << args[k + 1] }
+					'--ignore-element' { o.ignore_el << args[k + 1] }
 					else { o.exclude << args[k + 1] }
 				}
 				k += 2
@@ -749,6 +771,10 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 		eprintln(err.msg())
 		exit(2)
 	}
+	ch.check_ignored(o) or {
+		eprintln(err.msg())
+		exit(2)
+	}
 	sc := ch.sc
 	print_undeclared(out, m, sc)
 	if ch.typing == unsafe { nil } {
@@ -794,7 +820,7 @@ fn cmd_get(o Opts) {
 	rest.paths = o.paths[1..]
 	_, _, c, _ := merged(rest, Out{
 		err: true
-	}, all_skipped())
+	}, read_options(o))
 	hs := c.index.holders(path)
 	if hs.len == 0 {
 		eprintln('nothing at ${path}')
@@ -813,6 +839,34 @@ fn cmd_get(o Opts) {
 	}
 }
 
+// cmd_values prints every value a path pattern wants, one a line: `path = "text"` (Checked.values).
+fn cmd_values(o Opts) {
+	out := Out{}
+	if o.paths.len < 2 {
+		eprintln('values needs a path pattern and the files')
+		exit(2)
+	}
+	pattern := o.paths[0]
+	if (!pattern.starts_with('/') && !pattern.starts_with('#') && !pattern.starts_with('**'))
+		|| (pattern != '/' && os.exists(pattern)) {
+		eprintln('values: ${pattern} is no path pattern (/Pkg/Name, /Pkg/**/Name, ...): the pattern comes before the files')
+		exit(2)
+	}
+	mut rest := o
+	rest.paths = o.paths[1..]
+	_, _, c, _ := merged(rest, Out{
+		err: true
+	}, read_options(o))
+	vals := c.values(pattern)
+	for v in vals {
+		out.line(v.line())
+	}
+	eprintln(plural(vals.len, 'value'))
+	if vals.len == 0 {
+		exit(1)
+	}
+}
+
 // cmd_list prints the AUTOSAR path of every referrable element of one element name, a path held
 // by two such elements once for each.
 fn cmd_list(o Opts) {
@@ -826,7 +880,7 @@ fn cmd_list(o Opts) {
 	rest.paths = o.paths[1..]
 	_, _, c, _ := merged(rest, Out{
 		err: true
-	}, all_skipped())
+	}, read_options(o))
 	mut paths := []string{}
 	for j, n in c.index.nodes {
 		if c.view.node(n).name() == kind {
@@ -860,6 +914,18 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 		case_sensitive:    o.exact
 		ignore_attrs:      o.ignore
 		compare_attrs:     o.compare
+		ignore_elements:   o.ignore_el
+	}
+}
+
+// read_options are the options of the commands that only read the merged model (get, list,
+// values): no layer checked.
+fn read_options(o Opts) arxmodel.CheckOptions {
+	return arxmodel.CheckOptions{
+		skip_xml:          true
+		skip_multiplicity: true
+		skip_references:   true
+		ignore_elements:   o.ignore_el
 	}
 }
 

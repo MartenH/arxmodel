@@ -63,8 +63,10 @@ arxmodel check --rules autosar.rules.txt <file|dir>...                         #
 arxmodel check --schema-dir DIR --format json <file|dir>... > check.json        # or junit: for machines
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
+arxmodel values --schema-dir DIR '/Pkg/**/Name' <file|dir>...  # every value there, `path = "text"`
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
 arxmodel diff A B                                   # what changed, by AUTOSAR path (no schema needed)
+arxmodel diff --ignore-element ANNOTATIONS A B      # ... an element's content not compared
 arxmodel merge3 BASE OURS THEIRS -o OUT             # a three-way merge (no schema needed)
 arxmodel git-setup [REPO]                           # git's merge and diff drivers for *.arxml
 ```
@@ -351,6 +353,47 @@ scoped rule beside its unscoped counterpart, and a child element no role names, 
 has rules, gets a rule of the kind no rule gives (each its own) for its place. A merged model is
 then written in the order its schema requires.
 
+## Values (`values`)
+
+`values PATTERN <file|dir>...` merges the files as `get` does and prints every value whose path
+the pattern matches, or lies below a path it matches, one a line, `path = "text"` (the text a TOML
+basic string), in the order of the merged view:
+
+```text
+/Pkg/LampCfg/Dim = "10"
+/Pkg/LampCfg/Signal = "/Sig/A"
+/Pkg/Head#WATTS = "55"
+```
+
+A value is an element holding text and no element. One the merge names by its definition (an
+item of the policy's `item_identity` roles, or of the built-in rules' `by_definition`: ECUC
+parameter and reference values) is named by it: its container's path, `/`, and the definition's
+last name, with its variation point's label as a key where it has one (`Dim[v1]`). Of such an
+item, its last element, when that holds text only, is the value itself (the value comes last in
+such an item); its other parts follow a `#` (`/Pkg/LampCfg/Dim#IS-AUTO-VALUE`). Any other value
+is named as findings name elements: its nearest referrable ancestor's path, `#`, and the elements
+below it with their keys. A referrable element's SHORT-NAME is its path, not a value; attributes
+are not values; what the merge does not compare (structured comments, `--ignore-element`) is left
+out. Where fragments give a value differently, the first file's is printed, as `merge` writes it
+(`check` reports the difference).
+
+The pattern is a path glob, as the policy's filters take them: `*` one segment or part of one,
+`**` any segments, `#` matched only by itself or `**`, a keyed segment matched by its name unless
+the pattern gives the key. `/Pkg/**/Dim` finds a definition's value wherever it is; `/Pkg/LampCfg`
+gives every value of that container and its subcontainers; `/**` every value. A pattern that is a
+file or directory is refused (the pattern comes first). Exit 1 when no value matches.
+
+## Elements not compared (`--ignore-element`)
+
+Tools keep their own bookkeeping in a model (annotations, administrative data) that changes
+without the model changing. `--ignore-element NAME` (repeatable; `check`, `merge`, `get`, `list`,
+`values`, `diff`, `merge3`, `git-diff`) treats such an element as the policy treats structured
+comments: its content is not compared. Its differences between fragments are no finding, between
+versions no change, between sides of a three-way merge no conflict; it is no part of a value's
+content, so a value of a definition given several values is matched across versions whatever the
+element holds, and no part of the content of a repeated role's items; `values` leaves it out. It
+is still read, validated against the XML schema and written by `merge`.
+
 ## Export (`merge`)
 
 `merge` merges and checks the files as `check` does, with the same options, the summary going to
@@ -509,7 +552,7 @@ and multiplicity layers need the schema.
 the same rules (the built-in ones, or the schema of the newest release either declares), and
 flatxml's diff is read by AUTOSAR path. Where an element is written, the order of items whose
 order means nothing, and the attributes the merge lets differ (UUID, namespace declarations, xsi:
-attributes) are not changes. One line a change: `- removed`, `+ added`, `> moved`, `~ text`,
+attributes) are not changes, nor is the content of an element `--ignore-element` names. One line a change: `- removed`, `+ added`, `> moved`, `~ text`,
 `@ attribute`, each with its positions. Exit 0 when the versions are the same model, 1 when they
 differ.
 

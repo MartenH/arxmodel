@@ -83,6 +83,9 @@ pub mut:
 	lists map[string]bool // element names some document holds as a list of named elements
 	// `definition sep label` of values given more than once under one parent
 	multi map[string]bool
+	// elements whose content the merge does not compare (Flat.ignore_content): no part of a
+	// value's content
+	ignored []string
 mut:
 	// per name table seen by `observe`, what depends only on names, decided once; keys are
 	// read for every element, so they read these instead of matching and looking up strings
@@ -206,7 +209,7 @@ fn (x &Identified) named_by(n flatxml.Node, f &TabFacts) ?string {
 			return none
 		}
 		if first == '' && k in x.multi {
-			return k + flatxml.key_sep + content_of(n, x.id.value_role(), x.nm)
+			return k + flatxml.key_sep + content_of(n, x.id.value_role(), x.nm, x.ignored)
 		}
 		return first + flatxml.key_sep + k
 	}
@@ -282,6 +285,34 @@ pub fn list_key(name string) string {
 	return flatxml.key_sep + name
 }
 
+// identity_rules is the one rule of identity rules: every child of every parent keyed as x says,
+// merged by its key, an unkeyed one each its own.
+fn identity_rules(x &Identified) []flatxml.Rule {
+	key_fn := fn [x] (n flatxml.Node) ?string {
+		return x.key(n)
+	}
+	return [
+		flatxml.Rule{
+			parent:  '*'
+			key_fn:  key_fn
+			keyless: .quiet
+			merge:   true
+		},
+	]
+}
+
+// with_ignored is a copy of x whose values leave the elements named out of their content.
+fn (x &Identified) with_ignored(ignored []string) &Identified {
+	return &Identified{
+		id:      x.id
+		nm:      x.nm
+		lists:   x.lists
+		multi:   x.multi
+		ignored: ignored.clone()
+		tabs:    x.tabs
+	}
+}
+
 // identity_flat is the merge rules of identity rules, as applied to the models: every child of
 // every parent keyed as `key` says, merged by its key, an unkeyed one each its own.
 pub fn identity_flat(id Identity, models []&Model) Flat {
@@ -298,25 +329,17 @@ pub fn identified(id Identity, models []&Model) &Identified {
 	return x
 }
 
-// flat is the merge rules of the identity rules as applied (see identity_flat).
+// flat is the merge rules of the identity rules as applied (see identity_flat); the Flat keeps x,
+// whose copy ignore_content binds the rule's keys to.
 pub fn (x &Identified) flat() Flat {
-	key_fn := fn [x] (n flatxml.Node) ?string {
-		return x.key(n)
-	}
 	return Flat{
 		rules:             flatxml.RuleSet{
-			rules: [
-				flatxml.Rule{
-					parent:  '*'
-					key_fn:  key_fn
-					keyless: .quiet
-					merge:   true
-				},
-			]
+			rules:    identity_rules(x)
 			// a prefix is a spelling of the namespace: `ar:X` in one file is X in another
 			local_ns: x.nm.ns
 		}
 		described:         ['built-in identity']
 		unkeyed_by_design: true
+		identified:        x
 	}
 }

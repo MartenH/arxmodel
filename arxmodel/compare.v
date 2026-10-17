@@ -81,9 +81,11 @@ pub fn new_ruling(flat0 Flat, name string, st Settings, ty &Typing, models []&Mo
 		}
 	}
 	mut flat := flat0
-	flat.rules = with_settings(flat0.rules, r.fold, r.ignore)
+	flat.ignore_content(opts.ignore_elements)
+	flat.rules = with_settings(flat.rules, r.fold, r.ignore)
 	mut ch := new_content_hashes(r.ignore, naming(flat.rules.local_ns, models))
 	ch.observe_ignored(models)
+	ch.skip_elements(flat.ignored_content)
 	flat.rules = flat.merge_rules(models, mut ch)
 	r.flat = flat
 	for k, rule in flat.rules.rules {
@@ -182,14 +184,11 @@ fn (r &Ruling) in_ignored_content(c flatxml.Change) bool {
 	if r.flat.ignored_content.len == 0 {
 		return false
 	}
-	mut cur := if c.new.ok() { c.new } else { c.old }
-	for cur.ok() {
-		if cur.name() in r.flat.ignored_content {
-			return true
-		}
-		cur = cur.parent()
+	if c.kind == .moved {
+		// out of compared content or into it is a change: only a move within ignored content is not
+		return in_ignored(c.old, r.flat.ignored_content) && in_ignored(c.new, r.flat.ignored_content)
 	}
-	return false
+	return in_ignored(if c.new.ok() { c.new } else { c.old }, r.flat.ignored_content)
 }
 
 // ignored reports whether a change is one of an attribute the merge lets differ.
@@ -298,17 +297,42 @@ pub mut:
 pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged3 {
 	mut m3 := flatxml.merge3(base.view, ours.view, theirs.view)!
 	mut out := []PathConflict{}
+	// a node one side removed while the other changed only content not compared inside it: the
+	// removal is the change, so where theirs removed it, it is removed from the result (which
+	// holds ours); not where the node has a conflict of its own besides
+	mut removals := []flatxml.MNode{}
+	mut kept := map[u32]bool{}
+	ignored := r.flat.ignored_content
 	for c in m3.conflicts {
 		if c.kind == .attr && c.name in r.ignore {
 			continue
 		}
-		// structured comments are not compared, by the policy: ours is kept
-		if r.flat.ignored_content.len > 0 && in_ignored(c.node, r.flat.ignored_content) {
+		// content not compared (structured comments by the policy, ignored elements): ours is
+		// kept; for two additions the node is the base's parent, so the added nodes say
+		if ignored.len > 0 && (in_ignored(c.node, ignored)
+			|| (c.kind == .added && in_ignored(c.ours.new, ignored))) {
 			continue
+		}
+		if ignored.len > 0 && c.kind == .added {
+			// both sides added one node, differing only in content not compared: ours is it
+			if r.same_merged(c.ours.new, c.theirs.new, ignored) {
+				continue
+			}
+		}
+		if ignored.len > 0 && c.kind == .removed {
+			// every edit the other side made below the node, not only the one the conflict names
+			if c.ours.kind == .removed && only_ignored_below(m3.theirs, c.node, ignored) {
+				continue
+			}
+			if c.theirs.kind == .removed && only_ignored_below(m3.ours, c.node, ignored) {
+				removals << c.node
+				continue
+			}
 		}
 		if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {
 			continue
 		}
+		kept[c.node.i] = true
 		what := match c.kind {
 			.text {
 				'text ${show(c.ours.after)} / ${show(c.theirs.after)}'
@@ -335,10 +359,36 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged
 			theirs_at: if c.theirs.new.ok() { m3.theirs.pos(c.theirs.new) } else { '-' }
 		}
 	}
+	for n in removals {
+		// a node with a conflict besides keeps ours, as that conflict says
+		if n.i !in kept {
+			m3.edit.remove(n)!
+		}
+	}
 	return Merged3{
 		m3:        m3
 		conflicts: out
 	}
+}
+
+// same_content reports whether two merged nodes hold the same content, fragment by fragment, as
+// the content hashes see it (what is not compared left out).
+fn same_content(mut ch ContentHashes, a flatxml.MNode, b flatxml.MNode) bool {
+	if !a.ok() || !b.ok() || a.fragment_count() != b.fragment_count() {
+		return false
+	}
+	for k in 0 .. a.fragment_count() {
+		if ch.hash(a.fragment(k)) != ch.hash(b.fragment(k)) {
+			return false
+		}
+	}
+	return true
+}
+
+// change_in_ignored reports whether a change lies in content not compared.
+fn change_in_ignored(c flatxml.Change, ignored []string) bool {
+	n := if c.new.ok() { c.new } else { c.old }
+	return n.ok() && in_ignored(n, ignored)
 }
 
 // side_path is where a side's change puts a node: its path in that side's version, or `removed`.
