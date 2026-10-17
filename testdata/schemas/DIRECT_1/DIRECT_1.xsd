@@ -43,6 +43,25 @@
                <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
             </xsd:annotation>
          </xsd:element>
+         <!-- flags named by an attribute, no wrapper -->
+         <xsd:element name="FLAG" type="D:FLAG" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="flag";mmt.qualifiedName="Store.flag";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+         <!-- entries in a wrapper, keyed by a kind first, then the item itself -->
+         <xsd:element name="ENTRIES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="entry.kind, entry";mmt.qualifiedName="Store.entry";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="ENTRY" type="D:CHOICE"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
          <!-- choices keyed by a kind first, then the item itself (its identity, by the policy) -->
          <xsd:element name="CHOICE" type="D:CHOICE" minOccurs="0" maxOccurs="unbounded">
             <xsd:annotation>
@@ -62,6 +81,19 @@
             <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Option.value";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
          </xsd:element>
       </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="FLAG">
+      <xsd:sequence>
+         <xsd:element name="VALUE" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Flag.value";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+      <xsd:attribute name="NAME" type="xsd:string">
+         <xsd:annotation>
+            <xsd:appinfo source="tags">mmt.qualifiedName="Flag.name";pureMM.maxOccurs="1";pureMM.minOccurs="0";xml.attribute="true"</xsd:appinfo>
+         </xsd:annotation>
+      </xsd:attribute>
    </xsd:complexType>
 
    <xsd:complexType name="CHOICE">

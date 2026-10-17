@@ -926,15 +926,13 @@ pub fn (rs &RuleSet) identity_roles() []IdentityRole {
 		if r.name !in rs.policy.item_identity || !r.wrapper || r.flat || r.items.len == 0 {
 			continue
 		}
-		key := r.items[0].key
-		if key.len == 0 {
-			continue
-		}
+		// the policy's identity wherever it stands in the key, and the part after it
+		def, label := rs.identity_parts(r) or { continue }
 		out << IdentityRole{
 			parent:     r.element
 			items:      r.items.map(it.element)
-			definition: key[0].steps.join('/')
-			label:      if key.len > 1 { key[1].steps.join('/') } else { '' }
+			definition: def
+			label:      label
 		}
 	}
 	return out

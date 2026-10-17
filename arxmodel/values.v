@@ -82,8 +82,8 @@ const any_parent = u32(0xFFFF_FFFF)
 // of the set's table.
 struct ItemIdentity {
 	parent u32
-	def    []u32
-	label  []u32
+	def    IdPath
+	label  IdPath
 	// a role with no wrapper: its items are those whose merge rule keys by the definition first
 	by_key string
 }
@@ -170,8 +170,8 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 		parent := tab.id(r.parent) or { continue }
 		idents << ItemIdentity{
 			parent: parent
-			def:    name_ids(tab, r.definition)
-			label:  name_ids(tab, r.label)
+			def:    id_path(tab, r.definition)
+			label:  id_path(tab, r.label)
 		}
 		for item in r.items {
 			if id := tab.id(item) {
@@ -182,8 +182,8 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 	for r in c.flat.direct_identities {
 		idents << ItemIdentity{
 			parent: any_parent
-			def:    name_ids(tab, r.definition)
-			label:  name_ids(tab, r.label)
+			def:    id_path(tab, r.definition)
+			label:  id_path(tab, r.label)
 			by_key: r.definition
 		}
 		for item in r.items {
@@ -197,8 +197,8 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 		role := id.value_role()
 		idents << ItemIdentity{
 			parent: any_parent
-			def:    name_ids(tab, role.definition)
-			label:  name_ids(tab, role.label)
+			def:    id_path(tab, role.definition)
+			label:  id_path(tab, role.label)
 		}
 		for k in 2 .. n {
 			name := tab.name(u32(k))
@@ -223,16 +223,40 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 	}
 }
 
-// name_ids is a path's names as ids of a table; none where the table lacks a name.
-fn name_ids(tab &flatxml.Names, path string) []u32 {
+// IdPath is a key path below an item, as name ids of the set's table, ending at an element's
+// text or, where its last step is `@NAME`, at that attribute.
+struct IdPath {
+	ids  []u32
+	attr string
+	ok   bool // the table has every name (and the path is not empty)
+}
+
+// id_path is a key path as an IdPath; not ok where the table lacks a name.
+fn id_path(tab &flatxml.Names, path string) IdPath {
 	if path == '' {
-		return []u32{}
+		return IdPath{}
 	}
-	mut out := []u32{}
-	for name in path.split('/') {
-		out << tab.id(name) or { return []u32{} }
+	mut steps := path.split('/')
+	mut attr := ''
+	if steps.last().starts_with('@') {
+		attr = steps.last()[1..]
+		steps = steps[..steps.len - 1].clone()
 	}
-	return out
+	mut ids := []u32{}
+	for name in steps {
+		ids << tab.id(name) or { return IdPath{} }
+	}
+	return IdPath{
+		ids:  ids
+		attr: attr
+		ok:   true
+	}
+}
+
+// starts_at reports whether a child element of an item is where the path starts: the item's
+// name, not a part of it (an attribute of the item itself starts at none).
+fn (p IdPath) starts_at(tag u32) bool {
+	return p.ok && p.ids.len > 0 && p.ids[0] == tag
 }
 
 // visit collects the values of n and below: inner is whether the path has its `#` part, below
@@ -375,8 +399,7 @@ fn (mut w ValueWalk) terminal(n flatxml.MNode, id ItemIdentity) u32 {
 	for c in n.children() {
 		tag := c.tag()
 		// neither the definition nor the label (the item's name, the label a part of its own)
-		if tag != flatxml.text_tag && !(id.def.len > 0 && tag == id.def[0])
-			&& !(id.label.len > 0 && tag == id.label[0]) {
+		if tag != flatxml.text_tag && !id.def.starts_at(tag) && !id.label.starts_at(tag) {
 			w.parts << c.i
 			w.followed << false
 		}
@@ -432,7 +455,7 @@ fn (mut w ValueWalk) terminal(n flatxml.MNode, id ItemIdentity) u32 {
 fn (w &ValueWalk) is_part(c flatxml.MNode, id ItemIdentity) bool {
 	tag := c.tag()
 	return tag != flatxml.text_tag && !(int(tag) < w.skip.len && w.skip[tag])
-		&& !(id.def.len > 0 && tag == id.def[0])
+		&& !id.def.starts_at(tag)
 }
 
 // from_ref starts the path of a node anew, after what is written: its nearest referrable
@@ -508,13 +531,14 @@ fn same_definition(s flatxml.MNode, n flatxml.MNode, id ItemIdentity, def string
 		&& path_text(s, id.def) == def && path_text(s, id.label) == label
 }
 
-// path_text is the text at a path of name ids below a merged node, trimmed; '' where there is none.
-fn path_text(n flatxml.MNode, ids []u32) string {
-	if ids.len == 0 {
+// path_text is the text at a key path below a merged node, or the attribute it ends at, trimmed;
+// '' where there is none.
+fn path_text(n flatxml.MNode, p IdPath) string {
+	if !p.ok {
 		return ''
 	}
 	mut cur := n
-	for id in ids {
+	for id in p.ids {
 		mut found := false
 		for c in cur.children() {
 			if c.tag() == id {
@@ -526,6 +550,9 @@ fn path_text(n flatxml.MNode, ids []u32) string {
 		if !found {
 			return ''
 		}
+	}
+	if p.attr != '' {
+		return trimmed(cur.attr(p.attr))
 	}
 	return trimmed(cur.text())
 }
