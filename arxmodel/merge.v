@@ -59,6 +59,9 @@ pub mut:
 	repeat_rules []int
 	// elements whose content a merge does not compare (structured comments, by the policy)
 	ignored_content []string
+	// the built-in identity rules the Flat was made of, which name values by their definition
+	// (values); nil for a schema's rules
+	identified &Identified = unsafe { nil }
 }
 
 // Conflict is an element pair under a parent path that roles of different holders still give
