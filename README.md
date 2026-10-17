@@ -454,6 +454,8 @@ the one read; if they differ, that is a `merge.value_differs` finding. `rule_fil
 files the rules were read from: the rules file, or each schema found and what it imports, and the
 configuration file that named the schema directory (`OpenOptions.config`). A program that caches
 what it opened can count them among its inputs.
+`open_sources` opens documents a program has read already; `roots` names the directories they
+came from, which a policy filter's relative `file` glob is read from as `open` reads it.
 
 A **model file** (`<name>.arxmodel.toml`) states a model once, beside it, for a program that
 opens it by name:
