@@ -871,7 +871,13 @@ fn cmd_values(o Opts) {
 // cmd_list prints the AUTOSAR path of every referrable element of one element name (answer_list).
 fn cmd_list(o Opts) {
 	kind, c := read_for(o, 'list', 'an element name')
-	answer_list(&c, kind).emit()
+	// printed from the sorted list, no second copy (answer_list buffers it, for the server)
+	paths := list_paths(&c, kind)
+	for p in paths {
+		println(p)
+	}
+	eprintln(plural(paths.len, kind))
+	exit(0)
 }
 
 // read_for is a reading command's argument and the model it reads: the files read and merged,

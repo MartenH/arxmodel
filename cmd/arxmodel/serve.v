@@ -96,13 +96,7 @@ fn answer_get(c &arxmodel.Checked, path string) Answer {
 // answer_list is the AUTOSAR path of every referrable element of one element name, a path held by
 // two such elements once for each.
 fn answer_list(c &arxmodel.Checked, kind string) Answer {
-	mut paths := []string{}
-	for j, n in c.index.nodes {
-		if c.view.node(n).name() == kind {
-			paths << c.index.path_at(j)
-		}
-	}
-	paths.sort()
+	paths := list_paths(c, kind)
 	mut sb := strings.new_builder(paths.len * 64 + 16)
 	for p in paths {
 		sb.writeln(p)
@@ -111,6 +105,18 @@ fn answer_list(c &arxmodel.Checked, kind string) Answer {
 		out: sb.str()
 		err: '${plural(paths.len, kind)}\n'
 	}
+}
+
+// list_paths are the AUTOSAR paths of every referrable element of one element name, sorted.
+fn list_paths(c &arxmodel.Checked, kind string) []string {
+	mut paths := []string{}
+	for j, n in c.index.nodes {
+		if c.view.node(n).name() == kind {
+			paths << c.index.path_at(j)
+		}
+	}
+	paths.sort()
+	return paths
 }
 
 // ask asks the server at socket for a command's answer.
@@ -245,8 +251,15 @@ struct Stamp {
 }
 
 // stamps are the files of the input set, found again, and how they are now.
-fn stamps(o Opts) ![]Stamp {
-	found := arxmodel.find_arxml(o.paths, exclude: o.exclude)!
+fn stamps(o Opts) []Stamp {
+	// the set not found at all (a path gone, a list unreadable) is a stamp of its own: a change
+	// from any set found, and from an empty one
+	found := arxmodel.find_arxml(o.paths, exclude: o.exclude) or {
+		return [Stamp{
+			path:  'not found: ${err.msg()}'
+			mtime: -1
+		}]
+	}
 	mut out := []Stamp{cap: found.files.len + found.failed.len}
 	// a directory that cannot be read (now, or no more) is as much a change as a file
 	for f in found.failed {
@@ -288,7 +301,9 @@ fn changed(was []Stamp, now []Stamp, read_at i64) int {
 			n++
 			continue
 		}
-		if b != s || s.mtime >= read_at {
+		// written in the second the files were read in (not any later time: a file dated ahead by
+		// another clock would read as changed until this one caught up)
+		if b != s || s.mtime == read_at {
 			n++
 		}
 		before.delete(s.path)
@@ -337,7 +352,7 @@ fn worker_args(o Opts, socket string) []string {
 
 // start_worker starts a worker on the input set as it is now and waits until it answers.
 fn start_worker(o Opts, socket string) !Worker {
-	stamp := stamps(o)!
+	stamp := stamps(o)
 	read_at := time.now().unix()
 	if os.exists(socket) {
 		if !is_socket(socket) {
@@ -435,9 +450,20 @@ fn serve_worker(o Opts) {
 		exit(2)
 	}
 	l.set_accept_timeout(5 * time.second)
+	mut orphan := false
 	for {
+		// the listener blocks, so accept alone waits for ever: wait the timeout first, to see
+		// the server go
+		l.wait_for_accept() or {
+			if os.getppid() != parent {
+				orphan = true
+				break // the server is gone
+			}
+			continue
+		}
 		mut conn := l.accept() or {
 			if os.getppid() != parent {
+				orphan = true
 				break // the server is gone
 			}
 			continue
@@ -474,6 +500,13 @@ fn serve_worker(o Opts) {
 		conn.close() or {}
 	}
 	l.close() or {}
+	if orphan {
+		// the server died without removing its workers' directory: this worker does
+		dir := os.dir(o.socket)
+		if os.file_name(dir).starts_with('arxmodel-') {
+			os.rmdir_all(dir) or {}
+		}
+	}
 }
 
 // cmd_serve answers values, get and list over a Unix domain socket until stopped, or idle for
@@ -539,6 +572,13 @@ fn cmd_serve(o Opts) {
 		''
 	}}')
 	for {
+		if idle > 0 {
+			// the listener blocks, so accept alone waits for ever: wait the idle time first
+			l.wait_for_accept() or {
+				eprintln('serve: idle for ${idle} minutes, stopping')
+				break
+			}
+		}
 		mut conn := l.accept() or {
 			eprintln('serve: ${if idle > 0 { 'idle for ${idle} minutes' } else { err.msg() }}, stopping')
 			break
@@ -561,7 +601,7 @@ fn cmd_serve(o Opts) {
 		mut tries := 0
 		for {
 			if cmd in ['values', 'get', 'list', 'reload'] {
-				now := stamps(o) or { []Stamp{} }
+				now := stamps(o)
 				n := changed(w.stamp, now, w.read_at)
 				if (cmd == 'reload' && tries == 0) || n > 0 || w.p == unsafe { nil }
 					|| !w.p.is_alive() {
@@ -600,7 +640,7 @@ fn cmd_serve(o Opts) {
 			}
 			// a file written while the worker answered: that answer is from changed files (compared
 			// as they are: the racy-file rule is the next request's, as the second has not passed)
-			after := stamps(o) or { []Stamp{} }
+			after := stamps(o)
 			if changed(w.stamp, after, max_i64) == 0 {
 				break
 			}

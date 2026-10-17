@@ -102,6 +102,38 @@ set +e
 set -e
 [[ "$(cat notasocket)" == keep ]] || fail 'a file at --socket was removed'
 
+# a file dated ahead (another machine's clock): read once, not again on every request
+mkdir -p ahead && cp m.arxml ahead/a.arxml && touch -d '+1 day' ahead/a.arxml
+"$bin" serve --socket a.sock ahead > ahead.log 2>&1 &
+for _ in $(seq 1 200); do [[ -S a.sock ]] && break; sleep 0.05; done
+"$bin" values --socket a.sock '/**/Dim' > /dev/null 2> ahead1.log
+"$bin" values --socket a.sock '/**/Dim' > /dev/null 2> ahead2.log
+! grep -q 'read again' ahead2.log || { cat ahead2.log; fail 'a future-dated file read again on every request'; }
+"$bin" serve --socket a.sock --stop > /dev/null 2>&1
+
+# an empty set whose directory goes: said (exit 2), not answered as empty
+mkdir -p empty
+"$bin" serve --socket e.sock empty > empty.log 2>&1 &
+for _ in $(seq 1 200); do [[ -S e.sock ]] && break; sleep 0.05; done
+[[ -S e.sock ]] || { cat empty.log; fail 'no server on an empty directory'; }
+rmdir empty
+set +e
+"$bin" values --socket e.sock '/**' > /dev/null 2> gone_set.log
+[[ $? == 2 ]] || { cat gone_set.log; fail 'an input directory gone answered as before'; }
+set -e
+"$bin" serve --socket e.sock --stop > /dev/null 2>&1
+
+# a server killed outright: its worker stops and removes its socket and directory
+"$bin" serve --socket k.sock m.arxml > killed.log 2>&1 &
+killed=$!
+for _ in $(seq 1 200); do [[ -S k.sock ]] && break; sleep 0.05; done
+dirs_before=$(ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* 2> /dev/null | wc -l)
+[[ $dirs_before == 1 ]] || fail "no worker directory for the server ($dirs_before)"
+kill -9 "$killed"
+for _ in $(seq 1 160); do ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/null 2>&1 || break; sleep 0.1; done
+! ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/null 2>&1 || fail 'an orphaned worker left its directory'
+rm -f k.sock
+
 # --idle takes a whole number; a server that cannot start leaves no directory behind
 set +e
 timeout 10 "$bin" serve --socket x.sock --idle 6O m.arxml > /dev/null 2> idle.log
