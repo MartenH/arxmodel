@@ -403,6 +403,16 @@ fn test_files_giving_one_element_two_values_say_so() {
 		other.free()
 	}
 	assert other.findings.map(it.path) == ['/P/F#MAPS']
+	// and so are lists of them, keyed by their element name
+	lists := fn (first string, second string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><MAPS><NOTE>n</NOTE>' +
+			'<${first}><M><SHORT-NAME>m</SHORT-NAME></M></${first}><${second}><M><SHORT-NAME>m</SHORT-NAME></M></${second}></MAPS>')
+	}
+	mut wrapped := open_sources([src('a.arxml', lists('XS', 'YS')), src('b.arxml', lists('YS', 'XS'))])!
+	defer {
+		wrapped.free()
+	}
+	assert wrapped.findings.len == 0, wrapped.findings.str()
 	// nor is a name one file repeats: those are matched by place
 	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
 	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!

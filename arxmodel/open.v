@@ -108,6 +108,7 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	mut notes := []string{}
 	mut ty := &Typing(unsafe { nil })
 	mut rule_files := []string{}
+	mut by_identity := &Identified(unsafe { nil })
 	if opts.policy !in ['', 'spec', 'automat'] {
 		rule_files << opts.policy
 	}
@@ -131,7 +132,8 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		flat, name = f, 'schema ${gname}'
 		ty = new_typing(gov.schema)
 	} else {
-		flat, name = identity_flat(builtin_identity(), [m]), 'built-in identity rules'
+		x := identified(builtin_identity(), [m])
+		flat, name, by_identity = x.flat(), 'built-in identity rules', x
 	}
 	// a reader reads in the order the files are written: siblings as first written, not by key.
 	// The rules name the local namespace already (the schema's, or the model's for the built-in
@@ -146,16 +148,14 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		skip_references:   true
 	}
 	mut c := check_typed(m, flat, name, st, p, copts, ty)!
-	if opts.rules_file == '' && opts.schema_dir == '' {
-		nm := naming(flat.rules.local_ns, [m])
+	if by_identity != unsafe { nil } {
 		_, ignored := st.apply(m, copts)
 		mut ignore := ignored_identities(ignored, [m])
 		for a in ignored {
 			ignore[a] = true
 		}
 		c.findings << singles_differ(mut c.view, c.index, p, &Canon{
-			nm:     nm
-			id:     builtin_identity()
+			x:      by_identity
 			ignore: ignore
 		})
 	}
@@ -205,7 +205,7 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 // one. Attributes the merge ignores (ignore: by name, and by the identity any document gives a
 // name ignored) are no part of either.
 fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, cn &Canon) []Finding {
-	nm := &cn.nm
+	nm := &cn.x.nm
 	mut out := []Finding{}
 	mut slots := map[voidptr]int{}
 	for i in 0 .. v.len() {
@@ -270,11 +270,10 @@ fn doc_number(mut slots map[voidptr]int, d &flatxml.Doc) int {
 	return slots.len - 1
 }
 
-// Canon is how singles_differ writes an element: named as the merge names it, its named
-// children told by the built-in identity rules, attributes in ignore left out.
+// Canon is how singles_differ writes an element: by the identity rules the merge was made by,
+// which name it and key its children, attributes in ignore left out.
 struct Canon {
-	nm     Naming
-	id     Identity
+	x      &Identified
 	ignore map[string]bool
 }
 
@@ -282,7 +281,7 @@ struct Canon {
 // nothing apart) and those in ignore left out; each part length-prefixed, so no text can pass
 // for a part.
 fn (cn &Canon) write_open(mut sb strings.Builder, n flatxml.Node) {
-	write_part(mut sb, cn.nm.node_name(n))
+	write_part(mut sb, cn.x.nm.node_name(n))
 	lo, hi := n.doc.attr_range(n.i)
 	mut attrs := []string{}
 	for a := lo; a < hi; a++ {
@@ -312,8 +311,8 @@ fn write_part(mut sb strings.Builder, s string) {
 
 // canonical is an element's whole content, as one string: its name and attributes (write_open);
 // its own text in each slot among its children (the runs of one slot joined, then trimmed) and
-// its unnamed children so, in document order; then its named children (a short name, or a
-// definition), whose order does not count, sorted.
+// its unkeyed children so, in document order; then its keyed children (is_named), whose order
+// does not count, sorted.
 fn (cn &Canon) canonical(n flatxml.Node) string {
 	mut sb := strings.new_builder(64)
 	cn.write_canonical(mut sb, n)
@@ -357,32 +356,10 @@ fn (cn &Canon) write_canonical(mut sb strings.Builder, n flatxml.Node) {
 	sb.write_u8(`>`)
 }
 
-// is_named reports whether the built-in identity rules name n: by the text at its first name
-// path (a short name), or, for a name its definition names, by its definition.
+// is_named reports whether the identity rules key n (a name, a definition, a list): such
+// children are matched by their key and not their place, so their order does not count.
 fn (cn &Canon) is_named(n flatxml.Node) bool {
-	if cn.id.name.len > 0 && cn.text_at(n, cn.id.name[0]) != '' {
-		return true
-	}
-	name := cn.nm.node_name(n)
-	return cn.id.by_definition.any(glob(it, name)) && cn.text_at(n, cn.id.definition) != ''
-}
-
-// text_at is the trimmed text at a path of child names below n, '' where there is none.
-fn (cn &Canon) text_at(n flatxml.Node, path string) string {
-	mut cur := n
-	for part in path.split('/') {
-		mut found := false
-		for c in cur.children() {
-			if cn.nm.node_name(c) == part {
-				cur, found = c, true
-				break
-			}
-		}
-		if !found {
-			return ''
-		}
-	}
-	return cur.text().trim_space()
+	return cn.x.key(n) != none
 }
 
 // model_namespace is the namespace a model is in: the one most of its documents' roots are in,
