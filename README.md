@@ -64,6 +64,8 @@ arxmodel check --schema-dir DIR --format json <file|dir>... > check.json        
 arxmodel get --schema-dir DIR /Pkg/Name <file|dir>...      # the merged element at an AUTOSAR path
 arxmodel list --schema-dir DIR ECUC-MODULE-DEF <file|dir>... # the paths of every element of a name
 arxmodel values --schema-dir DIR '/Pkg/**/Name' <file|dir>...  # every value there, `path = "text"`
+arxmodel serve --schema-dir DIR --socket m.sock <file|dir>...   # read once; then, in milliseconds:
+arxmodel values --socket m.sock '/Pkg/**/Name'                  # ... (get and list likewise)
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
 arxmodel diff A B                                   # what changed, by AUTOSAR path (no schema needed)
 arxmodel merge3 BASE OURS THEIRS -o OUT             # a three-way merge (no schema needed)
@@ -380,6 +382,45 @@ The pattern is a path glob, as the policy's filters take them: `*` one segment o
 the pattern gives the key. `/Pkg/**/Dim` finds a definition's value wherever it is; `/Pkg/LampCfg`
 gives every value of that container and its subcontainers; `/**` every value. A pattern that is a
 file or directory is refused (the pattern comes first). Exit 1 when no value matches.
+
+## A model kept loaded (`serve`)
+
+A script, an editor or an agent asking one model many questions pays the reading and merging
+each time it runs a command. `serve` pays it once:
+
+```sh
+arxmodel serve --schema-dir DIR --socket m.sock model/ &      # read and merge once
+arxmodel values --socket m.sock '/Pkg/**/Dim'                  # answered from the loaded model
+arxmodel get --socket m.sock /Pkg/LampCfg
+arxmodel serve --socket m.sock --stop
+```
+
+`get`, `list` and `values` with `--socket PATH` take their argument alone and print what they print
+reading the files, with the same exit code. The server takes the options of those commands
+(the rules, `--policy`, `--exclude`) and keeps them; asked with `--socket`, those options are
+refused, as the server reads by its own.
+
+- **Never from changed files.** Before each answer the server finds its input set again and
+  looks at each file's size, inode and modification time; where anything differs (a file added,
+  removed or written) it reads the files again first, and the answer says so on standard error
+  (`read again: 1 file changed`). Modification times have one-second resolution, so a file
+  written in the second the files were read counts as changed until that second has passed.
+  `serve --socket PATH --reload` reads them again anyway.
+- **One model's memory.** The model lives in a worker process (`serve --worker`, its socket in a
+  directory only this user can enter) that the server starts again for each reading, so its memory goes back to the system however often the files
+  change; the server itself holds none. A worker that fails takes no server down.
+- **Files that cannot be read just then** (a tool writing them) give an answer saying why, exit
+  2; the next request tries again. No answer comes from part of the files.
+- **Stopping.** `serve --socket PATH --stop`; or after `--idle` minutes without a request (60 by
+  default, 0 never); a worker whose server is gone stops too.
+- The socket is a Unix domain socket, readable by its owner only (Windows has them too, since
+  Windows 10). Its path is limited to about 100 bytes: a relative path is read from the
+  directory the command runs in.
+
+Other programs can ask a server directly. One request a connection: `COMMAND<tab>ARGUMENT<newline>`
+(`values`, `get`, `list`; `reload`, `ping`, `stop`); the answer is `CODE OUTLEN ERRLEN<newline>`
+followed by OUTLEN bytes of standard output and ERRLEN bytes of standard error, as the command
+prints them.
 
 ## Export (`merge`)
 

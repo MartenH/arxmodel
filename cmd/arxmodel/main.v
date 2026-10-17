@@ -23,6 +23,9 @@
 //   arxmodel values (--schema-dir DIR | --rules FILE) <pattern> <file|dir>...
 //                                              every value a path pattern wants, one a line:
 //                                              `path = "text"`
+//   arxmodel serve (--schema-dir DIR | --rules FILE) --socket PATH <file|dir>...
+//                                              the files read once, get, list and values
+//                                              answered at a socket (--socket PATH on those)
 //   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
 //                  -o OUT|- <file|dir>...      merge and check them as check does (the summary
 //                                              on standard error), and write the merged model
@@ -53,6 +56,7 @@ module main
 
 import arxmodel
 import os
+import strconv
 import strings
 import time
 
@@ -101,6 +105,17 @@ const usage = 'usage:
       container and the last name of the definition (/Pkg/Cfg/Param = "3"); any other value is
       the path of its referrable element, `#` and the elements below it (/Pkg/Elem#LENGTH = "8").
       Exit 1 when no value matches
+  arxmodel serve (--schema-dir DIR | --rules FILE) [--idle MIN]
+                 --socket PATH <file|dir>...
+      read and merge the files once and answer get, list and values at a Unix domain socket:
+      `arxmodel values --socket PATH PATTERN` (get, list likewise) prints what the command prints
+      reading the files, in milliseconds. Before each answer the input set is looked at again
+      (each file found, its size and time) and the files read again where anything changed, by a
+      new worker process, so no answer is from changed files and the server holds one model;
+      files that cannot be read just then give exit 2. Stops after --idle minutes without a
+      request (60; 0 never)
+  arxmodel serve --socket PATH --reload | --stop
+      have the server read its files again; stop it
   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
                  -o OUT|- <file|dir>...
       merge and check the files as check does, the summary going to standard error, and write
@@ -131,13 +146,14 @@ const usage = 'usage:
       every setting of the policy with the values it takes, its value and the specification item
       it concerns, then the severities; --diff, how another policy differs; --schema, the JSON
       Schema of a policy file (policy.schema.json)
-  --policy NAME|FILE (rules, check, merge, get, list, values, diff, merge3, policy): the merge policy:
-      spec (policy.toml, as the AUTOSAR specification has it, the default), automat
+  --policy NAME|FILE (rules, check, merge, get, list, values, diff, merge3, policy): the merge
+      policy: spec (policy.toml, as the AUTOSAR specification has it, the default), automat
       (automat.policy.toml), or a file
   <file|dir>...: the input set, for every command reading models: a file; a directory (every
       .arxml below it); a glob (`*`, `?` within a name, `**` any depth; one matching nothing is
       a warning); @FILE (the paths FILE lists, one a line, `#` comments, relative to FILE);
       --exclude GLOB leaves files out; each file once, sorted by path; --verbose lists them all
+  --socket PATH (get, list, values): ask the server at PATH (serve) instead of reading files
   --jobs N: threads for loading (and for the XML schema layer of check); 0 for one per CPU, at
       most 8'
 
@@ -150,6 +166,11 @@ mut:
 	all        bool     // check: every problem, not the first of each kind
 	exact      bool     // check: keys compared as written
 	ignore     []string // check: attributes whose values may differ between fragments
+	socket     string   // serve: the socket to answer at; get, list, values: the server to ask
+	idle       int = -1 // serve: minutes without a request before it stops (0 never; -1 the default)
+	stop       bool     // serve: stop the server at --socket
+	reload     bool     // serve: have the server at --socket read its files again
+	worker     bool     // serve: be the worker holding the model (started by a server)
 	exclude    []string // file globs left out of the input set
 	verbose    bool     // list every file of the input set
 	compare    []string // check: attributes ignored by default that are compared after all
@@ -242,7 +263,13 @@ fn main() {
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
 				'--skip-multiplicity', '--skip-references', '--refs-from', '--format']
 		}
-		'get', 'list', 'values' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
+		'get', 'list', 'values' {
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--socket']
+		}
+		'serve' {
+			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--socket', '--idle',
+				'--stop', '--reload', '--worker']
+		}
 		'merge' {
 			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
@@ -257,10 +284,12 @@ fn main() {
 		else { []string{} }
 	}
 	// the input set: every command reading models takes excludes, and lists its files
-	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'values', 'merge', 'diff', 'merge3'] {
+	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'values', 'serve', 'merge', 'diff',
+		'merge3'] {
 		allowed << ['--exclude', '--verbose']
 	}
-	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy'] {
+	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy']
+		&& !(args[0] == 'serve' && (opts.stop || opts.reload)) {
 		eprintln('no files or directories given')
 		eprintln(usage)
 		exit(2)
@@ -275,13 +304,15 @@ fn main() {
 			exit(2)
 		}
 	}
-	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'diff', 'merge3', 'git-diff', 'git-setup']
-		&& opts.schema_dir != '' && opts.rules_file != '' {
+	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'serve', 'diff', 'merge3', 'git-diff',
+		'git-setup'] && opts.schema_dir != '' && opts.rules_file != '' {
 		eprintln('${args[0]} takes --schema-dir or --rules, not both')
 		exit(2)
 	}
 	// git-setup records only what it is given: the drivers resolve the rest when they run
-	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'diff', 'merge3', 'git-diff', 'rules'] {
+	// a reading command asking a server needs no rules: the server has its own
+	if (args[0] in ['check', 'merge', 'get', 'list', 'values', 'diff', 'merge3', 'git-diff', 'rules']
+		&& opts.socket == '') || (args[0] == 'serve' && !opts.stop && !opts.reload) {
 		resolve_rules(mut opts) or {
 			// git's diff driver always answers, with a text diff where it cannot read models
 			if args[0] != 'git-diff' {
@@ -303,6 +334,9 @@ fn main() {
 		}
 		'values' {
 			cmd_values(opts)
+		}
+		'serve' {
+			cmd_serve(opts)
 		}
 		'check' {
 			if opts.format != 'text' && opts.format !in arxmodel.report_formats {
@@ -409,6 +443,15 @@ fn parse_opts(args []string) !Opts {
 			'--no-schema' {
 				o.no_schema = true
 			}
+			'--stop' {
+				o.stop = true
+			}
+			'--reload' {
+				o.reload = true
+			}
+			'--worker' {
+				o.worker = true
+			}
 			'--schema' {
 				o.schema = true
 			}
@@ -424,7 +467,7 @@ fn parse_opts(args []string) !Opts {
 				continue
 			}
 			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from',
-			'--format', '--diff' {
+			'--format', '--diff', '--socket', '--idle' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -438,6 +481,13 @@ fn parse_opts(args []string) !Opts {
 					'--refs-from' { o.refs_from << v }
 					'--format' { o.format = v }
 					'--diff' { o.diff = v }
+					'--socket' { o.socket = v }
+					'--idle' {
+						o.idle = strconv.atoi(v) or { -2 }
+						if o.idle < 0 {
+							return error('--idle takes minutes, a whole number of 0 or more (0: never), not ${v}')
+						}
+					}
 					else { o.dump = v }
 				}
 				k += 2
@@ -795,55 +845,22 @@ fn merged(o Opts, out Out, opts arxmodel.CheckOptions) (&arxmodel.Model, arxmode
 }
 
 // cmd_get prints the merged element at an AUTOSAR path: its element, and each file and line it
-// is made of.
+// is made of (answer_get); from the server at --socket where one is given.
 fn cmd_get(o Opts) {
-	out := Out{}
-	if o.paths.len < 2 {
-		eprintln('get needs a path and the files')
-		exit(2)
-	}
-	path := o.paths[0]
-	mut rest := o
-	rest.paths = o.paths[1..]
-	_, _, c, _ := merged(rest, Out{
-		err: true
-	}, all_skipped())
-	hs := c.index.holders(path)
-	if hs.len == 0 {
-		eprintln('nothing at ${path}')
-		exit(1)
-	}
-	if hs.len > 1 {
-		out.line('${path}: held by ${hs.len} elements, which the merge keeps apart')
-	}
-	mut v := c.view
-	for k in hs {
-		n := v.node(k)
-		out.line('${c.index.path_of(k) or { '' }}: ${n.name()}, ${plural(n.fragment_count(), 'element')}, ${n.child_count()} below it')
-		for f in n.fragments() {
-			out.line('  ${v.pos(f)}')
-		}
-	}
+	path, c := read_for(o, 'get', 'a path')
+	answer_get(&c, path).emit()
 }
 
-// cmd_values prints every value a path pattern wants, one a line: `path = "text"` (Checked.values),
-// each as it is found.
+// cmd_values prints every value a path pattern wants, one a line: `path = "text"` (answer_values).
 fn cmd_values(o Opts) {
-	if o.paths.len < 2 {
-		eprintln('values needs a path pattern and the files')
-		exit(2)
+	if o.paths.len > 0 {
+		if why := values_pattern_error(o.paths[0]) {
+			eprintln(why)
+			exit(2)
+		}
 	}
-	pattern := o.paths[0]
-	if (!pattern.starts_with('/') && !pattern.starts_with('#') && !pattern.starts_with('**'))
-		|| (pattern != '/' && os.exists(pattern)) {
-		eprintln('values: ${pattern} is no path pattern (/Pkg/Name, /Pkg/**/Name, ...): the pattern comes before the files')
-		exit(2)
-	}
-	mut rest := o
-	rest.paths = o.paths[1..]
-	_, _, c, _ := merged(rest, Out{
-		err: true
-	}, all_skipped())
+	pattern, c := read_for(o, 'values', 'a path pattern')
+	// printed as found, nothing held (answer_values buffers the same bytes, for the server)
 	n := c.each_value(pattern, fn (v arxmodel.Value) {
 		println(v.line())
 	})
@@ -851,31 +868,38 @@ fn cmd_values(o Opts) {
 	exit(if n == 0 { 1 } else { 0 })
 }
 
-// cmd_list prints the AUTOSAR path of every referrable element of one element name, a path held
-// by two such elements once for each.
+// cmd_list prints the AUTOSAR path of every referrable element of one element name (answer_list).
 fn cmd_list(o Opts) {
-	out := Out{}
+	kind, c := read_for(o, 'list', 'an element name')
+	answer_list(&c, kind).emit()
+}
+
+// read_for is a reading command's argument and the model it reads: the files read and merged,
+// or, with --socket, the answer of the server there, printed (and exit).
+fn read_for(o Opts, cmd string, what string) (string, arxmodel.Checked) {
+	if o.socket != '' {
+		for a in ['--schema-dir', '--rules', '--no-schema', '--policy', '--jobs', '--exclude'] {
+			if a in o.given {
+				eprintln('${cmd} --socket takes no ${a}: the server reads by the options it was started with')
+				exit(2)
+			}
+		}
+		if o.paths.len != 1 {
+			eprintln('${cmd} --socket takes ${what} alone: the server has the files')
+			exit(2)
+		}
+		ask(o.socket, cmd, o.paths[0]).emit()
+	}
 	if o.paths.len < 2 {
-		eprintln('list needs an element name and the files')
+		eprintln('${cmd} needs ${what} and the files')
 		exit(2)
 	}
-	kind := o.paths[0]
 	mut rest := o
 	rest.paths = o.paths[1..]
 	_, _, c, _ := merged(rest, Out{
 		err: true
-	}, all_skipped())
-	mut paths := []string{}
-	for j, n in c.index.nodes {
-		if c.view.node(n).name() == kind {
-			paths << c.index.path_at(j)
-		}
-	}
-	paths.sort()
-	for p in paths {
-		out.line(p)
-	}
-	eprintln('${plural(paths.len, kind)}')
+	}, read_options(o))
+	return o.paths[0], c
 }
 
 fn all_skipped() arxmodel.CheckOptions {
@@ -898,6 +922,16 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 		case_sensitive:    o.exact
 		ignore_attrs:      o.ignore
 		compare_attrs:     o.compare
+	}
+}
+
+// read_options are the options of the commands that only read the merged model (get, list,
+// values): no layer checked.
+fn read_options(o Opts) arxmodel.CheckOptions {
+	return arxmodel.CheckOptions{
+		skip_xml:          true
+		skip_multiplicity: true
+		skip_references:   true
 	}
 }
 
