@@ -226,6 +226,26 @@ fn test_the_policy_filters_apply_to_what_open_found() {
 	assert f[0].severity == .error && f[0].filter == 1
 }
 
+fn test_open_sources_reads_relative_filters_from_its_roots() {
+	// a filter by a file relative to where the files came from, the documents given as bytes
+	policy := open_policy_file('rootfilter', automat_policy_text.replace(open_identity_line,
+		'item_identity = { "Shelf.setting" = "definition" }') +
+		'\n[[filter]]\nmatch = "merge.value_differs"\nfile = "b.arxml"\nseverity = "error"\n')
+	defer {
+		os.rm(policy) or {}
+	}
+	root := os.join_path(os.temp_dir(), 'arxmodel_roots_${os.getpid()}')
+	srcs := [src(os.join_path(root, 'a.arxml'), vk_setting_doc('', '1')),
+		src(os.join_path(root, 'b.arxml'), vk_setting_doc('', '2'))]
+	schemas := os.join_path(@VMODROOT, 'testdata', 'schemas')
+	mut o := open_sources(srcs, schema_dir: schemas, policy: policy, roots: [root])!
+	defer {
+		o.free()
+	}
+	f := o.findings.filter(it.kind == 'value_differs')
+	assert f.len == 1 && f[0].filter == 1 && f[0].severity == .error, f.str()
+}
+
 const open_identity_line = 'item_identity = { "EcucContainerValue.parameterValue" = "definition", "EcucContainerValue.referenceValue" = "definition" }'
 
 fn test_an_element_of_another_namespace_is_not_the_models() {
