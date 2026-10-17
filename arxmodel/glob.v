@@ -1,5 +1,6 @@
 module arxmodel
 
+import math
 import os
 
 // File globs, one matcher for the input set's globs and excludes and the filters' `file`: `*`
@@ -31,11 +32,27 @@ pub:
 // is matched against is: `a/../b` is `b`, where a is a name and not a wildcard.
 pub fn compile_file_glob(glob string) FileGlob {
 	abs := os.is_abs_path(glob)
-	segs := glob.replace('\\', '/').split('/').filter(it != '' && it != '.')
+	norm := glob.replace('\\', '/')
+	segs := norm.split('/').filter(it != '' && it != '.')
+	// the volume an absolute path is on (a drive, or a UNC share's server and share), which `..`
+	// never leaves: at the root it stays there, as the file system has it
+	unc := $if windows { norm.starts_with('//') } $else { false }
+	volume := if !abs || segs.len == 0 {
+		0
+	} else if unc {
+		math.min(2, segs.len)
+	} else if segs[0].ends_with(':') {
+		1
+	} else {
+		0
+	}
 	mut pat := []string{cap: segs.len}
 	for seg in segs {
-		if abs && seg == '..' && pat.len > 0 && pat.last() != '..' && !pat.last().contains_any('*?') {
-			pat.delete_last()
+		if abs && seg == '..' && pat.len >= volume && (pat.len == volume || (pat.last() != '..'
+			&& !pat.last().contains_any('*?'))) {
+			if pat.len > volume {
+				pat.delete_last()
+			}
 		} else {
 			pat << seg
 		}

@@ -199,6 +199,12 @@ fn test_an_exclude_matches_any_spelling_of_a_file() {
 	assert compile_file_glob('/data/a/../b/*.arxml').pat == ['data', 'b', '*.arxml']
 	assert compile_file_glob('/data/**/../x.arxml').pat == ['data', '**', '..', 'x.arxml']
 	assert compile_file_glob('a/../b').pat == ['a', '..', 'b']
+	// and never past the root, or the volume it is on
+	assert compile_file_glob('/../a/*.arxml').pat == ['a', '*.arxml']
+	$if windows {
+		assert compile_file_glob('C:/../**/*.arxml').pat == ['C:', '**', '*.arxml']
+		assert compile_file_glob('//srv/share/../../x.arxml').pat == ['srv', 'share', 'x.arxml']
+	}
 }
 
 fn test_the_set_knows_where_its_files_came_from() {

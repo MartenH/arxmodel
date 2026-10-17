@@ -352,6 +352,28 @@ fn test_files_giving_one_element_two_values_say_so() {
 		labels.free()
 	}
 	assert labels.findings.len == 0, labels.findings.str()
+	// the attributes' order is nothing, nor a schema hint the merge ignores; what lies deeper is
+	// content like the rest
+	ref := fn (attrs string, path string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><PDU-REF ${attrs}>${path}</PDU-REF>')
+	}
+	mut refs := open_sources([src('a.arxml', ref('DEST="I-PDU" BASE="b"', '/P/A')),
+		src('b.arxml', ref('BASE="b" DEST="I-PDU"', '/P/B'))])!
+	defer {
+		refs.free()
+	}
+	assert refs.findings.map(it.path) == ['/P/F#PDU-REF']
+	hinted := frame_doc('12').replace('<AUTOSAR xmlns="urn:m">', '<AUTOSAR xmlns="urn:m" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:m m.xsd">').replace('<FRAME-LENGTH>', '<FRAME-LENGTH xsi:schemaLocation="urn:m x.xsd">')
+	mut hints := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', hinted)])!
+	defer {
+		hints.free()
+	}
+	assert hints.findings.map(it.path) == ['/P/F#FRAME-LENGTH'], hints.findings.str()
+	mut deep := open_sources([src('a.arxml', desc('EN', 'hello')), src('b.arxml', desc('EN', 'hello').replace('L="EN"', 'L="DE"'))])!
+	defer {
+		deep.free()
+	}
+	assert deep.findings.map(it.path) == ['/P/F#DESC']
 	// nor is a name one file repeats: those are matched by place
 	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
 	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!

@@ -2,6 +2,7 @@ module arxmodel
 
 import flatxml
 import os
+import strings
 
 // Opened is a model opened for reading: its files merged into one view, and every referrable
 // element by its AUTOSAR path. It is what a program that reads a model, rather than checks it,
@@ -143,7 +144,12 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	mut c := check_typed(m, flat, name, st, p, copts, ty)!
 	if opts.rules_file == '' && opts.schema_dir == '' {
 		nm := naming(flat.rules.local_ns, [m])
-		c.findings << singles_differ(mut c.view, c.index, p, &nm)
+		_, ignored := st.apply(m, copts)
+		mut ignore := map[string]bool{}
+		for a in ignored {
+			ignore[a] = true
+		}
+		c.findings << singles_differ(mut c.view, c.index, p, &nm, ignore)
 	}
 	c.filter(p, copts, m)
 	mut o := &Opened{
@@ -187,40 +193,47 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 // singles_differ are what the built-in rules' merge cannot say. They match an unnamed element by
 // its place, each file's apart; so under a merged element, the children of one name and
 // attributes that each file gives once (a frame's FRAME-LENGTH) are one element of the model,
-// read from the first file, and a value in which they differ is a finding, as the merge makes one.
-fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, nm &Naming) []Finding {
+// read from the first file, and content in which they differ is a finding, as the merge makes
+// one. Attributes the merge ignores (ignore) are no part of either.
+fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, nm &Naming, ignore map[string]bool) []Finding {
 	mut out := []Finding{}
+	mut slots := map[voidptr]int{}
 	for i in 0 .. v.len() {
 		n := v.node(u32(i))
 		if n.fragment_count() < 2 {
 			continue
 		}
-		mut groups := map[string][]flatxml.MNode{}
-		mut order := []string{}
-		mut repeated := map[string]bool{}
+		mut number := map[string]int{} // a group's identity -> its number, in the order met
+		mut groups := [][]flatxml.MNode{}
+		mut seen := map[u64]bool{} // group number << 32 | document number: a member of the group
+		mut repeated := []bool{}
 		for ch in n.children() {
 			if ch.keyed() || ch.fragment_count() != 1 {
 				continue
 			}
 			f := ch.fragment(0)
-			id := element_identity(f, nm)
-			mut g := groups[id] or {
-				order << id
-				[]flatxml.MNode{}
+			mut sb := strings.new_builder(32)
+			write_open(mut sb, f, nm, ignore)
+			id := sb.str()
+			gi := number[id] or {
+				number[id] = groups.len
+				groups << []flatxml.MNode{}
+				repeated << false
+				groups.len - 1
 			}
-			if g.any(voidptr(it.fragment(0).doc) == voidptr(f.doc)) {
-				repeated[id] = true
+			member := u64(gi) << 32 | u64(doc_number(mut slots, f.doc))
+			if member in seen {
+				repeated[gi] = true
 			}
-			g << ch
-			groups[id] = g
+			seen[member] = true
+			groups[gi] << ch
 		}
-		for id in order {
-			g := groups[id] or { continue }
-			if g.len < 2 || id in repeated {
+		for gi, g in groups {
+			if g.len < 2 || repeated[gi] {
 				continue
 			}
-			first := subtree_text(g[0].fragment(0), nm)
-			if g[1..].all(subtree_text(it.fragment(0), nm) == first) {
+			first := canonical(g[0].fragment(0), nm, ignore)
+			if g[1..].all(canonical(it.fragment(0), nm, ignore) == first) {
 				continue
 			}
 			what := nm.node_name(g[0].fragment(0))
@@ -238,24 +251,66 @@ fn singles_differ(mut v flatxml.Merged, index &PathIndex, p Policy, nm &Naming) 
 	return out
 }
 
-// element_identity is an element's name and attributes, as the merge names them.
-fn element_identity(n flatxml.Node, nm &Naming) string {
-	mut parts := [nm.node_name(n)]
-	lo, hi := n.doc.attr_range(n.i)
-	for a := lo; a < hi; a++ {
-		if int(a) < n.doc.attr_ns.len && n.doc.attr_ns[a] == flatxml.xmlns_ns {
-			continue
-		}
-		parts << '${n.doc.tab.name(n.doc.attr_id(a))}=${n.doc.attr_value(a)}'
+// doc_number is a document's number, given in the order asked.
+fn doc_number(mut slots map[voidptr]int, d &flatxml.Doc) int {
+	if k := slots[voidptr(d)] {
+		return k
 	}
-	return parts.join(flatxml.key_sep)
+	slots[voidptr(d)] = slots.len
+	return slots.len - 1
 }
 
-// subtree_text is an element's leaves, each as its path and trimmed text, in document order.
-fn subtree_text(n flatxml.Node, nm &Naming) string {
-	mut out := []string{}
-	leaf_texts(n, nm.node_name(n), nm, mut out)
-	return out.join(flatxml.key_list_sep)
+// write_open writes an element's name and attributes, as the merge names them, the attributes
+// sorted (their order tells nothing apart) and those in ignore left out.
+fn write_open(mut sb strings.Builder, n flatxml.Node, nm &Naming, ignore map[string]bool) {
+	sb.write_string(nm.node_name(n))
+	lo, hi := n.doc.attr_range(n.i)
+	mut attrs := []string{}
+	for a := lo; a < hi; a++ {
+		if n.doc.is_ns_decl(a) {
+			continue
+		}
+		id := n.doc.tab.name(n.doc.attr_id(a))
+		if id in ignore || n.doc.attr_name(a) in ignore {
+			continue
+		}
+		attrs << '${id}=${n.doc.attr_value(a)}'
+	}
+	attrs.sort()
+	for x in attrs {
+		sb.write_string(flatxml.key_sep)
+		sb.write_string(x)
+	}
+}
+
+// canonical is an element's whole content, as one string: its name and attributes (write_open),
+// its own text runs trimmed, and its children so, in document order.
+fn canonical(n flatxml.Node, nm &Naming, ignore map[string]bool) string {
+	mut sb := strings.new_builder(64)
+	write_canonical(mut sb, n, nm, ignore)
+	return sb.str()
+}
+
+fn write_canonical(mut sb strings.Builder, n flatxml.Node, nm &Naming, ignore map[string]bool) {
+	sb.write_u8(`<`)
+	write_open(mut sb, n, nm, ignore)
+	sb.write_u8(`>`)
+	runs := n.text_runs()
+	mut r := 0
+	mut slot := 0
+	for c in n.children() {
+		for r < runs.len && runs[r].slot == slot {
+			sb.write_string(runs[r].text.trim_space())
+			r++
+		}
+		write_canonical(mut sb, c, nm, ignore)
+		slot++
+	}
+	for r < runs.len {
+		sb.write_string(runs[r].text.trim_space())
+		r++
+	}
+	sb.write_string('</>')
 }
 
 // model_namespace is the namespace a model is in: the one most of its documents' roots are in,
