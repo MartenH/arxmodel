@@ -388,6 +388,21 @@ fn test_files_giving_one_element_two_values_say_so() {
 		cdata.free()
 	}
 	assert cdata.findings.len == 0, cdata.findings.str()
+	// named elements below are compared whatever their order, as the built-in rules merge them
+	both := fn (first string, second string) string {
+		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><MAPS><NOTE>n</NOTE>' +
+			'<MAP><SHORT-NAME>${first}</SHORT-NAME></MAP><MAP><SHORT-NAME>${second}</SHORT-NAME></MAP></MAPS>')
+	}
+	mut order := open_sources([src('a.arxml', both('M1', 'M2')), src('b.arxml', both('M2', 'M1'))])!
+	defer {
+		order.free()
+	}
+	assert order.findings.len == 0, order.findings.str()
+	mut other := open_sources([src('a.arxml', both('M1', 'M2')), src('b.arxml', both('M1', 'M3'))])!
+	defer {
+		other.free()
+	}
+	assert other.findings.map(it.path) == ['/P/F#MAPS']
 	// nor is a name one file repeats: those are matched by place
 	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
 	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!
@@ -433,6 +448,14 @@ fn test_open_says_which_files_the_rules_came_from() {
 		r.free()
 	}
 	assert r.rule_files == [rules]
+	// and a policy file, whatever the rules
+	pol := os.join_path(dir, 'p.toml')
+	os.write_file(pol, default_policy_text)!
+	mut rp := open(files, rules_file: rules, policy: pol)!
+	defer {
+		rp.free()
+	}
+	assert rp.rule_files == [pol, rules]
 	// and by the built-in rules, none
 	mut b := open(files)!
 	defer {
