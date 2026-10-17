@@ -43,6 +43,13 @@
                <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
             </xsd:annotation>
          </xsd:element>
+         <!-- choices keyed by a kind first, then the item itself (its identity, by the policy) -->
+         <xsd:element name="CHOICE" type="D:CHOICE" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="choice.kind, choice";mmt.qualifiedName="Store.choice";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
       </xsd:sequence>
    </xsd:complexType>
 
@@ -53,6 +60,20 @@
          </xsd:element>
          <xsd:element name="VALUE" type="xsd:string" minOccurs="0">
             <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Option.value";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="CHOICE">
+      <xsd:sequence>
+         <xsd:element name="KIND" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Choice.kind";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="DEFINITION-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Choice.definition";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="VALUE" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Choice.value";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
          </xsd:element>
       </xsd:sequence>
    </xsd:complexType>

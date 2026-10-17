@@ -321,7 +321,7 @@ fn keyed_by(n flatxml.MNode, def string) bool {
 		return true
 	}
 	r := n.rule() or { return false }
-	return r.key.len > 0 && r.key[0] == def
+	return def in r.key
 }
 
 // item_parts collects an item's values: its value (terminal) at the item's path when it holds
@@ -333,7 +333,8 @@ fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
 		if !w.is_part(c, id) {
 			continue
 		}
-		if c.i != last && last_tag != flatxml.text_tag && c.tag() == last_tag {
+		if c.i != last && last_tag != flatxml.text_tag && c.tag() == last_tag
+			&& !same_fragment(c, n.m.node(last)) {
 			continue // another file's copy of the value: the first file's is the value
 		}
 		if c.i == last && c.child_count() == 0 {
@@ -344,6 +345,21 @@ fn (mut w ValueWalk) item_parts(n flatxml.MNode, id ItemIdentity, all bool) {
 		}
 		w.visit(c, false, all)
 	}
+}
+
+// same_fragment reports whether two merged children have an element in one fragment of their
+// parent: written side by side, not copies from different files.
+fn same_fragment(a flatxml.MNode, b flatxml.MNode) bool {
+	for i in 0 .. a.fragment_count() {
+		fa := a.fragment(i)
+		for j in 0 .. b.fragment_count() {
+			fb := b.fragment(j)
+			if voidptr(fa.doc) == voidptr(fb.doc) && fa.parent().i == fb.parent().i {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // terminal is the merged child that is an item's value: of its parts (every element but its
@@ -467,8 +483,29 @@ fn (mut w ValueWalk) write_item_name(n flatxml.MNode, id ItemIdentity) {
 		}
 		w.sb.write_u8(`]`)
 	}
+	// one definition given several values under one container (a set): each by its place among
+	// them, as a path shows an item keyed by its content. The merge orders children by key, so
+	// they are neighbours: two siblings are looked at, no list made.
+	mut place := 1
+	mut k := n.i
+	for k > 0 && same_definition(n.m.node(k - 1), n, id, def, label) {
+		place++
+		k--
+	}
+	if place > 1 || (int(n.i) + 1 < n.m.len() && same_definition(n.m.node(n.i + 1), n, id, def, label)) {
+		w.sb.write_string('[#')
+		w.sb.write_decimal(place)
+		w.sb.write_u8(`]`)
+	}
 	w.bounds << lo
 	w.bounds << w.sb.len
+}
+
+// same_definition reports whether a merged node is a sibling of n giving the same definition and
+// label.
+fn same_definition(s flatxml.MNode, n flatxml.MNode, id ItemIdentity, def string, label string) bool {
+	return s.ok() && s.tag() == n.tag() && s.parent().i == n.parent().i
+		&& path_text(s, id.def) == def && path_text(s, id.label) == label
 }
 
 // path_text is the text at a path of name ids below a merged node, trimmed; '' where there is none.

@@ -142,3 +142,19 @@ fn test_values_of_a_role_with_no_wrapper() {
 	d := check_with(m, g, 'rules file', st, p, skip_xml: true, skip_references: true)!
 	assert d.values('/Main/**').map(it.line()) == ['/Main/x = "1"', '/Main/y = "2"']
 }
+
+fn test_values_of_a_role_keyed_by_another_part_first() {
+	// the split key gives a kind before the item itself: the identity is the definition still
+	dir := os.join_path(os.temp_dir(), 'arxmodel_vk_${os.getpid()}', 'direct_kind')
+	os.mkdir_all(dir)!
+	os.write_file(os.join_path(dir, 'a.arxml'), '<?xml version="1.0" encoding="UTF-8"?>
+<DEPOT xmlns="urn:arxmodel:test:direct" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:direct DIRECT_1.xsd">
+<STORES><STORE><SHORT-NAME>Main</SHORT-NAME><CHOICE><KIND>k</KIND><DEFINITION-REF>/d/z</DEFINITION-REF><VALUE>3</VALUE></CHOICE></STORE></STORES>
+</DEPOT>')!
+	m := load([dir])!
+	p := vk_policy('{ "Store.choice" = "definition" }')
+	c := check(m, vk_schemas(m, p), skip_xml: true, skip_references: true)!
+	vals := c.values('/Main/**').map(it.line())
+	assert '/Main/z = "3"' in vals, vals.str()
+	assert !vals.any(it.starts_with('/Main/k')), vals.str()
+}

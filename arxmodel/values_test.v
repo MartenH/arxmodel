@@ -147,3 +147,18 @@ fn test_two_files_giving_an_item_its_value() {
 	// the other file's copy is no value of its own (check reports that the files disagree)
 	assert values_by(m, '/P/**') == ['/P/Cfg/Level = "2"']
 }
+
+fn test_values_written_side_by_side_and_several_of_one_definition() {
+	m := values_model('side_by_side', '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>
+<MODULE-VALUES><SHORT-NAME>Cfg</SHORT-NAME><PARAMETERS>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Level</DEFINITION-REF><VALUE>1</VALUE><VALUE>2</VALUE></NUMBER-PARAM-VALUE>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Mode</DEFINITION-REF><VALUE>a</VALUE></NUMBER-PARAM-VALUE>
+<NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Cfg/Mode</DEFINITION-REF><VALUE>b</VALUE></NUMBER-PARAM-VALUE>
+</PARAMETERS></MODULE-VALUES></ELEMENTS></PACKAGE></PACKAGES></MODEL>')
+	vals := values_by(m, '/P/**')
+	// two values one item writes side by side: both printed, no copy of another file's
+	assert '/P/Cfg/Level#VALUE = "1"' in vals && '/P/Cfg/Level = "2"' in vals, vals.str()
+	// one definition given two values: each by its place
+	assert '/P/Cfg/Mode[#1] = "a"' in vals && '/P/Cfg/Mode[#2] = "b"' in vals, vals.str()
+	assert values_by(m, '/P/Cfg/Mode[#2]') == ['/P/Cfg/Mode[#2] = "b"']
+}

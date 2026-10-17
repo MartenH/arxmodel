@@ -890,17 +890,32 @@ pub fn (rs &RuleSet) direct_identity_roles() []IdentityRole {
 		if r.name !in rs.policy.item_identity || r.wrapper || r.flat || r.items.len == 0 {
 			continue
 		}
-		key := r.items[0].key
-		if key.len == 0 {
-			continue
-		}
+		def, label := rs.identity_parts(r) or { continue }
 		out << IdentityRole{
 			items:      r.items.map(it.element)
-			definition: key[0].steps.join('/')
-			label:      if key.len > 1 { key[1].steps.join('/') } else { '' }
+			definition: def
+			label:      label
 		}
 	}
 	return out
+}
+
+// identity_parts are the paths of an item_identity role's identity and label in its items' key:
+// the part the policy's identity gave (resolve_key), wherever it stands, and the part after it.
+fn (rs &RuleSet) identity_parts(r Rule) ?(string, string) {
+	by := rs.policy.item_identity[r.name] or { return none }
+	if r.items.len == 0 {
+		return none
+	}
+	w := rs.walk_roles(rs.schema.elements[r.items[0].decl].typ, [by]) or { return none }
+	def := w.steps.join('/')
+	key := r.items[0].key
+	for j, k in key {
+		if k.steps.join('/') == def {
+			return def, if j + 1 < key.len { key[j + 1].steps.join('/') } else { '' }
+		}
+	}
+	return none
 }
 
 // identity_roles are the wrapper roles the policy identifies by one role of their items: the
