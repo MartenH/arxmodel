@@ -212,7 +212,8 @@ fn is_socket(path string) bool {
 fn C.umask(mask u32) u32
 
 // listen_private listens at a socket only its owner can use: made so (umask) and kept so (chmod),
-// or refused.
+// or refused. Not on Windows, where a socket takes its directory's access list, which may let
+// others in: serve is not offered there.
 fn listen_private(socket string) !&unix.StreamListener {
 	$if !windows {
 		old := C.umask(0o177)
@@ -227,7 +228,7 @@ fn listen_private(socket string) !&unix.StreamListener {
 		}
 		return l
 	} $else {
-		return unix.listen_stream(socket)!
+		return error('serve is not offered on Windows: a socket there is not made its owner alone')
 	}
 }
 
@@ -352,8 +353,15 @@ fn worker_args(o Opts, socket string) []string {
 
 // start_worker starts a worker on the input set as it is now and waits until it answers.
 fn start_worker(o Opts, socket string) !Worker {
-	stamp := stamps(o)
-	read_at := time.now().unix()
+	mut stamp := stamps(o)
+	mut read_at := time.now().unix()
+	// a file written in this second may be written again in it, to the same size and times: read
+	// in the next second, so that a file dated the second the model was read is one written after
+	if stamp.any(it.mtime == read_at) {
+		time.sleep(time.Duration((read_at + 1) * 1000 - time.now().unix_milli() + 1) * time.millisecond)
+		stamp = stamps(o)
+		read_at = time.now().unix()
+	}
 	if os.exists(socket) {
 		if !is_socket(socket) {
 			return error('${socket} is there and is no socket: not removed')
@@ -420,7 +428,12 @@ fn worker_socket(dir string, n int) string {
 // private_dir makes a directory for the workers' sockets that only this user can enter: not the
 // server's own directory, which others may write in (/tmp), where one could take a worker's path.
 fn private_dir() !string {
-	dir := os.join_path(os.temp_dir(), 'arxmodel-${os.getpid()}-${time.now().unix_milli()}')
+	name := 'arxmodel-${os.getpid()}-${time.now().unix_milli()}'
+	mut dir := os.join_path(os.temp_dir(), name)
+	// a socket path is at most about 100 bytes (104 on some systems): a long TMPDIR is not used
+	if worker_socket(dir, 99999).len >= 100 {
+		dir = os.join_path('/tmp', name)
+	}
 	os.mkdir(dir, mode: 0o700)!
 	$if !windows {
 		st := os.stat(dir)!
@@ -638,10 +651,10 @@ fn cmd_serve(o Opts) {
 			if cmd !in ['values', 'get', 'list'] {
 				break
 			}
-			// a file written while the worker answered: that answer is from changed files (compared
-			// as they are: the racy-file rule is the next request's, as the second has not passed)
+			// a file written while the worker answered: that answer is from changed files (a file
+			// dated the second the model was read in, written after it: start_worker waits)
 			after := stamps(o)
-			if changed(w.stamp, after, max_i64) == 0 {
+			if changed(w.stamp, after, w.read_at) == 0 {
 				break
 			}
 			tries++

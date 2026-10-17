@@ -413,9 +413,9 @@ refused, as the server reads by its own.
   2; the next request tries again. No answer comes from part of the files.
 - **Stopping.** `serve --socket PATH --stop`; or after `--idle` minutes without a request (60 by
   default, 0 never); a worker whose server is gone stops too.
-- The socket is a Unix domain socket, readable by its owner only (Windows has them too, since
-  Windows 10). Its path is limited to about 100 bytes: a relative path is read from the
-  directory the command runs in.
+- The socket is a Unix domain socket, readable by its owner only. Not on Windows: a socket
+  there takes its directory's access list, so `serve` is not offered. Its path is limited to
+  about 100 bytes: a relative path is read from the directory the command runs in.
 
 Other programs can ask a server directly. One request a connection: `COMMAND<tab>ARGUMENT<newline>`
 (`values`, `get`, `list`; `reload`, `ping`, `stop`); the answer is `CODE OUTLEN ERRLEN<newline>`

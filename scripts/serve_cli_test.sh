@@ -134,6 +134,17 @@ for _ in $(seq 1 160); do ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/nu
 ! ls -d "${TMPDIR:-/tmp}"/arxmodel-"$killed"-* > /dev/null 2>&1 || fail 'an orphaned worker left its directory'
 rm -f k.sock
 
+# a long TMPDIR: the workers' sockets go where their paths fit
+long="$work/$(printf 'd%.0s' $(seq 1 90))"
+mkdir -p "$long"
+TMPDIR="$long" "$bin" serve --socket l.sock m.arxml > long.log 2>&1 &
+longserver=$!
+for _ in $(seq 1 200); do [[ -S l.sock ]] && break; sleep 0.05; done
+[[ -S l.sock ]] || { cat long.log; fail 'no server with a long TMPDIR'; }
+"$bin" values --socket l.sock '/**/Dim' > /dev/null 2>&1 || fail 'no answer with a long TMPDIR'
+"$bin" serve --socket l.sock --stop > /dev/null 2>&1
+for _ in $(seq 1 100); do kill -0 $longserver 2> /dev/null || break; sleep 0.05; done
+
 # --idle takes a whole number; a server that cannot start leaves no directory behind
 set +e
 timeout 10 "$bin" serve --socket x.sock --idle 6O m.arxml > /dev/null 2> idle.log
