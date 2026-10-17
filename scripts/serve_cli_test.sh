@@ -15,7 +15,7 @@ cleanup() {
 	cd / && rm -rf "$work"
 }
 trap cleanup EXIT
-unset ARXMODEL_SCHEMA_DIR XDG_RUNTIME_DIR # the workers' directory in TMPDIR, looked for there
+unset ARXMODEL_SCHEMA_DIR
 export XDG_CONFIG_HOME="$work/config"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 cp "$root/testdata/compare/base.arxml" m.arxml
@@ -148,29 +148,6 @@ set +e
 set -e
 [[ -S k.sock ]] || fail 'a stale socket removed'
 rm -f k.sock
-
-# a long TMPDIR: the workers' sockets go where their paths fit
-long="$work/$(printf 'd%.0s' $(seq 1 90))"
-mkdir -p "$long"
-TMPDIR="$long" "$bin" serve --socket l.sock m.arxml > long.log 2>&1 &
-longserver=$!
-for _ in $(seq 1 200); do [[ -S l.sock ]] && break; sleep 0.05; done
-[[ -S l.sock ]] || { cat long.log; fail 'no server with a long TMPDIR'; }
-"$bin" values --socket l.sock '/**/Dim' > /dev/null 2>&1 || fail 'no answer with a long TMPDIR'
-"$bin" serve --socket l.sock --stop > /dev/null 2>&1
-for _ in $(seq 1 100); do kill -0 $longserver 2> /dev/null || break; sleep 0.05; done
-
-# a base others may rename in (not sticky, not this user's alone): refused; XDG_RUNTIME_DIR used
-mkdir -p open && chmod 777 open
-set +e
-TMPDIR="$work/open" timeout 20 "$bin" serve --socket o.sock m.arxml > /dev/null 2> open.log
-[[ $? == 2 ]] && grep -q 'not sticky' open.log || { cat open.log; fail 'a worker directory in a shared, not sticky, directory'; }
-set -e
-mkdir -p run && chmod 700 run
-XDG_RUNTIME_DIR="$work/run" "$bin" serve --socket r.sock m.arxml > run.log 2>&1 &
-for _ in $(seq 1 200); do [[ -S r.sock ]] && break; sleep 0.05; done
-ls -d run/arxmodel-* > /dev/null 2>&1 || { cat run.log; fail 'XDG_RUNTIME_DIR not used'; }
-"$bin" serve --socket r.sock --stop > /dev/null 2>&1
 
 # --idle takes a whole number; a server that cannot start leaves no directory behind
 set +e

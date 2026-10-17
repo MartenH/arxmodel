@@ -451,26 +451,8 @@ fn worker_socket(dir string, n int) string {
 
 // private_dir makes a directory for the workers' sockets that only this user can enter: not the
 // server's own directory, which others may write in (/tmp), where one could take a worker's path.
-// In XDG_RUNTIME_DIR where there is one (this user's own), else the temporary directory; either
-// must keep others from renaming what it holds (this user's alone, or sticky like /tmp).
 fn private_dir() !string {
-	name := 'arxmodel-${os.getpid()}-${time.now().unix_milli()}'
-	mut base := os.getenv('XDG_RUNTIME_DIR')
-	// a socket path is at most about 100 bytes (104 on some systems): a long base is not used
-	if base == '' || !os.is_abs_path(base) || worker_socket(os.join_path(base, name), 99999).len >= 100 {
-		base = os.temp_dir()
-	}
-	if worker_socket(os.join_path(base, name), 99999).len >= 100 {
-		base = '/tmp'
-	}
-	$if !windows {
-		st := os.stat(base)!
-		mine := st.uid == u32(os.getuid()) && st.mode & 0o022 == 0
-		if !mine && st.mode & 0o1000 == 0 {
-			return error('${base}: others may rename what it holds (not sticky): set TMPDIR to a directory of your own')
-		}
-	}
-	dir := os.join_path(base, name)
+	dir := os.join_path(os.temp_dir(), 'arxmodel-${os.getpid()}-${time.now().unix_milli()}')
 	os.mkdir(dir, mode: 0o700)!
 	$if !windows {
 		st := os.stat(dir)!
@@ -632,8 +614,9 @@ fn cmd_serve(o Opts) {
 		exit(2)
 	}
 	idle := if o.idle < 0 { 60 } else { o.idle }
-	// idle minutes count from the last request: a connection asking nothing does not count
-	mut last := time.now()
+	if idle > 0 {
+		l.set_accept_timeout(idle * time.minute)
+	}
 	eprintln('serving ${plural(w.files, 'file')} at ${o.socket}${if idle > 0 {
 		', stopping after ${idle} idle minutes'
 	} else {
@@ -641,13 +624,7 @@ fn cmd_serve(o Opts) {
 	}}')
 	for {
 		if idle > 0 {
-			// the listener blocks, so accept alone waits for ever: wait the idle time left first
-			left := idle * time.minute - time.since(last)
-			if left <= 0 {
-				eprintln('serve: idle for ${idle} minutes, stopping')
-				break
-			}
-			l.set_accept_timeout(left)
+			// the listener blocks, so accept alone waits for ever: wait the idle time first
 			l.wait_for_accept() or {
 				eprintln('serve: idle for ${idle} minutes, stopping')
 				break
@@ -662,7 +639,6 @@ fn cmd_serve(o Opts) {
 			conn.close() or {} // nothing asked in time
 			continue
 		}
-		last = time.now()
 		cmd, arg := req.all_before('\t'), req.all_after('\t')
 		if cmd == 'stop' {
 			send(mut conn, Answer{

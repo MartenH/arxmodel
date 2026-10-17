@@ -407,10 +407,9 @@ refused, as the server reads by its own.
   written in the second the files were read counts as changed until that second has passed.
   `serve --socket PATH --reload` reads them again anyway.
 - **One model's memory.** The model lives in a worker process (`serve --worker`, its socket in a
-  directory only this user can enter, in `XDG_RUNTIME_DIR` or else the temporary directory,
-  which must be this user's alone or sticky like `/tmp`) that the server starts again for each
-  reading, so its memory goes back to the system however often the files change; the server
-  itself holds none. A worker that fails takes no server down.
+  directory only this user can enter) that the server starts again for each reading, so its
+  memory goes back to the system however often the files change; the server itself holds none.
+  A worker that fails takes no server down.
 - **Files that cannot be read just then** (a tool writing them) give an answer saying why, exit
   2; the next request tries again. No answer comes from part of the files.
 - **Stopping.** `serve --socket PATH --stop`; or after `--idle` minutes without a request (60 by

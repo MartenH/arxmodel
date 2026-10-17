@@ -286,7 +286,10 @@ fn main() {
 	// the input set: every command reading models takes excludes, and lists its files
 	if args[0] in ['load', 'rules', 'check', 'get', 'list', 'values', 'serve', 'merge', 'diff',
 		'merge3'] {
-		allowed << ['--exclude', '--verbose']
+		allowed << '--exclude'
+		if args[0] != 'serve' {
+			allowed << '--verbose' // a worker reads for serve: its listing is not printed
+		}
 	}
 	if opts.paths.len == 0 && args[0] !in ['git-setup', 'policy']
 		&& !(args[0] == 'serve' && (opts.stop || opts.reload)) {
