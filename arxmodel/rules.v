@@ -881,6 +881,28 @@ fn (mut rs RuleSet) check_naming(mut r Rule) {
 	}
 }
 
+// direct_identity_roles are the roles the policy identifies by one role of their items whose items
+// are written in their holder with no wrapper: merged by that identity as their split key
+// (resolve_key), named by it by values as a wrapper role's items are. Their parent is left empty.
+pub fn (rs &RuleSet) direct_identity_roles() []IdentityRole {
+	mut out := []IdentityRole{}
+	for r in rs.rules {
+		if r.name !in rs.policy.item_identity || r.wrapper || r.flat || r.items.len == 0 {
+			continue
+		}
+		key := r.items[0].key
+		if key.len == 0 {
+			continue
+		}
+		out << IdentityRole{
+			items:      r.items.map(it.element)
+			definition: key[0].steps.join('/')
+			label:      if key.len > 1 { key[1].steps.join('/') } else { '' }
+		}
+	}
+	return out
+}
+
 // identity_roles are the wrapper roles the policy identifies by one role of their items: the
 // wrapper, its items, and the resolved paths of their identity and of the rest of the key.
 pub fn (rs &RuleSet) identity_roles() []IdentityRole {

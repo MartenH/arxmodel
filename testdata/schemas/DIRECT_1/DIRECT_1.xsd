@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A synthetic schema for arxmodel's tests: stores whose options are given to a definition and
+     written in the store, with no wrapper. It is written here. -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:D="urn:arxmodel:test:direct"
+            targetNamespace="urn:arxmodel:test:direct" elementFormDefault="qualified">
+   <xsd:element name="DEPOT" type="D:DEPOT"/>
+
+   <xsd:group name="NAMED">
+      <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Named"</xsd:appinfo></xsd:annotation>
+      <xsd:sequence>
+         <xsd:element name="SHORT-NAME" type="xsd:string" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">mmt.qualifiedName="Named.shortName";pureMM.maxOccurs="1";pureMM.minOccurs="1"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpIdentityContributor</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:group>
+
+   <xsd:complexType name="DEPOT">
+      <xsd:sequence>
+         <xsd:element name="STORES" minOccurs="0">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="store.shortName";mmt.qualifiedName="Depot.store";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+            <xsd:complexType>
+               <xsd:choice minOccurs="0" maxOccurs="unbounded">
+                  <xsd:element name="STORE" type="D:STORE"/>
+               </xsd:choice>
+            </xsd:complexType>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="STORE">
+      <xsd:sequence>
+         <xsd:group ref="D:NAMED"/>
+         <!-- options written in the store itself, no wrapper; each the value of a definition -->
+         <xsd:element name="OPTION" type="D:OPTION" minOccurs="0" maxOccurs="unbounded">
+            <xsd:annotation>
+               <xsd:appinfo source="tags">atp.Splitkey="option";mmt.qualifiedName="Store.option";pureMM.maxOccurs="-1";pureMM.minOccurs="0"</xsd:appinfo>
+               <xsd:appinfo source="stereotypes">atpSplitable</xsd:appinfo>
+            </xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+
+   <xsd:complexType name="OPTION">
+      <xsd:sequence>
+         <xsd:element name="DEFINITION-REF" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Option.definition";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+         <xsd:element name="VALUE" type="xsd:string" minOccurs="0">
+            <xsd:annotation><xsd:appinfo source="tags">mmt.qualifiedName="Option.value";pureMM.maxOccurs="1";pureMM.minOccurs="0"</xsd:appinfo></xsd:annotation>
+         </xsd:element>
+      </xsd:sequence>
+   </xsd:complexType>
+</xsd:schema>

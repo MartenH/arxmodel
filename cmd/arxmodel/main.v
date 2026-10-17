@@ -844,12 +844,11 @@ fn cmd_values(o Opts) {
 	_, _, c, _ := merged(rest, Out{
 		err: true
 	}, all_skipped())
-	vals := c.values(pattern)
-	for v in vals {
+	n := c.each_value(pattern, fn (v arxmodel.Value) {
 		println(v.line())
-	}
-	eprintln(plural(vals.len, 'value'))
-	exit(if vals.len == 0 { 1 } else { 0 })
+	})
+	eprintln(plural(n, 'value'))
+	exit(if n == 0 { 1 } else { 0 })
 }
 
 // cmd_list prints the AUTOSAR path of every referrable element of one element name, a path held

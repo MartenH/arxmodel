@@ -84,6 +84,8 @@ struct ItemIdentity {
 	parent u32
 	def    []u32
 	label  []u32
+	// a role with no wrapper: its items are those whose merge rule keys by the definition first
+	by_key string
 }
 
 // ValueWalk is one pass over a merged view collecting the values a pattern wants. The path of
@@ -93,8 +95,9 @@ struct ItemIdentity {
 // copied, then its name), so the segments of the wrappers above it stay as they were for their
 // other children.
 struct ValueWalk {
-	ix  &PathIndex
-	pat []string // the pattern's segments
+	view &flatxml.Merged = unsafe { nil }
+	ix   &PathIndex
+	pat  []string // the pattern's segments
 	// per name id of the set's table: the item identities of elements of that name (several
 	// roles may share an item name, under different parents)
 	item_of [][]int
@@ -112,6 +115,8 @@ mut:
 	ref_s0 int
 	ref_s1 int
 	out    []Value
+	each   ?fn (Value) // each value as found, where the caller asks so (each_value)
+	count  int
 	// terminal's scratch, kept between items: an item's parts, where a fragment writes each, and
 	// whether a fragment writes another part after it
 	parts    []u32
@@ -121,9 +126,35 @@ mut:
 
 // values are the values a path pattern wants, in the order of the merged view (see above).
 pub fn (c &Checked) values(pattern string) []Value {
+	mut w := c.value_walk(pattern)
+	w.walk()
+	return w.out
+}
+
+// each_value gives f every value a pattern wants, in the order of the merged view, as it is
+// found, and returns how many: nothing is kept, so a value's path and text are views valid during
+// the call (clone them to keep them).
+pub fn (c &Checked) each_value(pattern string, f fn (Value)) int {
+	mut w := c.value_walk(pattern)
+	w.each = f
+	w.walk()
+	return w.count
+}
+
+// walk visits the merged view from its root.
+fn (mut w ValueWalk) walk() {
+	if w.view != unsafe { nil } && w.view.root().ok() {
+		w.visit(w.view.root(), false, false)
+	}
+}
+
+// value_walk is a walk for a pattern over the merged view, its tables made.
+fn (c &Checked) value_walk(pattern string) ValueWalk {
 	v := c.view
 	if v == unsafe { nil } || !v.root().ok() {
-		return []Value{}
+		return ValueWalk{
+			ix: c.index
+		}
 	}
 	tab := v.set.tab
 	n := tab.len()
@@ -141,6 +172,19 @@ pub fn (c &Checked) values(pattern string) []Value {
 			parent: parent
 			def:    name_ids(tab, r.definition)
 			label:  name_ids(tab, r.label)
+		}
+		for item in r.items {
+			if id := tab.id(item) {
+				item_of[id] << idents.len - 1
+			}
+		}
+	}
+	for r in c.flat.direct_identities {
+		idents << ItemIdentity{
+			parent: any_parent
+			def:    name_ids(tab, r.definition)
+			label:  name_ids(tab, r.label)
+			by_key: r.definition
 		}
 		for item in r.items {
 			if id := tab.id(item) {
@@ -168,7 +212,8 @@ pub fn (c &Checked) values(pattern string) []Value {
 	if pat.len == 0 {
 		pat = ['**'] // `/`: the root, so every value
 	}
-	mut w := ValueWalk{
+	return ValueWalk{
+		view:    v
 		ix:      c.index
 		pat:     pat
 		item_of: item_of
@@ -176,8 +221,6 @@ pub fn (c &Checked) values(pattern string) []Value {
 		skip:    skip
 		sb:      strings.new_builder(256)
 	}
-	w.visit(v.root(), false, false)
-	return w.out
 }
 
 // name_ids is a path's names as ids of a table; none where the table lacks a name.
@@ -264,11 +307,21 @@ fn (w &ValueWalk) identity_of(n flatxml.MNode) int {
 	for k in w.item_of[tag] {
 		id := w.idents[k]
 		if (id.parent == any_parent || n.parent().tag() == id.parent)
-			&& path_text(n, id.def) != '' {
+			&& path_text(n, id.def) != '' && keyed_by(n, id.by_key) {
 			return k
 		}
 	}
 	return -1
+}
+
+// keyed_by reports whether a merged node's rule keys it by a definition path first; true where
+// none is asked (a wrapper role's items, the built-in rules').
+fn keyed_by(n flatxml.MNode, def string) bool {
+	if def == '' {
+		return true
+	}
+	r := n.rule() or { return false }
+	return r.key.len > 0 && r.key[0] == def
 }
 
 // item_parts collects an item's values: its value (terminal) at the item's path when it holds
@@ -305,7 +358,9 @@ fn (mut w ValueWalk) terminal(n flatxml.MNode, id ItemIdentity) u32 {
 	w.followed.clear()
 	for c in n.children() {
 		tag := c.tag()
-		if tag != flatxml.text_tag && !(id.def.len > 0 && tag == id.def[0]) {
+		// neither the definition nor the label (the item's name, the label a part of its own)
+		if tag != flatxml.text_tag && !(id.def.len > 0 && tag == id.def[0])
+			&& !(id.label.len > 0 && tag == id.label[0]) {
 			w.parts << c.i
 			w.followed << false
 		}
@@ -459,8 +514,18 @@ fn (mut w ValueWalk) write_inner(n flatxml.MNode) {
 	w.bounds << w.sb.len
 }
 
-// emit adds n's text as a value at the path written.
+// emit gives n's text as a value at the path written: to the caller's function, as views valid
+// during the call, or kept.
 fn (mut w ValueWalk) emit(n flatxml.MNode) {
+	w.count++
+	if f := w.each {
+		f(Value{
+			path: unsafe { tos(&w.sb[w.start], w.sb.len - w.start) }
+			text: trimmed(n.text())
+			node: n.i
+		})
+		return
+	}
 	w.out << Value{
 		path: w.sb[w.start..].bytestr()
 		text: trimmed(n.text()).clone()
