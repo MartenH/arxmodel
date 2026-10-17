@@ -55,14 +55,23 @@ pub:
 
 fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Policy) []XmlFound {
 	mut out := []XmlFound{}
+	// a checker per schema, kept for this thread's documents: what it works out about the schema
+	// (each type's index and automaton, each pattern's) is the same for every document, and
+	// worked out again per document it was most of this layer's time
+	mut checkers := map[voidptr]&xsd.Checker{}
 	for k := first; k < m.set.docs.len; k += step {
 		s := schema_of[k]
 		if s == unsafe { nil } {
 			continue
 		}
 		mut d := m.set.docs[k]
-		// every finding kept: one past a cap would be an error lost
-		v := xsd.validate(mut d, s, max_findings: max_i32) or {
+		mut c := checkers[voidptr(s)] or {
+			// every finding kept: one past a cap would be an error lost
+			nc := xsd.new_checker(s, max_findings: max_i32)
+			checkers[voidptr(s)] = nc
+			nc
+		}
+		v := c.validate(mut d) or {
 			out << XmlFound{
 				finding: Finding{
 					layer:    .xml_schema
@@ -75,10 +84,11 @@ fn validate_every(m &Model, schema_of []&xsd.Schema, first int, step int, p Poli
 			}
 			continue
 		}
-		lines := d.line_index()
+		// a position from the document's line index, made on its first finding (none for a
+		// document without one)
 		for f in v.findings {
-			kind := '${f.kind}'
-			line, col := lines.line_col(d.src_off[f.node])
+			kind := f.kind.str()
+			line, col := d.line_col(f.node)
 			what := d.name(f.node)
 			out << XmlFound{
 				finding: Finding{
