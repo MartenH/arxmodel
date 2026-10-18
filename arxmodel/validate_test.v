@@ -1,6 +1,5 @@
 module arxmodel
 
-import flatxml.xsd
 import os
 
 fn vdata(p ...string) string {

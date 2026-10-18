@@ -196,13 +196,11 @@ fn test_an_attribute_ignored_by_one_spelling_is_left_out_of_every_hash() {
 		d.resolve_namespaces() or { panic(err) }
 		return d
 	}
-	a := mk('<A xmlns="urn:m" xmlns:p="urn:x" p:id="1"/>')
-	b := mk('<A xmlns="urn:m" xmlns:q="urn:x" q:id="2"/>')
+	mut a := mk('<A xmlns="urn:m" xmlns:p="urn:x" p:id="1"/>')
+	mut b := mk('<A xmlns="urn:m" xmlns:q="urn:x" q:id="2"/>')
 	mut set := flatxml.DocSet.new()
-	mut da := a
-	mut db := b
-	set.add(mut da)
-	set.add(mut db)
+	set.add(mut a)
+	set.add(mut b)
 	m := &Model{
 		set: set
 	}

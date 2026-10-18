@@ -101,7 +101,7 @@ fn (mut r Reader) resolve() ! {
 	for ct in 0 .. r.s.complex_types.len {
 		mut from := map[u64]u64{}
 		for g in r.ct_agroups[u32(ct)] or { []u32{} } {
-			// joined as union_of joins, recording the uses it keeps
+			// joined as a set (a group reached twice adds its attributes once), recording the uses kept
 			for j, u in r.flatten(g)! {
 				if !r.s.complex_types[ct].attrs.any(it.decl == u.decl) {
 					r.s.complex_types[ct].attrs << u
@@ -217,7 +217,8 @@ fn (mut r Reader) flatten(g u32) ![]AttrUse {
 	mut attrs := r.agroups[g].attrs.clone()
 	mut origins := []u64{len: attrs.len, init: u64(g) << 32 | u64(index)}
 	for sub in r.agroups[g].refs {
-		// joined as union_of joins, each kept use with where it is written
+		// joined as a set (a group reached twice adds its attributes once), each kept use with
+		// where it is written
 		for j, u in r.flatten(sub)! {
 			if !attrs.any(it.decl == u.decl) {
 				attrs << u
@@ -230,18 +231,6 @@ fn (mut r Reader) flatten(g u32) ![]AttrUse {
 	r.agroups[g].busy = false
 	r.agroups[g].done = true
 	return attrs
-}
-
-// union_of is a then the uses of b whose declaration a does not have: attribute groups combine
-// as sets, so a group reached twice contributes its attributes once.
-fn union_of(a []AttrUse, b []AttrUse) []AttrUse {
-	mut out := a.clone()
-	for u in b {
-		if !out.any(it.decl == u.decl) {
-			out << u
-		}
-	}
-	return out
 }
 
 // check_simple_cycles refuses a simple type that is its own base, directly or through others.

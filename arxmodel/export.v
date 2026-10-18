@@ -101,16 +101,16 @@ fn relocate(location string, from string, to string) (string, string) {
 	if to == '-' {
 		return location, 'xsi:schemaLocation names ${location} as ${from} does, relative to that file'
 	}
-	from_dir := os.real_path(os.dir(from))
-	to_dir := os.real_path(os.dir(os.abs_path(to)))
-	if from_dir == to_dir {
+	src_dir := os.real_path(os.dir(from))
+	dst_dir := os.real_path(os.dir(os.abs_path(to)))
+	if src_dir == dst_dir {
 		return location, ''
 	}
-	target := os.join_path(from_dir, location)
+	target := os.join_path(src_dir, location)
 	if !os.exists(target) {
-		return location, 'xsi:schemaLocation names ${location} as ${from} does: no such file beside it to locate from ${to_dir}'
+		return location, 'xsi:schemaLocation names ${location} as ${from} does: no such file beside it to locate from ${dst_dir}'
 	}
-	return relative_path(to_dir, os.real_path(target)), ''
+	return relative_path(dst_dir, os.real_path(target)), ''
 }
 
 // relative_path is the path of target from directory dir, both absolute.

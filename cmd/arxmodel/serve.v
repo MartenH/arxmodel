@@ -479,7 +479,7 @@ fn serve_worker(o Opts) {
 	}
 	m, _, c, _ := merged(o, Out{
 		err: true
-	}, read_options(o))
+	}, read_options())
 	if m.failed.len > 0 {
 		// no answer from a part of the files: the server says why, from this file
 		os.write_file(errs, m.failed.map(it.msg).join('; ')) or {}
