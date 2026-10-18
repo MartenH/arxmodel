@@ -908,16 +908,8 @@ fn read_for(o Opts, cmd string, what string) (string, arxmodel.Checked) {
 	rest.paths = o.paths[1..]
 	_, _, c, _ := merged(rest, Out{
 		err: true
-	}, read_options(o))
+	}, read_options())
 	return o.paths[0], c
-}
-
-fn all_skipped() arxmodel.CheckOptions {
-	return arxmodel.CheckOptions{
-		skip_xml:          true
-		skip_multiplicity: true
-		skip_references:   true
-	}
 }
 
 // check_options are the options given to check and merge, as the merge's.
@@ -937,7 +929,7 @@ fn check_options(o Opts) arxmodel.CheckOptions {
 
 // read_options are the options of the commands that only read the merged model (get, list,
 // values): no layer checked.
-fn read_options(o Opts) arxmodel.CheckOptions {
+fn read_options() arxmodel.CheckOptions {
 	return arxmodel.CheckOptions{
 		skip_xml:          true
 		skip_multiplicity: true

@@ -3,7 +3,7 @@ module arxmodel
 import flatxml
 import os
 
-fn src(path string, body string) Source {
+fn source_of(path string, body string) Source {
 	return Source{path, body.bytes()}
 }
 
@@ -18,7 +18,7 @@ const open_b = '<ar:AUTOSAR xmlns:ar="urn:m"><ar:AR-PACKAGES><ar:AR-PACKAGE><ar:
 	'</ar:ELEMENTS></ar:AR-PACKAGE></ar:AR-PACKAGES></ar:AUTOSAR>'
 
 fn test_open_indexes_a_model_split_over_files() {
-	mut o := open_sources([src('a.arxml', open_a), src('b.arxml', open_b)])!
+	mut o := open_sources([source_of('a.arxml', open_a), source_of('b.arxml', open_b)])!
 	defer {
 		o.free()
 	}
@@ -37,7 +37,7 @@ fn test_open_indexes_a_model_split_over_files() {
 }
 
 fn test_open_follows_absolute_references_only() {
-	mut o := open_sources([src('a.arxml', open_a), src('b.arxml', open_b)])!
+	mut o := open_sources([source_of('a.arxml', open_a), source_of('b.arxml', open_b)])!
 	defer {
 		o.free()
 	}
@@ -61,7 +61,7 @@ fn test_open_follows_absolute_references_only() {
 }
 
 fn test_open_refuses_a_document_that_does_not_parse() {
-	open_sources([src('bad.arxml', '<AUTOSAR>')]) or {
+	open_sources([source_of('bad.arxml', '<AUTOSAR>')]) or {
 		assert err.msg().contains('bad.arxml')
 		return
 	}
@@ -72,7 +72,7 @@ fn test_open_keeps_the_order_written_and_lists_what_one_file_repeats() {
 	text := '<AUTOSAR xmlns="urn:m"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
 		'<THING><SHORT-NAME>Z</SHORT-NAME></THING><THING><SHORT-NAME>A</SHORT-NAME></THING>' +
 		'<THING><SHORT-NAME>Z</SHORT-NAME><V>1</V></THING></ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
-	mut o := open_sources([src('a.arxml', text)])!
+	mut o := open_sources([source_of('a.arxml', text)])!
 	defer {
 		o.free()
 	}
@@ -124,7 +124,7 @@ fn test_a_model_file_refuses_what_it_does_not_know() {
 }
 
 fn test_open_by_a_schema_dir_that_governs_nothing_is_an_error() {
-	open_sources([src('a.arxml', open_a)], schema_dir: os.temp_dir()) or {
+	open_sources([source_of('a.arxml', open_a)], schema_dir: os.temp_dir()) or {
 		assert err.msg().contains('no schema governs') || err.msg().contains('namespace'), err.msg()
 		return
 	}
@@ -170,7 +170,7 @@ fn named_count(o &Opened, local string) int {
 fn test_values_of_a_definition_given_twice_merge_whatever_the_prefix() {
 	// a definition given twice is keyed by its values' content: the content's element names are
 	// local names, so a prefix does not keep one value apart from itself
-	mut o := open_sources([src('a.arxml', ecuc('', ['1', '2'])), src('b.arxml', ecuc('ar', ['1', '2']))])!
+	mut o := open_sources([source_of('a.arxml', ecuc('', ['1', '2'])), source_of('b.arxml', ecuc('ar', ['1', '2']))])!
 	defer {
 		o.free()
 	}
@@ -199,8 +199,8 @@ fn test_by_the_schema_a_value_is_identified_by_its_definition_whatever_the_prefi
 	defer {
 		os.rm(policy) or {}
 	}
-	mut o := open_sources([src('a.arxml', vk_setting_doc('', '1')),
-		src('b.arxml', vk_setting_doc('l', '1'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
+	mut o := open_sources([source_of('a.arxml', vk_setting_doc('', '1')),
+		source_of('b.arxml', vk_setting_doc('l', '1'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
 	defer {
 		o.free()
 	}
@@ -216,8 +216,8 @@ fn test_the_policy_filters_apply_to_what_open_found() {
 	defer {
 		os.rm(policy) or {}
 	}
-	mut o := open_sources([src('a.arxml', vk_setting_doc('', '1')),
-		src('b.arxml', vk_setting_doc('', '2'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
+	mut o := open_sources([source_of('a.arxml', vk_setting_doc('', '1')),
+		source_of('b.arxml', vk_setting_doc('', '2'))], schema_dir: os.join_path(@VMODROOT, 'testdata', 'schemas'), policy: policy)!
 	defer {
 		o.free()
 	}
@@ -235,8 +235,8 @@ fn test_open_sources_reads_relative_filters_from_its_roots() {
 		os.rm(policy) or {}
 	}
 	root := os.join_path(os.temp_dir(), 'arxmodel_roots_${os.getpid()}')
-	srcs := [src(os.join_path(root, 'a.arxml'), vk_setting_doc('', '1')),
-		src(os.join_path(root, 'b.arxml'), vk_setting_doc('', '2'))]
+	srcs := [source_of(os.join_path(root, 'a.arxml'), vk_setting_doc('', '1')),
+		source_of(os.join_path(root, 'b.arxml'), vk_setting_doc('', '2'))]
 	schemas := os.join_path(@VMODROOT, 'testdata', 'schemas')
 	mut o := open_sources(srcs, schema_dir: schemas, policy: policy, roots: [root])!
 	defer {
@@ -252,7 +252,7 @@ fn test_an_element_of_another_namespace_is_not_the_models() {
 	text := '<AUTOSAR xmlns="urn:m" xmlns:ext="urn:x"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
 		'<THING><SHORT-NAME>A</SHORT-NAME></THING><ext:THING><ext:SHORT-NAME>Q</ext:SHORT-NAME></ext:THING>' +
 		'</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
-	mut o := open_sources([src('a.arxml', text)])!
+	mut o := open_sources([source_of('a.arxml', text)])!
 	defer {
 		o.free()
 	}
@@ -283,7 +283,7 @@ fn test_check_merges_a_prefixed_file_by_the_schemas_namespace() {
 
 fn test_the_models_namespace_is_most_roots_one() {
 	foreign := '<x:AUTOSAR xmlns:x="urn:other"><x:AR-PACKAGES/></x:AUTOSAR>'
-	mut o := open_sources([src('00.arxml', foreign), src('a.arxml', open_a), src('b.arxml', open_b)])!
+	mut o := open_sources([source_of('00.arxml', foreign), source_of('a.arxml', open_a), source_of('b.arxml', open_b)])!
 	defer {
 		o.free()
 	}
@@ -294,7 +294,7 @@ fn test_the_models_namespace_is_most_roots_one() {
 
 fn test_a_repetition_is_said_once() {
 	pkg := '<AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS><THING><SHORT-NAME>A</SHORT-NAME></THING></ELEMENTS></AR-PACKAGE>'
-	mut o := open_sources([src('a.arxml', '<AUTOSAR xmlns="urn:m"><AR-PACKAGES>${pkg}${pkg}</AR-PACKAGES></AUTOSAR>')])!
+	mut o := open_sources([source_of('a.arxml', '<AUTOSAR xmlns="urn:m"><AR-PACKAGES>${pkg}${pkg}</AR-PACKAGES></AUTOSAR>')])!
 	defer {
 		o.free()
 	}
@@ -307,7 +307,7 @@ fn test_an_element_of_no_namespace_is_no_value_of_the_model() {
 	text := '<AUTOSAR xmlns="urn:m"><AR-PACKAGES><AR-PACKAGE><SHORT-NAME>P</SHORT-NAME><ELEMENTS>' +
 		'<ECUC-CONTAINER-VALUE><SHORT-NAME>C</SHORT-NAME><PARAMETER-VALUES><VENDOR-PARAM-VALUE xmlns=""><DEFINITION-REF>/D/p</DEFINITION-REF></VENDOR-PARAM-VALUE></PARAMETER-VALUES></ECUC-CONTAINER-VALUE>' +
 		'</ELEMENTS></AR-PACKAGE></AR-PACKAGES></AUTOSAR>'
-	mut o := open_sources([src('a.arxml', text)])!
+	mut o := open_sources([source_of('a.arxml', text)])!
 	defer {
 		o.free()
 	}
@@ -340,7 +340,7 @@ fn lengths_of(n flatxml.MNode) []flatxml.MNode {
 fn test_files_giving_one_element_two_values_say_so() {
 	// the one FRAME-LENGTH of a frame in each file is one element of the model: the first file's
 	// is read, and that the second gives another is said
-	mut o := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('12'))])!
+	mut o := open_sources([source_of('a.arxml', frame_doc('8')), source_of('b.arxml', frame_doc('12'))])!
 	defer {
 		o.free()
 	}
@@ -349,7 +349,7 @@ fn test_files_giving_one_element_two_values_say_so() {
 	assert d.len == 1 && d[0].path == '/P/F#FRAME-LENGTH' && d[0].at.len == 2, d.str()
 	assert d[0].at[0].starts_with('a.arxml:') && d[0].at[1].starts_with('b.arxml:')
 	// the same value in both, or the same element told apart by an attribute, is no finding
-	mut same := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', frame_doc('8'))])!
+	mut same := open_sources([source_of('a.arxml', frame_doc('8')), source_of('b.arxml', frame_doc('8'))])!
 	defer {
 		same.free()
 	}
@@ -358,7 +358,7 @@ fn test_files_giving_one_element_two_values_say_so() {
 	desc := fn (l string, t string) string {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><DESC><L-2 L="${l}">${t}</L-2></DESC>')
 	}
-	mut langs := open_sources([src('a.arxml', desc('EN', 'hello')), src('b.arxml', desc('DE', 'hallo'))])!
+	mut langs := open_sources([source_of('a.arxml', desc('EN', 'hello')), source_of('b.arxml', desc('DE', 'hallo'))])!
 	defer {
 		langs.free()
 	}
@@ -367,7 +367,7 @@ fn test_files_giving_one_element_two_values_say_so() {
 	label := fn (l string, t string) string {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><L-2 L="${l}">${t}</L-2>')
 	}
-	mut labels := open_sources([src('a.arxml', label('EN', 'hello')), src('b.arxml', label('DE', 'hallo'))])!
+	mut labels := open_sources([source_of('a.arxml', label('EN', 'hello')), source_of('b.arxml', label('DE', 'hallo'))])!
 	defer {
 		labels.free()
 	}
@@ -377,19 +377,19 @@ fn test_files_giving_one_element_two_values_say_so() {
 	ref := fn (attrs string, path string) string {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><PDU-REF ${attrs}>${path}</PDU-REF>')
 	}
-	mut refs := open_sources([src('a.arxml', ref('DEST="I-PDU" BASE="b"', '/P/A')),
-		src('b.arxml', ref('BASE="b" DEST="I-PDU"', '/P/B'))])!
+	mut refs := open_sources([source_of('a.arxml', ref('DEST="I-PDU" BASE="b"', '/P/A')),
+		source_of('b.arxml', ref('BASE="b" DEST="I-PDU"', '/P/B'))])!
 	defer {
 		refs.free()
 	}
 	assert refs.findings.map(it.path) == ['/P/F#PDU-REF']
 	hinted := frame_doc('12').replace('<AUTOSAR xmlns="urn:m">', '<AUTOSAR xmlns="urn:m" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:m m.xsd">').replace('<FRAME-LENGTH>', '<FRAME-LENGTH xsi:schemaLocation="urn:m x.xsd">')
-	mut hints := open_sources([src('a.arxml', frame_doc('8')), src('b.arxml', hinted)])!
+	mut hints := open_sources([source_of('a.arxml', frame_doc('8')), source_of('b.arxml', hinted)])!
 	defer {
 		hints.free()
 	}
 	assert hints.findings.map(it.path) == ['/P/F#FRAME-LENGTH'], hints.findings.str()
-	mut deep := open_sources([src('a.arxml', desc('EN', 'hello')), src('b.arxml', desc('EN', 'hello').replace('L="EN"', 'L="DE"'))])!
+	mut deep := open_sources([source_of('a.arxml', desc('EN', 'hello')), source_of('b.arxml', desc('EN', 'hello').replace('L="EN"', 'L="DE"'))])!
 	defer {
 		deep.free()
 	}
@@ -398,12 +398,12 @@ fn test_files_giving_one_element_two_values_say_so() {
 	text_or := fn (body string) string {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><DESC>${body}</DESC>')
 	}
-	mut lit := open_sources([src('a.arxml', text_or('&lt;L-2&gt;hello')), src('b.arxml', text_or('<L-2>hello</L-2>'))])!
+	mut lit := open_sources([source_of('a.arxml', text_or('&lt;L-2&gt;hello')), source_of('b.arxml', text_or('<L-2>hello</L-2>'))])!
 	defer {
 		lit.free()
 	}
 	assert lit.findings.map(it.path) == ['/P/F#DESC']
-	mut cdata := open_sources([src('a.arxml', text_or('a <![CDATA[b]]>')), src('b.arxml', text_or('a b'))])!
+	mut cdata := open_sources([source_of('a.arxml', text_or('a <![CDATA[b]]>')), source_of('b.arxml', text_or('a b'))])!
 	defer {
 		cdata.free()
 	}
@@ -413,12 +413,12 @@ fn test_files_giving_one_element_two_values_say_so() {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><MAPS><NOTE>n</NOTE>' +
 			'<MAP><SHORT-NAME>${first}</SHORT-NAME></MAP><MAP><SHORT-NAME>${second}</SHORT-NAME></MAP></MAPS>')
 	}
-	mut order := open_sources([src('a.arxml', both('M1', 'M2')), src('b.arxml', both('M2', 'M1'))])!
+	mut order := open_sources([source_of('a.arxml', both('M1', 'M2')), source_of('b.arxml', both('M2', 'M1'))])!
 	defer {
 		order.free()
 	}
 	assert order.findings.len == 0, order.findings.str()
-	mut other := open_sources([src('a.arxml', both('M1', 'M2')), src('b.arxml', both('M1', 'M3'))])!
+	mut other := open_sources([source_of('a.arxml', both('M1', 'M2')), source_of('b.arxml', both('M1', 'M3'))])!
 	defer {
 		other.free()
 	}
@@ -428,14 +428,14 @@ fn test_files_giving_one_element_two_values_say_so() {
 		return frame_doc('8').replace('</FRAME-LENGTH>', '</FRAME-LENGTH><MAPS><NOTE>n</NOTE>' +
 			'<${first}><M><SHORT-NAME>m</SHORT-NAME></M></${first}><${second}><M><SHORT-NAME>m</SHORT-NAME></M></${second}></MAPS>')
 	}
-	mut wrapped := open_sources([src('a.arxml', lists('XS', 'YS')), src('b.arxml', lists('YS', 'XS'))])!
+	mut wrapped := open_sources([source_of('a.arxml', lists('XS', 'YS')), source_of('b.arxml', lists('YS', 'XS'))])!
 	defer {
 		wrapped.free()
 	}
 	assert wrapped.findings.len == 0, wrapped.findings.str()
 	// nor is a name one file repeats: those are matched by place
 	twice := frame_doc('8').replace('<FRAME-LENGTH>8</FRAME-LENGTH>', '<FRAME-LENGTH>8</FRAME-LENGTH><FRAME-LENGTH>9</FRAME-LENGTH>')
-	mut rep := open_sources([src('a.arxml', twice), src('b.arxml', frame_doc('12'))])!
+	mut rep := open_sources([source_of('a.arxml', twice), source_of('b.arxml', frame_doc('12'))])!
 	defer {
 		rep.free()
 	}
