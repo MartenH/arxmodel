@@ -21,7 +21,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up pinned V
         uses: ./.github/actions/setup-v
@@ -53,7 +53,7 @@ jobs:
       - name: The input set through the command
         run: scripts/inputs_cli_test.sh bin/arxmodel
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -61,3 +61,42 @@ jobs:
         run: |
           python -m pip install --quiet jsonschema lxml
           scripts/check_reports.sh bin/arxmodel "$RUNNER_TEMP/reports"
+
+      # The Windows build, made the way release.yml makes it (mingw-w64 from this Linux job's V), so a
+      # change that breaks Windows is seen on its own push, not at the next tag. The job below runs it.
+      - name: Build for Windows
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64
+          mkdir -p dist
+          v -prod -os windows -cc x86_64-w64-mingw32-gcc -o dist/arxmodel.exe cmd/arxmodel
+          file dist/arxmodel.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: arxmodel-windows
+          path: dist/arxmodel.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Windows binary RUN on Windows: what release.yml's windows job checks before it publishes.
+  windows:
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: arxmodel-windows
+          path: dist
+      - name: Run on Windows
+        run: |
+          set -e
+          ver="$(sed -n "s/^\s*version: '\(.*\)'\s*\$/\1/p" v.mod)"
+          [ "$(dist/arxmodel.exe --version | tr -d '\r')" = "arxmodel $ver" ]
+          dist/arxmodel.exe check --schema-dir testdata/schemas testdata/export
+          dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
+          dist/arxmodel.exe check --schema-dir testdata/schemas "$RUNNER_TEMP/model.arxml"
+          dist/arxmodel.exe check --format json --schema-dir testdata/schemas testdata/merge > "$RUNNER_TEMP/merge.json" || [ $? -eq 1 ]

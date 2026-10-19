@@ -24,7 +24,7 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: The tag equals v.mod and is on main
@@ -40,7 +40,7 @@ jobs:
     # the oldest runner: a static binary still asks the kernel for what glibc's build host knew
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up pinned V
         uses: ./.github/actions/setup-v
@@ -62,7 +62,7 @@ jobs:
           v -prod -os windows -cc x86_64-w64-mingw32-gcc -o dist/arxmodel.exe cmd/arxmodel
           file dist/arxmodel.exe
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries
           path: dist
@@ -75,8 +75,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: binaries
           path: dist
@@ -96,8 +96,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: binaries
           path: dist
