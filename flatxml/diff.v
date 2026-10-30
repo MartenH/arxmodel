@@ -84,10 +84,18 @@ pub fn diff(old &Merged, new &Merged, opts DiffOptions) Diff {
 		max_d: opts.max_d
 	}
 	d.by_ns = names_resolved(old) && names_resolved(new)
+	// on Windows a collection can suspend a thread holding the C heap's lock and then need that
+	// lock itself: none may start while these threads run
+	$if windows {
+		gc_disable()
+	}
 	// the two views hashed at once, one of them on a thread of its own
 	t := spawn view_hashes(new, d.by_ns)
 	d.ohash, d.oname = view_hashes(old, d.by_ns)
 	d.nhash, d.nname = t.wait()
+	$if windows {
+		gc_enable()
+	}
 	o, n := old.root(), new.root()
 	if !o.ok() && !n.ok() {
 		return d
