@@ -68,6 +68,7 @@ pub mut:
 	ns     string
 	path   string // where it was found; '' when not found
 	note   string // how it was found, when not by its exact name
+	stated bool   // named by the caller, not by the documents, which it governs all the same
 	docs   []int  // indices into the set's documents
 	schema &xsd.Schema = unsafe { nil }
 	rules  &RuleSet    = unsafe { nil }
@@ -161,9 +162,10 @@ fn compile_one_schema(m &Model, file string, opts SchemaOptions) Schemas {
 	out.policy = opts.policy
 	ns := target_namespace(file)
 	mut one := &SchemaUse{
-		name: os.file_name(file)
-		ns:   ns
-		path: file
+		name:   os.file_name(file)
+		ns:     ns
+		path:   file
+		stated: true
 	}
 	mut others := []&SchemaUse{}
 	for mut u in out.uses {
@@ -181,7 +183,8 @@ fn compile_one_schema(m &Model, file string, opts SchemaOptions) Schemas {
 		}
 	}
 	out.uses = others
-	if one.docs.len > 0 {
+	// a version with nothing in it, as one side of a comparison, is read by the schema too
+	if one.docs.len > 0 || m.set.docs.len == 0 {
 		one.docs.sort()
 		compile_use(one, opts.policy)
 		out.uses.prepend(one)
@@ -190,7 +193,7 @@ fn compile_one_schema(m &Model, file string, opts SchemaOptions) Schemas {
 	for mut g in out.governing {
 		if g.ns == ns && g.use >= 0 {
 			g.note = ''
-		} else if g.use < 0 && one.docs.len == 0 {
+		} else if g.use < 0 && one.docs.len == 0 && m.set.docs.len > 0 {
 			g.note = '${one.name} is of namespace ${ns}'
 		}
 	}

@@ -54,6 +54,13 @@ grep -q 'rules: schema LIB_2.xsd (--schema)' one.log || { cat one.log; fail 'the
 if "$bin" check --schema "$lib" --schema-dir "$root/testdata/schemas" base > /dev/null 2>&1; then
 	fail 'check took --schema with --schema-dir'
 fi
+mkdir in exported
+echo '<LIBRARY xmlns="urn:arxmodel:test:lib"><SHELVES/></LIBRARY>' > in/bare.arxml
+"$bin" merge --schema "$lib" -o exported/m.arxml in/bare.arxml > merge.log 2>&1 || { cat merge.log; fail 'merge --schema'; }
+grep -q 'schemaLocation="urn:arxmodel:test:lib LIB_2.xsd"' exported/m.arxml || { cat exported/m.arxml; fail 'the export names no schema'; }
+"$bin" check --schema-dir "$root/testdata/schemas" exported/m.arxml > merge.log 2>&1 || { cat merge.log; fail 'the export does not load'; }
+"$bin" diff --schema "$lib" /dev/null in/bare.arxml > diff.log 2>&1 || true
+if grep -q 'namespaces declared' diff.log; then cat diff.log; fail 'diff --schema with an empty side'; fi
 if "$bin" check --schema nope.xsd base > /dev/null 2>&1; then fail 'check took a schema that is not there'; fi
 "$bin" policy --schema | grep -q '"properties"' || fail 'policy --schema'
 echo 'input set CLI test: ok'

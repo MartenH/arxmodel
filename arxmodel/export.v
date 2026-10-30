@@ -32,9 +32,11 @@ pub fn export(c &Checked, m &Model, sc &Schemas, path string) ![]string {
 fn root_location(c &Checked, m &Model, sc &Schemas, d &flatxml.Doc, i u32, path string) ([]flatxml.EAttr, []string) {
 	ns := d.ns_uri(d.ns_of(i))
 	mut docs := []int{}
+	mut stated := false
 	for u in sc.uses {
 		if u.name == c.governing && u.ns == ns {
 			docs << u.docs
+			stated = stated || u.stated
 		}
 	}
 	if docs.len == 0 {
@@ -43,8 +45,12 @@ fn root_location(c &Checked, m &Model, sc &Schemas, d &flatxml.Doc, i u32, path 
 		]
 	}
 	docs.sort()
+	// a schema the caller named has no location in the files: its name is what it can be found by
 	gd := m.set.docs[docs[0]]
-	location, note := relocate(declared_schema(gd).location, gd.path, path)
+	mut location, mut note := c.governing, ''
+	if !stated {
+		location, note = relocate(declared_schema(gd).location, gd.path, path)
+	}
 	mut notes := if note == '' { []string{} } else { [note] }
 	pair := '${ns} ${location}'
 	if a := schema_location_attr(d, i) {

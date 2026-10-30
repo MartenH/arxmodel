@@ -87,8 +87,10 @@ lib="$work/lib"
 git init -q -b main "$lib"
 cp "$root/testdata/model/a.arxml" "$lib/a.arxml"
 git -C "$lib" add a.arxml
-# a repository with no model yet keeps the option it was given
+# --schema is kept, a model tracked or not: a rules file is held to what the files declare
 mkdir "$work/one" && git -C "$work/one" init -q
+echo '<LIBRARY xmlns="urn:arxmodel:test:lib"><SHELVES/></LIBRARY>' > "$work/one/bare.arxml"
+git -C "$work/one" add bare.arxml
 "$bin" git-setup --schema "$root/testdata/schemas/LIB_2/LIB_2.xsd" "$work/one" > /dev/null
 git -C "$work/one" config merge.arxml.driver | grep -q -- '--schema .*LIB_2.xsd' || fail 'git-setup lost --schema'
 "$bin" git-setup --schema-dir "$root/testdata/schemas" "$lib" > "$work/setup.txt"
