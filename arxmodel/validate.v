@@ -34,6 +34,11 @@ pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]XmlFound, int) {
 	} else {
 		jobs
 	}
+	// on Windows a collection can suspend a thread holding the C heap's lock and then need that
+	// lock itself: none may start while these threads run
+	$if windows {
+		gc_disable()
+	}
 	mut threads := []thread []XmlFound{}
 	for w in 0 .. jobs {
 		threads << spawn validate_every(m, schema_of, w, jobs, sc.policy)
@@ -41,6 +46,9 @@ pub fn xml_findings(m &Model, sc &Schemas, jobs_asked int) ([]XmlFound, int) {
 	mut out := []XmlFound{}
 	for t in threads {
 		out << t.wait()
+	}
+	$if windows {
+		gc_enable()
 	}
 	return out, fallback
 }
