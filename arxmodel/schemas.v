@@ -130,6 +130,11 @@ pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
 		u.path = path
 		u.note = note
 	}
+	// on Windows a collection can suspend a thread holding the C heap's lock and then need that
+	// lock itself: none may start while these threads run
+	$if windows {
+		gc_disable()
+	}
 	mut threads := []thread{}
 	for u in out.uses {
 		if u.path != '' {
@@ -137,6 +142,9 @@ pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
 		}
 	}
 	threads.wait()
+	$if windows {
+		gc_enable()
+	}
 	out.choose_governing()
 	return out
 }
