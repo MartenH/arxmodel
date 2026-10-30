@@ -117,21 +117,37 @@ pub fn find_schema(dir string, name string) (string, string) {
 	return '', ''
 }
 
-// add_newest_at_hand adds, for a namespace none of whose declared schemas is in dir, the newest
-// schema there of a family declared, of that namespace: it can govern the model, and a schema of a
-// newer release than any file declares is better than none.
-fn (mut sc Schemas) add_newest_at_hand(dir string) {
+// compile_newest_at_hand adds, for a namespace none of whose declared schemas is in dir, a schema
+// there per family declared: the newest of that namespace that compiles, as a schema of a newer
+// release than any file declares is better than none. Those that did not compile stay, to be said.
+fn (mut sc Schemas) compile_newest_at_hand(dir string, policy Policy) {
+	if !os.is_dir(dir) {
+		return
+	}
 	mut namespaces := []string{}
 	for u in sc.uses {
 		if u.ns !in namespaces {
 			namespaces << u.ns
 		}
 	}
-	if namespaces.len == 0 || !os.is_dir(dir) {
-		return
+	mut at_hand := []ReleaseFile{}
+	for f in os.walk_ext(dir, '') {
+		if f.to_lower().ends_with('.xsd') {
+			if r := release_of(f) {
+				at_hand << ReleaseFile{f, r}
+			}
+		}
 	}
-	mut all := os.walk_ext(dir, '').filter(it.to_lower().ends_with('.xsd'))
-	all.sort()
+	at_hand.sort_with_compare(fn (a &ReleaseFile, b &ReleaseFile) int {
+		c := b.release.compare(a.release)
+		return if c != 0 {
+			c
+		} else if a.path < b.path {
+			-1
+		} else {
+			1
+		}
+	})
 	for ns in namespaces {
 		declared := sc.uses.filter(it.ns == ns)
 		if declared.any(it.path != '') {
@@ -140,30 +156,47 @@ fn (mut sc Schemas) add_newest_at_hand(dir string) {
 		mut families := []string{}
 		for u in declared {
 			if r := release_of(u.name) {
-				families << r.prefix
+				if r.prefix !in families {
+					families << r.prefix
+				}
 			}
 		}
-		mut best := ''
-		mut best_release := Release{}
-		for f in all {
-			r := release_of(f) or { continue }
-			if r.prefix !in families || (best != '' && r.compare(best_release) <= 0) {
-				continue
-			}
-			text := os.read_file(f) or { continue }
-			if text.contains('targetNamespace="${ns}"') {
-				best, best_release = f, r
-			}
-		}
-		if best != '' {
-			sc.uses << &SchemaUse{
-				name: os.file_name(best)
-				ns:   ns
-				path: best
-				note: 'no file declares it: the newest of the family in ${dir}'
+		for family in families {
+			for f in at_hand {
+				if f.release.prefix != family || target_namespace(f.path) != ns {
+					continue
+				}
+				u := &SchemaUse{
+					name: os.file_name(f.path)
+					ns:   ns
+					path: f.path
+					note: 'no file declares it: the newest of the family in ${dir}'
+				}
+				compile_use(u, policy)
+				sc.uses << u
+				if u.rules != unsafe { nil } {
+					break
+				}
 			}
 		}
 	}
+}
+
+// ReleaseFile is a schema file and the release its name gives.
+struct ReleaseFile {
+	path    string
+	release Release
+}
+
+// target_namespace is the target namespace of the schema in file path; '' when it has none or
+// cannot be read.
+fn target_namespace(path string) string {
+	mut d := flatxml.parse_file(path) or { return '' }
+	defer {
+		d.free()
+	}
+	ns := d.attr(d.root(), 'targetNamespace') or { return '' }
+	return ns.clone()
 }
 
 // compile_schemas finds the schema each document of m declares in dir and compiles each distinct
@@ -179,7 +212,6 @@ pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
 		u.path = path
 		u.note = note
 	}
-	out.add_newest_at_hand(dir)
 	// on Windows a collection can suspend a thread holding the C heap's lock and then need that
 	// lock itself: none may start while these threads run
 	$if windows {
@@ -195,6 +227,7 @@ pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
 	$if windows {
 		gc_enable()
 	}
+	out.compile_newest_at_hand(dir, opts.policy)
 	out.choose_governing()
 	return out
 }

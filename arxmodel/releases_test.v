@@ -120,6 +120,90 @@ fn test_with_no_declared_schema_at_hand_the_newest_of_the_family_governs() {
 	assert none_here.governing[0].use < 0
 }
 
+// at_hand writes schema files into a new directory: LIB_2's text under each name, changed by edit.
+fn at_hand(name string, files map[string]fn (string) string) string {
+	dir := os.join_path(os.vtmp_dir(), 'arxmodel_at_hand_${os.getpid()}_${name}')
+	os.rmdir_all(dir) or {}
+	os.mkdir_all(dir) or { panic(err) }
+	text := os.read_file(tdata('schemas', 'LIB_2', 'LIB_2.xsd')) or { panic(err) }
+	for file, edit in files {
+		os.write_file(os.join_path(dir, file), edit(text)) or { panic(err) }
+	}
+	return dir
+}
+
+fn test_the_namespace_at_hand_is_the_attribute_as_xml_reads_it() {
+	mut m := load([tdata('releases', 'newest.arxml')])!
+	defer {
+		m.free()
+	}
+	dir := at_hand('ns', {
+		'LIB_2.xsd': fn (t string) string {
+			return t.replace('targetNamespace="urn:arxmodel:test:lib"', "targetNamespace = 'urn:arxmodel:test:lib'")
+		}
+		'LIB_8.xsd': fn (t string) string {
+			return t.replace('targetNamespace="urn:arxmodel:test:lib"', 'targetNamespace="urn:other"') +
+				'<!-- targetNamespace="urn:arxmodel:test:lib" -->'
+		}
+	})
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	sc := compile_schemas(m, dir, policy: automat_policy())
+	assert sc.uses[sc.governing[0].use].name == 'LIB_2.xsd'
+}
+
+fn test_an_older_schema_at_hand_governs_when_the_newest_does_not_compile() {
+	mut m := load([tdata('releases', 'newest.arxml')])!
+	defer {
+		m.free()
+	}
+	dir := at_hand('compile', {
+		'LIB_2.xsd': fn (t string) string {
+			return t
+		}
+		'LIB_9.xsd': fn (t string) string {
+			return t.replace('</xsd:schema>', '<xsd:include schemaLocation="gone.xsd"/></xsd:schema>')
+		}
+	})
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	sc := compile_schemas(m, dir, policy: automat_policy())
+	g := sc.governing[0]
+	assert sc.uses[g.use].name == 'LIB_2.xsd'
+	assert sc.uses[g.newest].name == 'LIB_9.xsd'
+	assert g.note.contains('LIB_9.xsd')
+}
+
+fn test_each_family_declared_gets_its_schema_at_hand() {
+	doc := fn (schema string) string {
+		return '<LIBRARY xmlns="urn:arxmodel:test:lib" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:arxmodel:test:lib ${schema}"><SHELVES/></LIBRARY>'
+	}
+	same := fn (t string) string {
+		return t
+	}
+	dir := at_hand('families', {
+		'A_2.xsd': same
+		'B_9.xsd': same
+	})
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	mut files := []string{}
+	for k, schema in ['A_1.xsd', 'A_1.xsd', 'B_1.xsd'] {
+		f := os.join_path(dir, 'd${k}.arxml')
+		os.write_file(f, doc(schema))!
+		files << f
+	}
+	mut m := load(files)!
+	defer {
+		m.free()
+	}
+	sc := compile_schemas(m, dir, policy: automat_policy())
+	assert sc.uses[sc.governing[0].use].name == 'A_2.xsd'
+}
+
 fn test_older_roles_and_documents_against_the_governing_schema() {
 	mut m := load([tdata('releases')])!
 	defer {
