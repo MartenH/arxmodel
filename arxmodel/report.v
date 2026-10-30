@@ -197,18 +197,25 @@ pub fn (r &Report) failed() bool {
 }
 
 // format is the report in one of report_formats.
-pub fn (r &Report) format(f string) string {
+pub fn (r &Report) format(f string, opts ReportOptions) string {
 	return match f {
-		'json' { r.json() }
+		'json' { r.json(opts) }
 		else { r.junit() }
 	}
 }
 
 // --- JSON --------------------------------------------------------------------------------------
 
+// ReportOptions says what a report holds.
+@[params]
+pub struct ReportOptions {
+pub:
+	all bool // the findings the policy ignores too, which `summary.ignored` counts in any case
+}
+
 // json is the report as arxmodel's JSON report (docs/report.md), one finding an element of
-// `findings`, every severity included.
-pub fn (r &Report) json() string {
+// `findings`. Ignored findings are left out unless asked for: there can be very many.
+pub fn (r &Report) json(opts ReportOptions) string {
 	t := r.tally()
 	mut b := strings.new_builder(4096 + r.findings.len * 256)
 	b.write_string('{"version":${report_version},"tool":{"name":"arxmodel","version":${jstr(version)}},')
@@ -233,10 +240,15 @@ pub fn (r &Report) json() string {
 		b.write_string('"column":${p.column},"message":${jstr(p.message)}}')
 	}
 	b.write_string('],"findings":[')
-	for k, f in r.findings {
-		if k > 0 {
+	mut written := 0
+	for f in r.findings {
+		if f.severity == .ignore && !opts.all {
+			continue
+		}
+		if written > 0 {
 			b.write_u8(`,`)
 		}
+		written++
 		b.write_string('{"layer":${jstr(f.layer.str())},"kind":${jstr(f.kind)},"rule":${jstr(rule_id(f))},')
 		b.write_string('"severity":${jstr(f.severity.str())},"what":${jstr(f.what)},')
 		b.write_string('"in_conflict":${f.in_conflict},"path":${jstr(f.path)},"message":${jstr(f.message)},')

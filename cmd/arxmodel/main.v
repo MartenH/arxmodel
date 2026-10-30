@@ -956,7 +956,7 @@ fn cmd_check(o Opts) {
 		// the report alone on standard output, what was read on standard error
 		m, sc, c, _ := merged(o, Out{ err: true }, check_options(o))
 		r := arxmodel.check_report(m, sc, c)
-		print(r.format(o.format))
+		print(r.format(o.format, all: o.all))
 		exit(if r.failed() { 1 } else { 0 })
 	}
 	out := Out{}

@@ -113,7 +113,7 @@ fn test_files_not_checked_are_in_every_report() {
 	assert r.junit().count('<failure ') == 2
 }
 
-fn test_ignored_findings_are_left_out_of_junit() {
+fn test_ignored_findings_are_left_out_unless_asked_for() {
 	r := Report{
 		command:  'check'
 		layers:   ['merge']
@@ -137,7 +137,10 @@ fn test_ignored_findings_are_left_out_of_junit() {
 		]
 	}
 	assert !r.failed()
-	assert json2.decode[json2.Any](r.json())!.as_map()['findings']!.as_array().len == 2
+	doc := json2.decode[json2.Any](r.json())!.as_map()
+	assert doc['findings']!.as_array().len == 1
+	assert doc['summary']!.as_map()['ignored']!.int() == 1
+	assert json2.decode[json2.Any](r.json(all: true))!.as_map()['findings']!.as_array().len == 2
 	j := r.junit()
 	assert !j.contains('value_differs') && !j.contains('<failure')
 	assert j.contains('<system-out>')
