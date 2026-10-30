@@ -124,7 +124,8 @@ mut:
 	text    map[u32]int   // a base node whose text changed
 	attrs   map[u64]int   // (base node, attribute key)
 	added   map[u32][]int // a base node -> the changes adding under it
-	// a base node something but a removal changes, at it (itself, or a child it gains) or below
+	// a base node something but a removal changes, at it (itself, or a child it gains) or below;
+	// an attribute the rules ignore is no such change, so a removal of the node is not a conflict
 	touched map[u32]int
 	// a base node anything changes at or below, a removal too
 	below map[u32]int
@@ -152,7 +153,9 @@ fn side_of(d &Diff) Side {
 				} else {
 					s.attrs[mix(u64(c.old.i), c.akey)] = k
 				}
-				mark(mut s.touched, d.old, c.old.i, k)
+				if !d.ignores(c) {
+					mark(mut s.touched, d.old, c.old.i, k)
+				}
 				mark(mut s.below, d.old, c.old.i, k)
 			}
 			.added {
@@ -163,6 +166,31 @@ fn side_of(d &Diff) Side {
 		}
 	}
 	return s
+}
+
+// ignores reports whether c changes an attribute the rules let differ, as either side has it.
+fn (d &Diff) ignores(c Change) bool {
+	return c.kind == .attr && (ignored_in(d.old, c.old, c.akey, d.by_ns)
+		|| ignored_in(d.new, c.new, c.akey, d.by_ns))
+}
+
+// ignored_in reports whether node n of m has the attribute akey under a name the rules ignore:
+// spelled so, or by the identity a namespaced one has, as a merge compares them.
+fn ignored_in(m &Merged, n MNode, akey u64, by_ns bool) bool {
+	if m.rules.ignore.len == 0 {
+		return false
+	}
+	for j in 0 .. n.fragment_count() {
+		f := n.fragment(j)
+		lo, hi := f.doc.attr_range(f.i)
+		for x := lo; x < hi; x++ {
+			if attr_key(f.doc, x, by_ns) == akey
+				&& (f.doc.attr_tag[x] in m.rules.ignore || f.doc.attr_id(x) in m.rules.ignore) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mark notes change k at node n of m and every node above it, where none is noted yet.
@@ -237,8 +265,8 @@ fn combine(d1 &Diff, d2 &Diff, ours &Side) ([]Change, []Conflict) {
 		at := anchor_of(c)
 		// below a node ours removes: theirs changes something that is gone
 		if k := removed_above(ours, at) {
-			if c.kind == .removed {
-				continue // removed by ours already, or with a node above it
+			if c.kind == .removed || d2.ignores(c) {
+				continue // removed by ours already, or with a node above it, or nothing to lose
 			}
 			r := d1.changes[k]
 			if !said[r.old.i] {

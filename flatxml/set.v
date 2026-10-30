@@ -51,6 +51,11 @@ pub fn (mut s DocSet) load(paths []string, opts LoadOptions) []LoadError {
 			got[k] = parse_one(k, p, opts.namespaces)
 		}
 	} else {
+		// on Windows a collection can suspend a thread holding the C heap's lock and then need that
+		// lock itself: none may start while these threads run
+		$if windows {
+			gc_disable()
+		}
 		mut threads := []thread []Parsed{}
 		// each thread takes every jobs-th file, so large and small files spread evenly
 		for w in 0 .. jobs {
@@ -60,6 +65,9 @@ pub fn (mut s DocSet) load(paths []string, opts LoadOptions) []LoadError {
 			for p in t.wait() {
 				got[p.k] = p
 			}
+		}
+		$if windows {
+			gc_enable()
 		}
 	}
 	mut errs := []LoadError{}
