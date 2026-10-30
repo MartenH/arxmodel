@@ -234,7 +234,9 @@ said; it governs only when it is the one schema that compiled. One release under
 is one release: one that compiled stands for it.
 
 When the newest declared schema is not in the schema directory, or does not compile, the newest
-one that does governs, and `rules` says so. Against the governing schema it reports, per older
+one that does governs, and `rules` says so. When no declared schema is there, the newest schema of
+the family and namespace in the directory governs, though no file declares it, and that is said
+too: `AUTOSAR_00054.xsd` serves files that declare older releases. Against the governing schema it reports, per older
 schema at hand, the roles that have no rule in it (`--problems` lists them), and the element names
 the documents use that it does not declare, with counts, files and the first position.
 

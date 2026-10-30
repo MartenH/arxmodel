@@ -105,6 +105,21 @@ fn test_newest_declared_governs_or_the_newest_at_hand() {
 	assert use_names(sc, g.ranked) == ['lib_1-9-9.xsd', 'LIB_1.xsd', 'LIB_2.xsd', 'LIB_3.xsd']
 }
 
+fn test_with_no_declared_schema_at_hand_the_newest_of_the_family_governs() {
+	mut m := load([tdata('releases', 'newest.arxml')])!
+	defer {
+		m.free()
+	}
+	sc := compile_schemas(m, tdata('schemas'), policy: automat_policy())
+	g := sc.governing[0]
+	assert sc.uses[g.use].name == 'LIB_2.xsd'
+	assert sc.uses[g.use].note.contains('no file declares it')
+	assert g.note.contains('LIB_3.xsd')
+	// a directory with no schema of the family: still none
+	none_here := compile_schemas(m, tdata('schemas', 'ALT_1'), policy: automat_policy())
+	assert none_here.governing[0].use < 0
+}
+
 fn test_older_roles_and_documents_against_the_governing_schema() {
 	mut m := load([tdata('releases')])!
 	defer {
