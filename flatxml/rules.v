@@ -143,6 +143,12 @@ struct CRule {
 	max     int
 }
 
+// ignore_named reports whether an attribute of this name is one the rules do not compare.
+fn (r &CompiledRules) ignore_named(t &Names, name string) bool {
+	id := t.id(name) or { return false }
+	return id in r.ignore
+}
+
 // CompiledRules is a rule set with its names as ids of one table. Each way a rule names a parent
 // is a selector: 0 is any parent; the others are a parent's name, a path of ancestor names, or
 // a class. The selectors that apply to a parent, most specific first, are its context.

@@ -124,6 +124,28 @@ fn test_merge3_takes_both_sides_or_names_the_conflict() {
 	assert conflicted.conflicts.map(it.line().all_before('  ')) == ['! /Body/Head#WATTS: text "60" / "65"']
 }
 
+fn test_merge3_a_removal_takes_a_node_only_its_uuid_changed_on() {
+	tail := '<LAMP UUID="u2">
+          <SHORT-NAME>Tail</SHORT-NAME>
+          <WATTS>5</WATTS>
+          <TARGET-REF DEST="LAMP">/Body/Head</TARGET-REF>
+        </LAMP>'
+	base := version_of('base')
+	uuid := version_of('uuid', 'UUID="u2"', 'UUID="u9"')
+	gone := version_of('gone', tail, '')
+	watts := version_of('watts', '<WATTS>5</WATTS>', '<WATTS>7</WATTS>')
+	r, v := builtin_versions(base, uuid, gone, watts)
+	// whichever side changed the UUID, the node goes, with no conflict
+	mut ours := r.merge3(&v[0], &v[1], &v[2])!
+	assert ours.conflicts.len == 0
+	assert !ours.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+	mut theirs := r.merge3(&v[0], &v[2], &v[1])!
+	assert theirs.conflicts.len == 0
+	assert !theirs.m3.edit.doc_edit(0).xml().contains('<SHORT-NAME>Tail</SHORT-NAME>')
+	// a change the model holds still conflicts with the removal
+	assert r.merge3(&v[0], &v[3], &v[2])!.conflicts.len == 1
+}
+
 fn test_versions_read_by_the_schema() {
 	// the exact rules: the LIB schema's, the release the versions declare
 	mut a := load([cdata('merge')])!
