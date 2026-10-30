@@ -39,6 +39,7 @@ pub:
 	jobs       int      // threads to parse with; 0 for `default_jobs`
 	exclude    []string // file globs left out of the input set
 	schema_dir string   // where the schemas the files declare are; '' for none
+	schema     string   // one schema file to merge by, whatever the files declare; '' for none
 	rules_file string   // a rules file to merge by instead of a schema (`arxmodel rules --emit`)
 	policy     string   // `spec` (the default), `automat`, or a policy file
 	// the configuration file schema_dir was read from (`configured_schema_dir`); '' for none
@@ -116,6 +117,10 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 	if opts.policy !in ['', 'spec', 'automat'] {
 		rule_files << opts.policy
 	}
+	if opts.schema != '' && !os.is_file(opts.schema) {
+		return error('${opts.schema}: not a schema file')
+	}
+	schema := if opts.schema != '' { opts.schema } else { opts.schema_dir }
 	if opts.rules_file != '' {
 		text := os.read_file(opts.rules_file) or { return error('${opts.rules_file}: ${err.msg()}') }
 		f, pv, fst := parse_rules_file(text) or { return error('${opts.rules_file}: ${err.msg()}') }
@@ -124,13 +129,13 @@ pub fn open_model(m &Model, opts OpenOptions) !&Opened {
 		}
 		flat, st, name = f, fst, 'rules file ${os.file_name(opts.rules_file)} (${pv.schema})'
 		rule_files << opts.rules_file
-	} else if opts.schema_dir != '' {
-		sc := compile_schemas(m, opts.schema_dir, policy: p)
+	} else if schema != '' {
+		sc := compile_schemas(m, schema, policy: p)
 		if opts.config != '' {
 			rule_files << opts.config
 		}
 		rule_files << sc.files()
-		why := 'merging by the schemas in ${opts.schema_dir}'
+		why := 'merging by the schemas in ${schema}'
 		f, gname := governing_flat(sc) or { return error('${why}: ${err.msg()}') }
 		gov := governing_use(sc) or { return error('${why}: ${err.msg()}') }
 		flat, name = f, 'schema ${gname}'

@@ -118,8 +118,12 @@ pub fn find_schema(dir string, name string) (string, string) {
 }
 
 // compile_schemas finds the schema each document of m declares in dir and compiles each distinct
-// one once, in parallel, and reads its rules.
+// one once, in parallel, and reads its rules. When dir is a schema file, that one schema is used
+// (`compile_one_schema`).
 pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
+	if os.is_file(dir) {
+		return compile_one_schema(m, dir, opts)
+	}
 	mut out := declare_schemas(m)
 	out.policy = opts.policy
 	for mut u in out.uses {
@@ -147,6 +151,61 @@ pub fn compile_schemas(m &Model, dir string, opts SchemaOptions) Schemas {
 	}
 	out.choose_governing()
 	return out
+}
+
+// compile_one_schema compiles the schema in file, which governs every document of its target
+// namespace, whatever they declare; a document of another namespace is left ungoverned, and a
+// schema no document is of is not used at all.
+fn compile_one_schema(m &Model, file string, opts SchemaOptions) Schemas {
+	mut out := declare_schemas(m)
+	out.policy = opts.policy
+	ns := target_namespace(file)
+	mut one := &SchemaUse{
+		name: os.file_name(file)
+		ns:   ns
+		path: file
+	}
+	mut others := []&SchemaUse{}
+	for mut u in out.uses {
+		if u.ns == ns {
+			one.docs << u.docs
+		} else {
+			u.error = '${one.name} is of namespace ${ns}'
+			others << u
+		}
+	}
+	for k in out.undeclared.keys() {
+		if declared_schema(m.set.docs[k]).ns == ns {
+			one.docs << k
+			out.undeclared.delete(k)
+		}
+	}
+	out.uses = others
+	if one.docs.len > 0 {
+		one.docs.sort()
+		compile_use(one, opts.policy)
+		out.uses.prepend(one)
+	}
+	out.choose_governing()
+	for mut g in out.governing {
+		if g.ns == ns && g.use >= 0 {
+			g.note = ''
+		} else if g.use < 0 && one.docs.len == 0 {
+			g.note = '${one.name} is of namespace ${ns}'
+		}
+	}
+	return out
+}
+
+// target_namespace is the target namespace of the schema in file path; '' when it has none or
+// cannot be read.
+fn target_namespace(path string) string {
+	mut d := flatxml.parse_file(path) or { return '' }
+	defer {
+		d.free()
+	}
+	ns := d.attr(d.root(), 'targetNamespace') or { return '' }
+	return ns.clone()
 }
 
 @[params]

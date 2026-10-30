@@ -111,9 +111,9 @@ fn test_a_model_file_reads_its_paths_from_its_own_directory() {
 fn test_a_model_file_refuses_what_it_does_not_know() {
 	for text, want in {
 		'':                                          '`paths` names no file'
-		'paths = ["a"]\nschema = "x"':               'unknown setting `schema`'
+		'paths = ["a"]\nschemas = "x"':              'unknown setting `schemas`'
 		'paths = "a"':                               '`paths` takes a list of strings'
-		'paths = ["a"]\nschema_dir = "d"\nrules = "r"': 'both given'
+		'paths = ["a"]\nschema_dir = "d"\nrules = "r"': 'more than one given'
 	} {
 		parse_model_file(text, 'm.arxmodel.toml') or {
 			assert err.msg().contains(want), err.msg()

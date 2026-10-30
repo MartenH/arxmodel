@@ -87,6 +87,10 @@ lib="$work/lib"
 git init -q -b main "$lib"
 cp "$root/testdata/model/a.arxml" "$lib/a.arxml"
 git -C "$lib" add a.arxml
+# a repository with no model yet keeps the option it was given
+mkdir "$work/one" && git -C "$work/one" init -q
+"$bin" git-setup --schema "$root/testdata/schemas/LIB_2/LIB_2.xsd" "$work/one" > /dev/null
+git -C "$work/one" config merge.arxml.driver | grep -q -- '--schema .*LIB_2.xsd' || fail 'git-setup lost --schema'
 "$bin" git-setup --schema-dir "$root/testdata/schemas" "$lib" > "$work/setup.txt"
 grep -q "merge.arxml.driver = .* merge3 --rules '\?$lib/.git/arxmodel/autosar.rules.txt'\? %O %A %B -o %A" "$work/setup.txt" || { cat "$work/setup.txt"; fail 'git-setup did not record the rules file'; }
 [ -f "$lib/.git/arxmodel/autosar.rules.txt" ] || fail 'no rules file emitted'

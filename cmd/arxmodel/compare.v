@@ -217,7 +217,7 @@ fn cmd_git_setup(o Opts) {
 // file in its git directory, and is the option naming it; a repository with no model yet keeps
 // the schema directory.
 fn setup_rules_file(o Opts, repo string, top string) string {
-	dir := '--schema-dir ${os.quoted_path(os.real_path(o.schema_dir))}'
+	dir := '${schema_flag(o)} ${os.quoted_path(os.real_path(o.schema_dir))}'
 	listed := git_out(repo, ['ls-files', '--', '*.arxml', '*.ARXML']) or { return dir }
 	files := listed.split_into_lines().filter(it != '').map(os.join_path(top, it))
 	if files.len == 0 {

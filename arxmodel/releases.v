@@ -142,7 +142,7 @@ pub fn (mut sc Schemas) choose_governing() {
 			} else if compiled.len > 1 {
 				g.note = 'no release can be read from the names of the schemas compiled'
 			} else {
-				g.note = 'no schema compiled'
+				g.note = 'no schema compiled; one can be named to govern (--schema, or `schema` in a model file)'
 			}
 		} else if sc.uses[g.newest].rules == unsafe { nil } {
 			g.note = 'the newest declared, ${sc.uses[g.newest].name}, ${sc.uses[g.newest].error}; the newest at hand governs'

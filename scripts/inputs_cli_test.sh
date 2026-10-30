@@ -47,4 +47,13 @@ if "$bin" merge --no-schema --force -o base/a/merged.arxml @list.txt > /dev/null
 	fail 'merge wrote inside a directory read through a list'
 fi
 grep -q 'inside' merge.log || { cat merge.log; fail 'the clash is not said'; }
+# --schema names one schema, whatever the files declare; `policy --schema` stays what it was
+lib="$root/testdata/schemas/LIB_2/LIB_2.xsd"
+"$bin" check --schema "$lib" "$root/testdata/releases/newest.arxml" > one.log 2>&1 || { cat one.log; fail 'check --schema'; }
+grep -q 'rules: schema LIB_2.xsd (--schema)' one.log || { cat one.log; fail 'the rules line does not say --schema'; }
+if "$bin" check --schema "$lib" --schema-dir "$root/testdata/schemas" base > /dev/null 2>&1; then
+	fail 'check took --schema with --schema-dir'
+fi
+if "$bin" check --schema nope.xsd base > /dev/null 2>&1; then fail 'check took a schema that is not there'; fi
+"$bin" policy --schema | grep -q '"properties"' || fail 'policy --schema'
 echo 'input set CLI test: ok'
