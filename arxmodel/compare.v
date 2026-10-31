@@ -384,10 +384,11 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Me
 		ours:   r.scope_of(&first.ours, base, ours)
 		theirs: r.scope_of(&first.theirs, base, theirs)
 	}
-	mut m3 := if decisions.len == 0 {
-		first
-	} else {
-		flatxml.merge3(base.view, ours.view, theirs.view,
+	// no `if` expression: first is on the heap, so V makes one a pointer, here to a value of the
+	// else block that is gone after it
+	mut m3 := first
+	if decisions.len > 0 {
+		m3 = flatxml.merge3(base.view, ours.view, theirs.view,
 			take_theirs: fn [r, base, ours, theirs, decisions, scopes, mut decided] (c flatxml.Conflict) bool {
 				p := r.path_conflict(c, base, ours, theirs, scopes) or { return false }
 				take := decisions[p.id] or { return false }
