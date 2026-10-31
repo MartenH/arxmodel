@@ -101,7 +101,7 @@ fn test_the_reports_carry_the_filters() {
 	sc := compile_schemas(m, ffdata('schemas'), policy: p)
 	c := check(m, sc, roots: [ffdata('refs')])!
 	r := check_report(m, sc, &c)
-	doc := json2.decode[json2.Any](r.json())!.as_map()
+	doc := json2.decode[json2.Any](r.json(all: true))!.as_map()
 	filters := doc['summary']!.as_map()['filters']!.as_array()
 	assert filters.len == 1 && filters[0].as_map()['matched']!.int() == 2
 		&& filters[0].as_map()['reason']!.str() == 'traced'

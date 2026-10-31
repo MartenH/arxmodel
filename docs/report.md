@@ -80,7 +80,8 @@ reader ignores fields it does not know.
   hand; `file` is the model's first file, and nothing else is checked, so `findings` is empty).
 - All text is UTF-8: a file name or message with bytes that are not is written with U+FFFD in
   their place.
-- `findings`: in the order check finds them. `rule` is `layer.kind`; `severity` is the policy's
+- `findings`: in the order check finds them, without those the policy ignores unless `--all` is
+  given (`summary.ignored` counts them either way: there can be very many). `rule` is `layer.kind`; `severity` is the policy's
   (`error`, `warning`, `ignore`); `what` the element or `@attribute` concerned, where the kind has
   one; `in_conflict` marks a merge finding on an element pair whose holders the rules cannot tell
   apart; `path` the element's AUTOSAR path, with merge keys below it; `locations` every place in
