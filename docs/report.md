@@ -106,16 +106,16 @@ above, and is counted apart from the check report's.
     {
       "id": "6f1d2a90c4b7e853", "kind": "text", "path": "/Body/Head#WATTS", "name": "",
       "what": "text \"60\" / \"65\"",
-      "base": {"file": "base.arxml", "line": 9, "column": 11, "value": "55", "xml": "<LAMP ...", "cut": false},
-      "ours": {"file": "ours.arxml", "line": 9, "column": 11, "value": "60", "xml": "<LAMP ...", "cut": false},
-      "theirs": {"file": "theirs.arxml", "line": 9, "column": 11, "value": "65", "xml": "<LAMP ...", "cut": false}
+      "base": {"file": "base.arxml", "line": 9, "column": 11, "value": "55", "xml": "<LAMP ...", "cut": false, "changes": []},
+      "ours": {"file": "ours.arxml", "line": 9, "column": 11, "value": "60", "xml": "<LAMP ...", "cut": false, "changes": []},
+      "theirs": {"file": "theirs.arxml", "line": 9, "column": 11, "value": "65", "xml": "<LAMP ...", "cut": false, "changes": []}
     }
   ]
 }
 ```
 
 - `summary`: `conflicts` counts those left, `resolved` those decisions settled, `unused` the ids of
-  decisions that met no conflict; `ours_changes` and `theirs_taken` are the changes merged.
+  decisions that met no conflict, as the file spells them; `ours_changes` and `theirs_taken` are the changes merged.
 - `conflicts`: those no decision settled. `kind` is `text`, `attr`, `removed`, `moved` or `added`;
   `name` the attribute's, for `attr`; `what` the conflict as one line says it.
 - `id`: 16 hexadecimal digits, a hash of the conflict's kind, path, place among like items, what
@@ -128,6 +128,8 @@ above, and is counted apart from the check report's.
   value. `xml` is the element around the node as the file has it, white space and comments too: its
   parent; the node itself where the parent is the root or over 64 KiB; and with `cut` true, the
   start of the node where it is over that too. A node several files hold is given from the first.
+  `changes`, for a `removed` or `moved` conflict, is all that version changes in the node, a line
+  each: `xml` shows the place of one of them, and a decision takes or drops them all.
 
 A decisions file for `--resolve` is `ours ID` or `theirs ID` a line; `#` starts a comment. `merge3`
 exits 2 on a line that is neither, or on an id decided both ways.

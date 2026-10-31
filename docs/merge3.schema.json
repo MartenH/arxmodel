@@ -17,7 +17,7 @@
       "properties": {
         "conflicts": {"type": "integer", "minimum": 0},
         "resolved": {"type": "integer", "minimum": 0},
-        "unused": {"type": "array", "items": {"$ref": "#/definitions/id"}},
+        "unused": {"type": "array", "items": {"type": "string"}},
         "ours_changes": {"type": "integer", "minimum": 0},
         "theirs_taken": {"type": "integer", "minimum": 0}
       }
@@ -47,14 +47,15 @@
         {"type": "null"},
         {
           "type": "object",
-          "required": ["file", "line", "column", "value", "xml", "cut"],
+          "required": ["file", "line", "column", "value", "xml", "cut", "changes"],
           "properties": {
             "file": {"type": "string"},
             "line": {"type": "integer", "minimum": 0},
             "column": {"type": "integer", "minimum": 0},
             "value": {"type": ["string", "null"]},
             "xml": {"type": "string"},
-            "cut": {"type": "boolean"}
+            "cut": {"type": "boolean"},
+            "changes": {"type": "array", "items": {"type": "string"}}
           }
         }
       ]

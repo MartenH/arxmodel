@@ -183,6 +183,11 @@ fn test_merge3_decisions_take_a_side_and_are_tied_to_the_conflict() {
 	})!
 	assert stale.conflicts.len == 2 && stale.unused == [head.id] && stale.resolved == 0
 	assert stale.m3.edit.doc_edit(0).xml().contains('<WATTS>60</WATTS>')
+
+	// a decision that is no id is said like one that went stale
+	assert r.merge3(&v[0], &v[1], &v[2], decisions: {
+		'aa': Take.ours
+	})!.unused == ['aa']
 }
 
 fn test_merge3_a_removal_has_no_side_where_it_is_gone() {
@@ -230,12 +235,30 @@ fn test_a_decision_on_a_removal_does_not_cover_a_later_change_below() {
 		id: Take.ours
 	})!
 	assert kept.conflicts.len == 1 && kept.unused == [id]
+	// and the report says all that the decision covers
+	assert kept.conflicts[0].theirs.changes == ['~ /Body/Head#WATTS: "55" -> "60"',
+		'~ /Body/Head#NOTES/NOTE: "first" -> "new"']
 	// theirs removes it: theirs decided on one change of ours
 	back := r.merge3(&v[0], &v[2], &v[1])!.conflicts[0].id
 	dropped := r.merge3(&v[0], &v[3], &v[1], decisions: {
 		back: Take.theirs
 	})!
 	assert dropped.conflicts.len == 1 && dropped.unused == [back]
+}
+
+fn test_a_decision_on_a_removal_counts_the_order_of_what_is_added() {
+	notes := '<NOTE>first</NOTE><NOTE>second</NOTE>'
+	base := version_of('base')
+	gone := version_of('gone', lamp_head, '')
+	ab := version_of('ab', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', notes, notes +
+		'<NOTE>a</NOTE><NOTE>b</NOTE>')
+	ba := version_of('ba', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', notes, notes +
+		'<NOTE>b</NOTE><NOTE>a</NOTE>')
+	r, v := builtin_versions(base, gone, ab, ba)
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	assert r.merge3(&v[0], &v[1], &v[3], decisions: {
+		id: Take.theirs
+	})!.unused == [id]
 }
 
 fn test_a_decision_on_a_move_is_tied_to_where_it_goes() {
