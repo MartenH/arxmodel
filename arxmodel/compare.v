@@ -512,13 +512,16 @@ fn change_print(c flatxml.Change, v &Version) string {
 	return parts.join('\0')
 }
 
-// places_of is a node's place among its like, and each ancestor's up to the nearest referrable one:
-// what tells apart the items of a list, which share a path.
+// places_of is what tells a node from others of its path: the merge key of it and of each node
+// above it, which a path need not show, and below the nearest referrable node each one's place
+// among its like, which is all the items of a list have.
 fn places_of(n flatxml.MNode, ix &PathIndex) string {
 	mut out := []string{}
 	mut cur := n
-	for cur.ok() && !(int(cur.i) < ix.at.len && ix.at[cur.i] != 0) {
-		out << place_of(cur).str()
+	mut listed := true
+	for cur.ok() {
+		listed = listed && !(int(cur.i) < ix.at.len && ix.at[cur.i] != 0)
+		out << if listed { '${cur.key()}\0${place_of(cur)}' } else { cur.key() }
 		cur = cur.parent()
 	}
 	return out.join('/')
@@ -590,11 +593,15 @@ fn (r &Ruling) changes_below(d &flatxml.Diff, base &Version, v &Version, wanted 
 	return at
 }
 
-// own_xml is a node as the file has it.
+// own_xml is a node as the files have it, every file that holds a part of it.
 fn own_xml(n flatxml.MNode) string {
-	f := n.fragment(0)
-	i := if f.doc.is_text(f.i) { f.doc.parent[f.i] } else { f.i }
-	return f.doc.source_xml(i)
+	mut out := []string{cap: n.fragment_count()}
+	for k in 0 .. n.fragment_count() {
+		f := n.fragment(k)
+		i := if f.doc.is_text(f.i) { f.doc.parent[f.i] } else { f.i }
+		out << f.doc.source_xml(i)
+	}
+	return out.join('\0')
 }
 
 // conflict_side is what a version has at a conflict; nothing where it has no such node.

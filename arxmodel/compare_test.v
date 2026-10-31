@@ -298,6 +298,53 @@ fn test_items_of_a_list_are_decided_apart() {
 	assert one.m3.edit.doc_edit(0).xml().contains('<NOTE>x</NOTE><NOTE>y</NOTE>')
 }
 
+fn test_variants_of_one_path_are_decided_apart() {
+	label := fn (l string) string {
+		return '<SHORT-NAME>Head</SHORT-NAME><VARIATION-POINT><SHORT-LABEL>${l}</SHORT-LABEL></VARIATION-POINT>'
+	}
+	two := ['<SHORT-NAME>Head</SHORT-NAME>', label('a'), '<SHORT-NAME>Tail</SHORT-NAME>', label('b'),
+		'<WATTS>5</WATTS>', '<WATTS>55</WATTS>']
+	base := version_of('base', ...two)
+	mut to_60 := two.clone()
+	to_60 << ['<WATTS>55</WATTS>', '<WATTS>60</WATTS>']
+	mut to_65 := two.clone()
+	to_65 << ['<WATTS>55</WATTS>', '<WATTS>65</WATTS>']
+	ours := version_of('ours', ...to_60)
+	theirs := version_of('theirs', ...to_65)
+	r, v := builtin_versions(base, ours, theirs)
+	cs := r.merge3(&v[0], &v[1], &v[2])!.conflicts
+	assert cs.len == 2 && cs[0].path == cs[1].path && cs[0].id != cs[1].id
+}
+
+fn test_an_addition_over_several_files_is_all_in_its_id() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_fragments_${os.getpid()}')
+	os.mkdir_all(dir) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	pkg := fn (inner string) string {
+		return '<PACKAGE><SHORT-NAME>New</SHORT-NAME><ELEMENTS>${inner}</ELEMENTS></PACKAGE>'
+	}
+	lamp := fn (name string) string {
+		return '<LAMP UUID="${name}"><SHORT-NAME>${name}</SHORT-NAME></LAMP>'
+	}
+	part := fn [dir, pkg, lamp] (name string, inner string) string {
+		path := os.join_path(dir, name + '.arxml')
+		os.write_file(path, '<MODEL><PACKAGES>${pkg(lamp(inner))}</PACKAGES></MODEL>') or {
+			panic(err)
+		}
+		return path
+	}
+	base := version_of('base')
+	ours := version_of('ours', '</PACKAGES>', pkg(lamp('O')) + '</PACKAGES>')
+	main := version_of('main', '</PACKAGES>', pkg(lamp('T')) + '</PACKAGES>').set.docs[0].path
+	theirs := load([main, part('one', 'A')])!
+	later := load([main, part('two', 'B')])!
+	r, v := builtin_versions(base, ours, theirs, later)
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	assert id != r.merge3(&v[0], &v[1], &v[3])!.conflicts[0].id
+}
+
 fn test_a_context_past_the_limit_is_the_node_then_its_start() {
 	long := '<NOTE>' + 'x'.repeat(context_limit) + '</NOTE>'
 	base := version_of('base')
