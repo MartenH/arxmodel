@@ -146,6 +146,108 @@ fn test_merge3_a_removal_takes_a_node_only_its_uuid_changed_on() {
 	assert r.merge3(&v[0], &v[3], &v[2])!.conflicts.len == 1
 }
 
+fn test_merge3_decisions_take_a_side_and_are_tied_to_the_conflict() {
+	base := version_of('base')
+	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>6</WATTS>')
+	theirs := version_of('theirs', '<WATTS>55</WATTS>', '<WATTS>65</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>7</WATTS>')
+	later := version_of('later', '<WATTS>55</WATTS>', '<WATTS>66</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>7</WATTS>')
+	r, v := builtin_versions(base, ours, theirs, later)
+	plain := r.merge3(&v[0], &v[1], &v[2])!
+	assert plain.conflicts.len == 2
+	head, tail := plain.conflicts[0], plain.conflicts[1]
+	assert head.id.len == 16 && head.id != tail.id
+	assert head.base.value or { '' } == '55' && head.ours.value or { '' } == '60'
+		&& head.theirs.value or { '' } == '65'
+	assert head.ours.xml.starts_with('<LAMP UUID="u1">\n          <SHORT-NAME>Head')
+	assert head.ours.xml.ends_with('</LAMP>') && !head.ours.cut
+
+	mut one := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		head.id: Take.theirs
+	})!
+	assert one.conflicts.map(it.id) == [tail.id] && one.resolved == 1 && one.unused == []
+	text := one.m3.edit.doc_edit(0).xml()
+	assert text.contains('<WATTS>65</WATTS>') && text.contains('<WATTS>6</WATTS>')
+
+	mut both := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		head.id: Take.theirs
+		tail.id: Take.ours
+	})!
+	assert both.conflicts.len == 0 && both.resolved == 2
+
+	// theirs changed since: not the conflict decided, so the decision does not apply
+	mut stale := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		head.id: Take.theirs
+	})!
+	assert stale.conflicts.len == 2 && stale.unused == [head.id] && stale.resolved == 0
+	assert stale.m3.edit.doc_edit(0).xml().contains('<WATTS>60</WATTS>')
+}
+
+fn test_merge3_a_removal_has_no_side_where_it_is_gone() {
+	tail := '<LAMP UUID="u2">
+          <SHORT-NAME>Tail</SHORT-NAME>
+          <WATTS>5</WATTS>
+          <TARGET-REF DEST="LAMP">/Body/Head</TARGET-REF>
+        </LAMP>'
+	base := version_of('base')
+	gone := version_of('gone', tail, '')
+	watts := version_of('watts', '<WATTS>5</WATTS>', '<WATTS>7</WATTS>')
+	r, v := builtin_versions(base, gone, watts)
+	mut m := r.merge3(&v[0], &v[1], &v[2])!
+	assert m.conflicts.len == 1
+	c := m.conflicts[0]
+	assert c.ours_at == '-' && c.ours.xml == ''
+	assert c.theirs.xml.contains('<WATTS>7</WATTS>')
+	report := m.json()
+	assert report.contains('"ours":null') && report.contains('"kind":"removed"')
+	// theirs gives the node back, with its change
+	mut back := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		c.id: Take.theirs
+	})!
+	assert back.conflicts.len == 0
+	assert back.m3.edit.doc_edit(0).xml().contains('<WATTS>7</WATTS>')
+}
+
+fn test_a_context_past_the_limit_is_the_node_then_its_start() {
+	long := '<NOTE>' + 'x'.repeat(context_limit) + '</NOTE>'
+	base := version_of('base')
+	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<NOTE>second</NOTE>',
+		long)
+	theirs := version_of('theirs', '<WATTS>55</WATTS>', '<WATTS>65</WATTS>')
+	r, v := builtin_versions(base, ours, theirs)
+	c := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0]
+	// the parent is too long on ours's side alone
+	assert c.ours.xml == '<WATTS>60</WATTS>' && !c.ours.cut
+	assert c.theirs.xml.starts_with('<LAMP UUID="u1">')
+	big := version_of('big', '<WATTS>55</WATTS>', '<WATTS>' + 'y'.repeat(context_limit) + '</WATTS>')
+	s, w := builtin_versions(base, big, theirs)
+	d := s.merge3(&w[0], &w[1], &w[2])!.conflicts[0]
+	assert d.ours.cut && d.ours.xml.len == context_limit
+}
+
+fn test_parse_decisions() {
+	got := parse_decisions('# what was decided\ntheirs aa  # a path\n\n  ours bb\nours bb\n')!
+	assert got == {
+		'aa': Take.theirs
+		'bb': Take.ours
+	}
+	if _ := parse_decisions('both cc') {
+		assert false
+	} else {
+		assert err.msg().contains('line 1')
+	}
+	if _ := parse_decisions('ours\n') {
+		assert false
+	}
+	if _ := parse_decisions('ours cc\ntheirs cc\n') {
+		assert false
+	} else {
+		assert err.msg().contains('line 2') && err.msg().contains('both ways')
+	}
+}
+
 fn test_versions_read_by_the_schema() {
 	// the exact rules: the LIB schema's, the release the versions declare
 	mut a := load([cdata('merge')])!

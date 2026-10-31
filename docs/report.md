@@ -6,7 +6,7 @@ people read; the others are for machines:
 
 | format  | what |
 |---------|------|
-| `json`  | arxmodel's own report, below; every finding, every severity |
+| `json`  | arxmodel's own report, below; every finding, every severity (and see [merge3](#merge3)) |
 | `junit` | JUnit XML, for CI test reports |
 
 Both are written from one `Report` (`arxmodel/report.v`), so a command that finds things fills
@@ -88,6 +88,53 @@ reader ignores fields it does not know.
   the files the finding involves, line and column from 1 (0 where not known). A finding a filter
   matched has `filter` (its number in the policy, from 1), its `reason`, and `policy_severity`,
   the severity [severity] gave it before the filter.
+
+## merge3
+
+`arxmodel merge3 --format json ... -o OUT` writes this report to standard output; what was read,
+and the check of the result, go to standard error. It needs `-o`, since the result would otherwise
+go to standard output too. Schema: [merge3.schema.json](merge3.schema.json). `version` works as
+above, and is counted apart from the check report's.
+
+```json
+{
+  "version": 1,
+  "tool": {"name": "arxmodel", "version": "0.1.0"},
+  "command": "merge3",
+  "summary": {"conflicts": 1, "resolved": 0, "unused": [], "ours_changes": 3, "theirs_taken": 2},
+  "conflicts": [
+    {
+      "id": "6f1d2a90c4b7e853", "kind": "text", "path": "/Body/Head#WATTS", "name": "",
+      "what": "text \"60\" / \"65\"",
+      "base": {"file": "base.arxml", "line": 9, "column": 11, "value": "55", "xml": "<LAMP ...", "cut": false},
+      "ours": {"file": "ours.arxml", "line": 9, "column": 11, "value": "60", "xml": "<LAMP ...", "cut": false},
+      "theirs": {"file": "theirs.arxml", "line": 9, "column": 11, "value": "65", "xml": "<LAMP ...", "cut": false}
+    }
+  ]
+}
+```
+
+- `summary`: `conflicts` counts those left, `resolved` those decisions settled, `unused` the ids of
+  decisions that met no conflict; `ours_changes` and `theirs_taken` are the changes merged.
+- `conflicts`: those no decision settled. `kind` is `text`, `attr`, `removed`, `moved` or `added`;
+  `name` the attribute's, for `attr`; `what` the conflict as one line says it.
+- `id`: 16 hexadecimal digits, a hash of the conflict's kind, path and what each side has there.
+  Neither a file's name nor a line goes into it, so a merge of the same versions gives the same ids
+  wherever it runs; a side changing gives a new id, so a decision kept cannot land on another
+  conflict.
+- `base`, `ours`, `theirs`: the node in each version; `null` where that version has none, as when
+  it removed it. `value` is the text or attribute value, `null` where the conflict is about no
+  value. `xml` is the element around the node as the file has it, white space and comments too: its
+  parent; the node itself where the parent is the root or over 64 KiB; and with `cut` true, the
+  start of the node where it is over that too. A node several files hold is given from the first.
+
+A decisions file for `--resolve` is `ours ID` or `theirs ID` a line; `#` starts a comment. `merge3`
+exits 2 on a line that is neither, or on an id decided both ways.
+
+```
+theirs 6f1d2a90c4b7e853   # /Body/Head#WATTS
+ours   0b7c41de92aa3f16
+```
 
 ## JUnit
 

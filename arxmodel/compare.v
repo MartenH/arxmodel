@@ -1,6 +1,8 @@
 module arxmodel
 
+import crypto.sha256
 import flatxml
+import strings
 
 // Comparing versions of a model: a semantic diff, and a three-way merge, by AUTOSAR path.
 //
@@ -269,15 +271,37 @@ pub fn (r &Ruling) diff(a &Version, b &Version) []PathChange {
 	return out
 }
 
+// merge3_report_version is the version of the merge's JSON report: a field removed or changed in
+// meaning raises it, a field added does not.
+pub const merge3_report_version = 1
+
+// context_limit is the most of a file a conflict's report gives for one version.
+const context_limit = 64 * 1024
+
+// ConflictSide is what one version has at a conflict.
+pub struct ConflictSide {
+pub:
+	value ?string // the text or attribute value, where the conflict is about one
+	xml   string  // the element around the node as the file has it ('' where the version has no node)
+	cut   bool    // xml is only the start of an element too long to give whole
+}
+
 // PathConflict is a node two versions change differently, by its AUTOSAR path in the base.
 pub struct PathConflict {
 pub:
+	// the same for the same conflict in another run or on another machine, and not for one whose
+	// sides have since changed: a decision made on it (`parse_decisions`) cannot land on another
+	id        string
 	kind      flatxml.ConflictKind
 	path      string
+	name      string // attr: the attribute's name
 	what      string // what each side made of it
 	base_at   string
 	ours_at   string // '-' where ours removed it
 	theirs_at string
+	base      ConflictSide
+	ours      ConflictSide
+	theirs    ConflictSide
 }
 
 // line is a conflict in one line.
@@ -290,55 +314,221 @@ pub fn (c PathConflict) line() string {
 pub struct Merged3 {
 pub mut:
 	m3        flatxml.Merge3
-	conflicts []PathConflict
+	conflicts []PathConflict // those no decision settled
+	resolved  int            // the conflicts decisions settled
+	unused    []string       // the decisions that met no conflict, by id, sorted
+}
+
+// Take is the side a decision takes at a conflict.
+pub enum Take {
+	ours
+	theirs
+}
+
+@[params]
+pub struct Merge3Options {
+pub:
+	decisions map[string]Take // by `PathConflict.id`
+}
+
+// Decided is the decisions a merge used: a heap object, so that a callback can add to it.
+@[heap]
+struct Decided {
+mut:
+	used map[string]bool
 }
 
 // merge3 merges ours and theirs, two changed versions of base. A conflict about an attribute the
-// merge lets differ, or two sides putting unordered items in different orders, is not one.
-pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version) !Merged3 {
-	mut m3 := flatxml.merge3(base.view, ours.view, theirs.view)!
+// merge lets differ, or two sides putting unordered items in different orders, is not one. A
+// decision settles the conflict it names; the result holds the side it takes.
+pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Merge3Options) !Merged3 {
+	decisions := opts.decisions
+	mut decided := &Decided{}
+	mut m3 := if decisions.len == 0 {
+		flatxml.merge3(base.view, ours.view, theirs.view)!
+	} else {
+		flatxml.merge3(base.view, ours.view, theirs.view,
+			take_theirs: fn [r, base, ours, theirs, decisions, mut decided] (c flatxml.Conflict) bool {
+				p := r.path_conflict(c, base, ours, theirs) or { return false }
+				take := decisions[p.id] or { return false }
+				decided.used[p.id] = true
+				return take == .theirs
+			}
+		)!
+	}
 	mut out := []PathConflict{}
 	for c in m3.conflicts {
-		if c.kind == .attr && c.name in r.ignore {
-			continue
-		}
-		// structured comments are not compared, by the policy: ours is kept
-		if r.flat.ignored_content.len > 0 && in_ignored(c.node, r.flat.ignored_content) {
-			continue
-		}
-		if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {
-			continue
-		}
-		what := match c.kind {
-			.text {
-				'text ${show(c.ours.after)} / ${show(c.theirs.after)}'
-			}
-			.attr {
-				'@${c.name} ${show(c.ours.after)} / ${show(c.theirs.after)}'
-			}
-			.removed {
-				'removed on one side, changed on the other (${c.ours.kind} / ${c.theirs.kind})'
-			}
-			.moved {
-				'moved on both sides (${side_path(c.ours, ours)} / ${side_path(c.theirs, theirs)})'
-			}
-			.added {
-				'two of one identity added (${merged_path(c.ours.new, ours.ix)} / ${merged_path(c.theirs.new, theirs.ix)})'
+		p := r.path_conflict(c, base, ours, theirs) or { continue }
+		if take := decisions[p.id] {
+			if take == .ours {
+				decided.used[p.id] = true
+				continue
 			}
 		}
-		out << PathConflict{
-			kind:      c.kind
-			path:      merged_path(c.node, base.ix)
-			what:      what
-			base_at:   m3.ours.pos(c.node)
-			ours_at:   if c.ours.new.ok() { m3.ours.pos(c.ours.new) } else { '-' }
-			theirs_at: if c.theirs.new.ok() { m3.theirs.pos(c.theirs.new) } else { '-' }
-		}
+		out << p
 	}
+	mut unused := decisions.keys().filter(it !in decided.used)
+	unused.sort()
 	return Merged3{
 		m3:        m3
 		conflicts: out
+		resolved:  decided.used.len
+		unused:    unused
 	}
+}
+
+// path_conflict is a conflict by AUTOSAR path; none where it is no conflict to the ruling.
+fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, theirs &Version) ?PathConflict {
+	if c.kind == .attr && c.name in r.ignore {
+		return none
+	}
+	// structured comments are not compared, by the policy: ours is kept
+	if r.flat.ignored_content.len > 0 && in_ignored(c.node, r.flat.ignored_content) {
+		return none
+	}
+	if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {
+		return none
+	}
+	what := match c.kind {
+		.text {
+			'text ${show(c.ours.after)} / ${show(c.theirs.after)}'
+		}
+		.attr {
+			'@${c.name} ${show(c.ours.after)} / ${show(c.theirs.after)}'
+		}
+		.removed {
+			'removed on one side, changed on the other (${c.ours.kind} / ${c.theirs.kind})'
+		}
+		.moved {
+			'moved on both sides (${side_path(c.ours, ours)} / ${side_path(c.theirs, theirs)})'
+		}
+		.added {
+			'two of one identity added (${merged_path(c.ours.new, ours.ix)} / ${merged_path(c.theirs.new, theirs.ix)})'
+		}
+	}
+	path := merged_path(c.node, base.ix)
+	return PathConflict{
+		id:        conflict_id(c, path)
+		kind:      c.kind
+		path:      path
+		name:      c.name
+		what:      what
+		base_at:   c.node.pos()
+		ours_at:   if c.ours.new.ok() { c.ours.new.pos() } else { '-' }
+		theirs_at: if c.theirs.new.ok() { c.theirs.new.pos() } else { '-' }
+		base:      conflict_side(c.node, c.ours.before)
+		ours:      conflict_side(c.ours.new, c.ours.after)
+		theirs:    conflict_side(c.theirs.new, c.theirs.after)
+	}
+}
+
+// conflict_id is a hash of what a conflict is: where, and what each side made of it. Where a
+// node lies in a file is left out, and so are the files' names, which are git's temporary ones
+// in a merge driver.
+fn conflict_id(c flatxml.Conflict, path string) string {
+	mut parts := ['${c.kind}', path, c.name]
+	for side in [c.ours, c.theirs] {
+		parts << '${side.kind}'
+		parts << side.after or { '' }
+		parts << if side.new.ok() { own_xml(side.new) } else { '' }
+	}
+	return sha256.sum(parts.join('\0').bytes()).hex()[..16]
+}
+
+// own_xml is a node as the file has it.
+fn own_xml(n flatxml.MNode) string {
+	f := n.fragment(0)
+	i := if f.doc.is_text(f.i) { f.doc.parent[f.i] } else { f.i }
+	return f.doc.source_xml(i)
+}
+
+// conflict_side is what a version has at a conflict; nothing where it has no such node.
+fn conflict_side(n flatxml.MNode, value ?string) ConflictSide {
+	if !n.ok() {
+		return ConflictSide{
+			value: value
+		}
+	}
+	xml, cut := context_of(n)
+	return ConflictSide{
+		value: value
+		xml:   xml
+		cut:   cut
+	}
+}
+
+// context_of is the element around a node, as the file has it: its parent; the node itself where
+// the parent is more than context_limit, or the root; and the start of that where it is too.
+fn context_of(n flatxml.MNode) (string, bool) {
+	f := n.fragment(0)
+	d := f.doc
+	i := if d.is_text(f.i) { d.parent[f.i] } else { f.i }
+	p := d.parent[i]
+	if p != 0 {
+		lo, hi := d.source_span(p)
+		if hi - lo <= context_limit {
+			return d.source_xml(p), false
+		}
+	}
+	lo, hi := d.source_span(i)
+	if hi - lo <= context_limit {
+		return d.source_xml(i), false
+	}
+	return d.source_xml(i)[..context_limit], true
+}
+
+// parse_decisions reads a decisions file: `ours ID` or `theirs ID` a line, ID a conflict's id; `#`
+// starts a comment, and a line may be empty.
+pub fn parse_decisions(text string) !map[string]Take {
+	mut out := map[string]Take{}
+	for k, raw in text.split_into_lines() {
+		line := raw.all_before('#').trim_space()
+		if line == '' {
+			continue
+		}
+		fields := line.fields()
+		if fields.len != 2 || fields[0] !in ['ours', 'theirs'] {
+			return error('line ${k + 1}: not `ours ID` or `theirs ID`: ${line}')
+		}
+		take := if fields[0] == 'ours' { Take.ours } else { Take.theirs }
+		if was := out[fields[1]] {
+			if was != take {
+				return error('line ${k + 1}: ${fields[1]} is decided both ways')
+			}
+		}
+		out[fields[1]] = take
+	}
+	return out
+}
+
+// json is the merge as a report (docs/report.md).
+pub fn (m &Merged3) json() string {
+	mut b := strings.new_builder(1024 + m.conflicts.len * 512)
+	b.write_string('{"version":${merge3_report_version},"tool":{"name":"arxmodel","version":${jstr(version)}},')
+	b.write_string('"command":"merge3","summary":{"conflicts":${m.conflicts.len},"resolved":${m.resolved},')
+	b.write_string('"unused":[${m.unused.map(jstr(it)).join(',')}],')
+	b.write_string('"ours_changes":${m.m3.ours.changes.len},"theirs_taken":${m.m3.taken}},"conflicts":[')
+	for k, c in m.conflicts {
+		if k > 0 {
+			b.write_u8(`,`)
+		}
+		b.write_string('{"id":${jstr(c.id)},"kind":${jstr(c.kind.str())},"path":${jstr(c.path)},')
+		b.write_string('"name":${jstr(c.name)},"what":${jstr(c.what)},')
+		b.write_string('"base":${side_json(c.base_at, c.base)},"ours":${side_json(c.ours_at, c.ours)},')
+		b.write_string('"theirs":${side_json(c.theirs_at, c.theirs)}}')
+	}
+	b.write_string(']}\n')
+	return b.str()
+}
+
+// side_json is one version at a conflict; null where it has no such node.
+fn side_json(at string, s ConflictSide) string {
+	if at == '-' {
+		return 'null'
+	}
+	l := parse_location(at)
+	value := if v := s.value { jstr(v) } else { 'null' }
+	return '{"file":${jstr(l.file)},"line":${l.line},"column":${l.column},"value":${value},"xml":${jstr(s.xml)},"cut":${s.cut}}'
 }
 
 // side_path is where a side's change puts a node: its path in that side's version, or `removed`.

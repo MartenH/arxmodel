@@ -33,7 +33,8 @@
 //                                              unless --force
 //
 //   arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) A B
-//   arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) BASE OURS THEIRS [-o OUT]
+//   arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json]
+//                   [--resolve FILE] BASE OURS THEIRS [-o OUT]
 //                                              a semantic diff, and a three-way merge, by
 //                                              AUTOSAR path
 //   arxmodel git-setup, git-diff                git's merge and diff drivers
@@ -130,12 +131,16 @@ const usage = 'usage:
       is written, the order of items whose order means nothing, and the attributes the merge lets
       differ are not changes. One line a change: - removed, + added, > moved, ~ text, @ attribute.
       Exit 0 when they are the same model, 1 when they differ
-  arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) BASE OURS THEIRS [-o OUT]
+  arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json]
+                 [--resolve FILE] BASE OURS THEIRS [-o OUT]
       merge OURS and THEIRS, two changed versions of BASE (files, or directories), on BASE: every
       byte no change touched kept as BASE has it; written to OUT (a file, or a directory for
       directories; standard output by default for files). Where the sides change one node
       differently, ours is taken and the conflict printed by AUTOSAR path on standard error.
-      Exit 0 when clean, 1 on conflicts
+      --format json writes the conflicts to standard output instead (docs/report.md; needs -o):
+      each with its id and what the three versions have there. --resolve reads decisions on them,
+      `ours ID` or `theirs ID` a line, and each takes that side; a decision that meets no conflict
+      is said, and changes nothing. Exit 0 when clean or every conflict is decided, 1 on conflicts
   arxmodel git-setup (--schema-dir DIR | --schema FILE | --rules FILE) [REPO]
       set up the git merge and diff drivers for *.arxml in a repository (.gitattributes, and the
       configuration of the repository, calling this binary as merge3 and git-diff)
@@ -190,7 +195,8 @@ mut:
 	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
 	origin     string   // resolved: where the rules come from, for the `rules:` line
 	rules_err  string   // git-diff: why the rules could not be resolved, so it falls back to a text diff
-	format     string = 'text' // check: how the report is written
+	format     string = 'text' // check, merge3: how the report is written
+	resolve    string   // merge3: the file of decisions on conflicts
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -290,9 +296,13 @@ fn main() {
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
 				'--skip-multiplicity', '--skip-references', '--refs-from', '--out', '--force']
 		}
-		'diff', 'merge3', 'git-diff' {
+		'diff', 'git-diff' {
 			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--case-sensitive',
 				'--ignore-attr', '--check-attr', '--out']
+		}
+		'merge3' {
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--case-sensitive',
+				'--ignore-attr', '--check-attr', '--out', '--format', '--resolve']
 		}
 		'git-setup' { ['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy'] }
 		'policy' { ['--policy', '--schema', '--diff', '--out'] }
@@ -494,7 +504,7 @@ fn parse_opts(cmd string, args []string) !Opts {
 				continue
 			}
 			'--jobs', '--schema-dir', '--dump', '--emit', '--rules', '--policy', '--refs-from',
-			'--format', '--diff', '--socket', '--idle' {
+			'--format', '--diff', '--socket', '--idle', '--resolve' {
 				if k + 1 >= args.len {
 					return error('${a} needs a value')
 				}
@@ -507,6 +517,7 @@ fn parse_opts(cmd string, args []string) !Opts {
 					'--policy' { o.policy = v }
 					'--refs-from' { o.refs_from << v }
 					'--format' { o.format = v }
+					'--resolve' { o.resolve = v }
 					'--diff' { o.diff = v }
 					'--socket' { o.socket = v }
 					'--idle' {

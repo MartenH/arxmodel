@@ -12,6 +12,8 @@ module flatxml
 // it is when ours changed something below it, and that is a conflict too: no change of either
 // side is dropped without one. A conflict is reported with the node's place in all three versions, and the result is
 // still made, holding ours: a caller for whom a conflict is an error refuses it when there is one.
+// A caller can take theirs at a conflict instead (`Merge3Options.take_theirs`): ours's change is
+// left out, as if ours had not made it, and what is left of ours is merged again.
 //
 // The same is a patch: the changes from A to B, made on C, are the merge of C (ours) and B
 // (theirs) on the base A.
@@ -58,14 +60,89 @@ mut:
 	list []Conflict
 }
 
+@[params]
+pub struct Merge3Options {
+pub:
+	into ?IntoFn // where a new element goes (see `ApplyOptions.into`)
+	// asked once of each conflict found: true takes theirs there. `conflicts` holds the rest; a
+	// merge made with less of ours can meet new ones, and those are asked too
+	take_theirs ?fn (c Conflict) bool
+}
+
 // merge3 merges ours and theirs, two changed versions of base, all read by the same rules: the
 // result is edits on the base's documents (`edit`), written as `MEdit` writes them.
-pub fn merge3(base &Merged, ours &Merged, theirs &Merged, opts ApplyOptions) !Merge3 {
-	d1 := diff(base, ours)
+pub fn merge3(base &Merged, ours &Merged, theirs &Merged, opts Merge3Options) !Merge3 {
+	mut d1 := diff(base, ours)
 	d2 := diff(base, theirs)
-	side := side_of(&d1)
-	mut keep, mut conflicts := combine(&d1, &d2, &side)
-	mut me := d1.apply(into: opts.into)!
+	mut m := merge3_of(base, &d1, &d2, opts.into)!
+	take := opts.take_theirs or { return m }
+	mut asked := map[u64]bool{}
+	for {
+		mut taken := []Conflict{}
+		for c in m.conflicts {
+			key := conflict_key(c)
+			if key !in asked {
+				asked[key] = take(c)
+			}
+			if asked[key] {
+				taken << c
+			}
+		}
+		if taken.len == 0 {
+			return m
+		}
+		d1.changes = without_ours(&d1, taken)
+		m = merge3_of(base, &d1, &d2, opts.into)!
+	}
+	return m
+}
+
+// conflict_key tells conflicts apart across the passes of a merge: which change of ours a conflict
+// meets can differ from one pass to the next, as the ones before it are left out.
+fn conflict_key(c Conflict) u64 {
+	return mix(mix(mix(u64(c.kind), u64(c.node.i)), text_hash(c.name)), u64(c.theirs.new.i))
+}
+
+// without_ours is d's changes less those the conflicts meet. A removal by theirs takes all that ours
+// changed in what goes; a change of ours moved into it is met in the next pass.
+fn without_ours(d &Diff, conflicts []Conflict) []Change {
+	mut places := map[u64]bool{}
+	mut gone := map[u32]bool{}
+	for c in conflicts {
+		places[change_key(c.ours)] = true
+		if c.kind == .removed && c.theirs.kind == .removed {
+			gone[c.node.i] = true
+		}
+	}
+	mut out := []Change{cap: d.changes.len}
+	outer: for c in d.changes {
+		if change_key(c) in places {
+			continue
+		}
+		if gone.len > 0 {
+			mut n := anchor_of(c)
+			for n.ok() {
+				if gone[n.i] {
+					continue outer
+				}
+				n = n.parent()
+			}
+		}
+		out << c
+	}
+	return out
+}
+
+// change_key tells the changes of one diff apart.
+fn change_key(c Change) u64 {
+	return mix(mix(mix(u64(c.kind), u64(c.old.i)), u64(c.new.i)), c.akey)
+}
+
+// merge3_of puts the changes of two diffs from base together.
+fn merge3_of(base &Merged, d1 &Diff, d2 &Diff, into ?IntoFn) !Merge3 {
+	side := side_of(d1)
+	mut keep, mut conflicts := combine(d1, d2, &side)
+	mut me := d1.apply(into: into)!
 	// theirs's changes below a node ours copied into another document would land on what it left
 	mut kept := []Change{cap: keep.len}
 	for c in keep {
@@ -97,14 +174,14 @@ pub fn merge3(base &Merged, ours &Merged, theirs &Merged, opts ApplyOptions) !Me
 		}
 		return true
 	}
-	mut rest := d2
+	mut rest := *d2
 	rest.changes = kept
-	rest.apply_to(mut me, into: opts.into, across: across)!
+	rest.apply_to(mut me, into: into, across: across)!
 	conflicts << refused.list
 	return Merge3{
 		base:      base
-		ours:      d1
-		theirs:    d2
+		ours:      *d1
+		theirs:    *d2
 		conflicts: conflicts
 		taken:     kept.len - refused.list.len
 		edit:      me

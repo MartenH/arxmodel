@@ -596,7 +596,12 @@ three-way merge: every byte no change touched stays as the base has it. Where th
 node differently, ours is taken and the conflict is printed by AUTOSAR path on standard error. The
 result is checked (by the same rules: the merge and references, or every layer with a schema) and
 what that finds is printed; the exit code says whether the merge was clean (0) or had conflicts
-(1). On directories it writes every file of the base to OUT, as merged; a file new on one side is
+(1). `--format json` writes the conflicts as a report instead ([docs/report.md](docs/report.md)),
+each with an id and what the three versions have there, for a tool that puts them to a person.
+`--resolve FILE` takes the decisions back, `ours ID` or `theirs ID` a line: the side named is
+in the result, and when every conflict is decided the exit code is 0. An id is made from the
+conflict's path and what each side has there, so a decision kept for a later merge applies only
+if that conflict is still the same; one that meets no conflict is reported. On directories it writes every file of the base to OUT, as merged; a file new on one side is
 merged into the base's files rather than written as a new one. Exit 2, for any command, when
 something kept it from answering.
 
