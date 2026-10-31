@@ -146,6 +146,243 @@ fn test_merge3_a_removal_takes_a_node_only_its_uuid_changed_on() {
 	assert r.merge3(&v[0], &v[3], &v[2])!.conflicts.len == 1
 }
 
+fn test_merge3_decisions_take_a_side_and_are_tied_to_the_conflict() {
+	base := version_of('base')
+	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>6</WATTS>')
+	theirs := version_of('theirs', '<WATTS>55</WATTS>', '<WATTS>65</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>7</WATTS>')
+	later := version_of('later', '<WATTS>55</WATTS>', '<WATTS>66</WATTS>', '<WATTS>5</WATTS>',
+		'<WATTS>7</WATTS>')
+	r, v := builtin_versions(base, ours, theirs, later)
+	plain := r.merge3(&v[0], &v[1], &v[2])!
+	assert plain.conflicts.len == 2
+	head, tail := plain.conflicts[0], plain.conflicts[1]
+	assert head.id.len == 16 && head.id != tail.id
+	assert head.base.value or { '' } == '55' && head.ours.value or { '' } == '60'
+		&& head.theirs.value or { '' } == '65'
+	assert head.ours.xml.starts_with('<LAMP UUID="u1">\n          <SHORT-NAME>Head')
+	assert head.ours.xml.ends_with('</LAMP>') && !head.ours.cut
+
+	mut one := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		head.id: Take.theirs
+	})!
+	assert one.conflicts.map(it.id) == [tail.id] && one.resolved == 1 && one.unused == []
+	text := one.m3.edit.doc_edit(0).xml()
+	assert text.contains('<WATTS>65</WATTS>') && text.contains('<WATTS>6</WATTS>')
+
+	mut both := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		head.id: Take.theirs
+		tail.id: Take.ours
+	})!
+	assert both.conflicts.len == 0 && both.resolved == 2
+
+	// theirs changed since: not the conflict decided, so the decision does not apply
+	mut stale := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		head.id: Take.theirs
+	})!
+	assert stale.conflicts.len == 2 && stale.unused == [head.id] && stale.resolved == 0
+	assert stale.m3.edit.doc_edit(0).xml().contains('<WATTS>60</WATTS>')
+
+	// a decision that is no id is said like one that went stale
+	assert r.merge3(&v[0], &v[1], &v[2], decisions: {
+		'aa': Take.ours
+	})!.unused == ['aa']
+}
+
+fn test_merge3_a_removal_has_no_side_where_it_is_gone() {
+	tail := '<LAMP UUID="u2">
+          <SHORT-NAME>Tail</SHORT-NAME>
+          <WATTS>5</WATTS>
+          <TARGET-REF DEST="LAMP">/Body/Head</TARGET-REF>
+        </LAMP>'
+	base := version_of('base')
+	gone := version_of('gone', tail, '')
+	watts := version_of('watts', '<WATTS>5</WATTS>', '<WATTS>7</WATTS>')
+	r, v := builtin_versions(base, gone, watts)
+	mut m := r.merge3(&v[0], &v[1], &v[2])!
+	assert m.conflicts.len == 1
+	c := m.conflicts[0]
+	assert c.ours_at == '-' && c.ours.xml == ''
+	assert c.theirs.xml.contains('<WATTS>7</WATTS>')
+	report := m.json()
+	assert report.contains('"ours":null') && report.contains('"kind":"removed"')
+	// theirs gives the node back, with its change
+	mut back := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		c.id: Take.theirs
+	})!
+	assert back.conflicts.len == 0
+	assert back.m3.edit.doc_edit(0).xml().contains('<WATTS>7</WATTS>')
+}
+
+// lamp_head is the base's Head, to take out of its package and put back elsewhere.
+const lamp_head = '<LAMP UUID="u1">
+          <SHORT-NAME>Head</SHORT-NAME>
+          <WATTS>55</WATTS>
+          <NOTES><NOTE>first</NOTE><NOTE>second</NOTE></NOTES>
+        </LAMP>'
+
+fn test_a_decision_on_a_removal_does_not_cover_a_later_change_below() {
+	base := version_of('base')
+	gone := version_of('gone', lamp_head, '')
+	one := version_of('one', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>')
+	two := version_of('two', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<NOTE>first</NOTE>',
+		'<NOTE>new</NOTE>')
+	r, v := builtin_versions(base, gone, one, two)
+	// ours removes it: ours decided on one change of theirs
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	kept := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		id: Take.ours
+	})!
+	assert kept.conflicts.len == 1 && kept.unused == [id]
+	// and the report says all that the decision covers
+	assert kept.conflicts[0].theirs.changes == ['~ /Body/Head#WATTS: "55" -> "60"',
+		'~ /Body/Head#NOTES/NOTE: "first" -> "new"']
+	// theirs removes it: theirs decided on one change of ours
+	back := r.merge3(&v[0], &v[2], &v[1])!.conflicts[0].id
+	dropped := r.merge3(&v[0], &v[3], &v[1], decisions: {
+		back: Take.theirs
+	})!
+	assert dropped.conflicts.len == 1 && dropped.unused == [back]
+}
+
+fn test_a_decision_on_a_removal_counts_the_order_of_what_is_added() {
+	notes := '<NOTE>first</NOTE><NOTE>second</NOTE>'
+	base := version_of('base')
+	gone := version_of('gone', lamp_head, '')
+	ab := version_of('ab', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', notes, notes +
+		'<NOTE>a</NOTE><NOTE>b</NOTE>')
+	ba := version_of('ba', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', notes, notes +
+		'<NOTE>b</NOTE><NOTE>a</NOTE>')
+	r, v := builtin_versions(base, gone, ab, ba)
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	assert r.merge3(&v[0], &v[1], &v[3], decisions: {
+		id: Take.theirs
+	})!.unused == [id]
+}
+
+fn test_a_decision_on_a_move_is_tied_to_where_it_goes() {
+	// three packages, Head moved into the one named
+	packages := fn (to string) string {
+		mut out := ''
+		for name in ['Q', 'R', 'S'] {
+			inside := if name == to { lamp_head } else { '' }
+			out += '<PACKAGE><SHORT-NAME>${name}</SHORT-NAME><ELEMENTS>${inside}</ELEMENTS></PACKAGE>\n'
+		}
+		return out + '</PACKAGES>'
+	}
+	base := version_of('base', '</PACKAGES>', packages(''))
+	q := version_of('q', lamp_head, '', '</PACKAGES>', packages('Q'))
+	r_ := version_of('r', lamp_head, '', '</PACKAGES>', packages('R'))
+	s_ := version_of('s', lamp_head, '', '</PACKAGES>', packages('S'))
+	r, v := builtin_versions(base, q, r_, s_)
+	c := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0]
+	assert c.kind == .moved
+	later := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		c.id: Take.theirs
+	})!
+	assert later.conflicts.len == 1 && later.unused == [c.id]
+}
+
+fn test_items_of_a_list_are_decided_apart() {
+	base := version_of('base')
+	ours := version_of('ours', '<NOTE>first</NOTE><NOTE>second</NOTE>', '<NOTE>x</NOTE><NOTE>x</NOTE>')
+	theirs := version_of('theirs', '<NOTE>first</NOTE><NOTE>second</NOTE>', '<NOTE>y</NOTE><NOTE>y</NOTE>')
+	r, v := builtin_versions(base, ours, theirs)
+	cs := r.merge3(&v[0], &v[1], &v[2])!.conflicts
+	assert cs.len == 2 && cs[0].id != cs[1].id
+	mut one := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		cs[1].id: Take.theirs
+	})!
+	assert one.conflicts.map(it.id) == [cs[0].id] && one.resolved == 1
+	assert one.m3.edit.doc_edit(0).xml().contains('<NOTE>x</NOTE><NOTE>y</NOTE>')
+}
+
+fn test_variants_of_one_path_are_decided_apart() {
+	label := fn (l string) string {
+		return '<SHORT-NAME>Head</SHORT-NAME><VARIATION-POINT><SHORT-LABEL>${l}</SHORT-LABEL></VARIATION-POINT>'
+	}
+	two := ['<SHORT-NAME>Head</SHORT-NAME>', label('a'), '<SHORT-NAME>Tail</SHORT-NAME>', label('b'),
+		'<WATTS>5</WATTS>', '<WATTS>55</WATTS>']
+	base := version_of('base', ...two)
+	mut to_60 := two.clone()
+	to_60 << ['<WATTS>55</WATTS>', '<WATTS>60</WATTS>']
+	mut to_65 := two.clone()
+	to_65 << ['<WATTS>55</WATTS>', '<WATTS>65</WATTS>']
+	ours := version_of('ours', ...to_60)
+	theirs := version_of('theirs', ...to_65)
+	r, v := builtin_versions(base, ours, theirs)
+	cs := r.merge3(&v[0], &v[1], &v[2])!.conflicts
+	assert cs.len == 2 && cs[0].path == cs[1].path && cs[0].id != cs[1].id
+}
+
+fn test_an_addition_over_several_files_is_all_in_its_id() {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_fragments_${os.getpid()}')
+	os.mkdir_all(dir) or { panic(err) }
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	pkg := fn (inner string) string {
+		return '<PACKAGE><SHORT-NAME>New</SHORT-NAME><ELEMENTS>${inner}</ELEMENTS></PACKAGE>'
+	}
+	lamp := fn (name string) string {
+		return '<LAMP UUID="${name}"><SHORT-NAME>${name}</SHORT-NAME></LAMP>'
+	}
+	part := fn [dir, pkg, lamp] (name string, inner string) string {
+		path := os.join_path(dir, name + '.arxml')
+		os.write_file(path, '<MODEL><PACKAGES>${pkg(lamp(inner))}</PACKAGES></MODEL>') or {
+			panic(err)
+		}
+		return path
+	}
+	base := version_of('base')
+	ours := version_of('ours', '</PACKAGES>', pkg(lamp('O')) + '</PACKAGES>')
+	main := version_of('main', '</PACKAGES>', pkg(lamp('T')) + '</PACKAGES>').set.docs[0].path
+	theirs := load([main, part('one', 'A')])!
+	later := load([main, part('two', 'B')])!
+	r, v := builtin_versions(base, ours, theirs, later)
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	assert id != r.merge3(&v[0], &v[1], &v[3])!.conflicts[0].id
+}
+
+fn test_a_context_past_the_limit_is_the_node_then_its_start() {
+	long := '<NOTE>' + 'x'.repeat(context_limit) + '</NOTE>'
+	base := version_of('base')
+	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<NOTE>second</NOTE>',
+		long)
+	theirs := version_of('theirs', '<WATTS>55</WATTS>', '<WATTS>65</WATTS>')
+	r, v := builtin_versions(base, ours, theirs)
+	c := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0]
+	// the parent is too long on ours's side alone
+	assert c.ours.xml == '<WATTS>60</WATTS>' && !c.ours.cut
+	assert c.theirs.xml.starts_with('<LAMP UUID="u1">')
+	big := version_of('big', '<WATTS>55</WATTS>', '<WATTS>' + 'y'.repeat(context_limit) + '</WATTS>')
+	s, w := builtin_versions(base, big, theirs)
+	d := s.merge3(&w[0], &w[1], &w[2])!.conflicts[0]
+	assert d.ours.cut && d.ours.xml.len == context_limit
+}
+
+fn test_parse_decisions() {
+	got := parse_decisions('# what was decided\ntheirs aa  # a path\n\n  ours bb\nours bb\n')!
+	assert got == {
+		'aa': Take.theirs
+		'bb': Take.ours
+	}
+	if _ := parse_decisions('both cc') {
+		assert false
+	} else {
+		assert err.msg().contains('line 1')
+	}
+	if _ := parse_decisions('ours\n') {
+		assert false
+	}
+	if _ := parse_decisions('ours cc\ntheirs cc\n') {
+		assert false
+	} else {
+		assert err.msg().contains('line 2') && err.msg().contains('both ways')
+	}
+}
+
 fn test_versions_read_by_the_schema() {
 	// the exact rules: the LIB schema's, the release the versions declare
 	mut a := load([cdata('merge')])!

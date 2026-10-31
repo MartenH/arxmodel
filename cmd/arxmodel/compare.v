@@ -76,10 +76,29 @@ fn cmd_diff(o Opts) {
 
 // cmd_merge3 merges OURS and THEIRS, two changed versions of BASE, and writes the result: to OUT
 // (a file for a file, a directory for a directory, - for standard output), each document of the
-// base as the merge leaves it. Conflicts are printed by AUTOSAR path on standard error.
+// base as the merge leaves it. Conflicts are printed by AUTOSAR path on standard error, or with
+// --format json as a report on standard output. --resolve settles the conflicts its file decides.
 fn cmd_merge3(o Opts) {
 	if o.paths.len != 3 {
 		trouble('merge3 takes three versions: BASE OURS THEIRS (files or directories)')
+	}
+	if o.format !in ['text', 'json'] {
+		trouble('merge3 --format takes text or json, not ${o.format}')
+	}
+	json := o.format == 'json'
+	if json && (o.out == '' || o.out == '-') {
+		trouble('merge3 --format json needs -o: standard output has the report')
+	}
+	mut decisions := map[string]arxmodel.Take{}
+	if o.resolve != '' {
+		text := os.read_file(o.resolve) or {
+			trouble('${o.resolve}: ${err.msg()}')
+			return
+		}
+		decisions = arxmodel.parse_decisions(text) or {
+			trouble('${o.resolve}: ${err.msg()}')
+			return
+		}
 	}
 	r, v := versions(o, o.paths, false) or {
 		trouble(err.msg())
@@ -92,12 +111,17 @@ fn cmd_merge3(o Opts) {
 	if set && (out == '-' || (os.exists(out) && !os.is_dir(out))) {
 		trouble('merge3 of sets of files needs -o DIR')
 	}
-	mut res := r.merge3(&v[0], &v[1], &v[2]) or {
+	mut res := r.merge3(&v[0], &v[1], &v[2], decisions: decisions) or {
 		trouble(err.msg())
 		return
 	}
-	for c in res.conflicts {
-		eprintln(c.line())
+	if !json {
+		for c in res.conflicts {
+			eprintln(c.line())
+		}
+	}
+	for id in res.unused {
+		eprintln('warning: decision ${id} met no conflict')
 	}
 	mut me := res.m3.edit
 	mut written := [out]
@@ -124,7 +148,11 @@ fn cmd_merge3(o Opts) {
 	if out == '-' {
 		os.rm(written[0]) or {}
 	}
-	eprintln('${plural(res.m3.ours.changes.len, 'change')} of ours, ${plural(res.m3.taken, 'change')} of theirs taken; ${plural(res.conflicts.len, 'conflict')}')
+	if json {
+		print(res.json())
+	}
+	settled := if o.resolve != '' { ', ${res.resolved} resolved' } else { '' }
+	eprintln('${plural(res.m3.ours.changes.len, 'change')} of ours, ${plural(res.m3.taken, 'change')} of theirs taken; ${plural(res.conflicts.len, 'conflict')}${settled}')
 	exit(if res.conflicts.len > 0 { 1 } else { 0 })
 }
 

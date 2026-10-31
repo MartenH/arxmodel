@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "arxmodel merge3 report",
+  "type": "object",
+  "required": ["version", "tool", "command", "summary", "conflicts"],
+  "properties": {
+    "version": {"const": 1},
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "arxmodel"}, "version": {"type": "string"}}
+    },
+    "command": {"const": "merge3"},
+    "summary": {
+      "type": "object",
+      "required": ["conflicts", "resolved", "unused", "ours_changes", "theirs_taken"],
+      "properties": {
+        "conflicts": {"type": "integer", "minimum": 0},
+        "resolved": {"type": "integer", "minimum": 0},
+        "unused": {"type": "array", "items": {"type": "string"}},
+        "ours_changes": {"type": "integer", "minimum": 0},
+        "theirs_taken": {"type": "integer", "minimum": 0}
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "path", "name", "what", "base", "ours", "theirs"],
+        "properties": {
+          "id": {"$ref": "#/definitions/id"},
+          "kind": {"enum": ["text", "attr", "removed", "moved", "added"]},
+          "path": {"type": "string"},
+          "name": {"type": "string"},
+          "what": {"type": "string"},
+          "base": {"$ref": "#/definitions/side"},
+          "ours": {"$ref": "#/definitions/side"},
+          "theirs": {"$ref": "#/definitions/side"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+    "side": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["file", "line", "column", "value", "xml", "cut", "changes"],
+          "properties": {
+            "file": {"type": "string"},
+            "line": {"type": "integer", "minimum": 0},
+            "column": {"type": "integer", "minimum": 0},
+            "value": {"type": ["string", "null"]},
+            "xml": {"type": "string"},
+            "cut": {"type": "boolean"},
+            "changes": {"type": "array", "items": {"type": "string"}}
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Validate arxmodel's reports against their schemas.
 
-usage: validate_reports.py --json REPORT.json --junit REPORT.xml JUNIT.xsd
+usage: validate_reports.py --json REPORT.json --merge3 REPORT.json --junit REPORT.xml JUNIT.xsd
 
-The JSON report is checked against docs/report.schema.json (arxmodel's own). The JUnit XSD is
-fetched by the caller, never committed.
+The JSON reports are checked against docs/report.schema.json and docs/merge3.schema.json
+(arxmodel's own). The JUnit XSD is fetched by the caller, never committed.
 Needs the jsonschema and lxml packages.
 """
 import argparse
@@ -21,12 +21,16 @@ HERE = pathlib.Path(__file__).resolve().parent.parent
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--json', action='append', default=[])
+    ap.add_argument('--merge3', action='append', default=[])
     ap.add_argument('--junit', nargs=2, action='append', default=[], metavar=('REPORT', 'XSD'))
     a = ap.parse_args()
     ours = json.loads((HERE / 'docs' / 'report.schema.json').read_text())
     bad = 0
     for path in a.json:
         bad += check_json(path, ours)
+    merge3 = json.loads((HERE / 'docs' / 'merge3.schema.json').read_text())
+    for path in a.merge3:
+        bad += check_json(path, merge3)
     for path, xsd in a.junit:
         s = etree.XMLSchema(etree.parse(xsd))
         if s.validate(etree.parse(path)):

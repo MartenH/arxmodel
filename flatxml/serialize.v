@@ -133,6 +133,24 @@ pub fn (d &Doc) outer_xml(i u32) string {
 	return e.buf.str()
 }
 
+// source_xml is element i as the file has it, from its `<` past its end tag: its comments and the
+// white space between its tags are there, and the namespace declarations above it are not (for
+// those, `outer_xml`). The bytes are the document's own, so it lives as long as the document.
+pub fn (d &Doc) source_xml(i u32) string {
+	lo, hi := d.source_span(i)
+	return unsafe { tos(d.src + lo, int(hi - lo)) }
+}
+
+// source_span is the span of element i in the source, from its `<` to past its end tag.
+pub fn (d &Doc) source_span(i u32) (u32, u32) {
+	ste := d.start_tag_end(i)
+	return d.src_off[i], if d.self_closing(ste) {
+		ste
+	} else {
+		d.close_after(i, d.content_end(i, ste))
+	}
+}
+
 // node_from_parts writes node i from the tree's parts, its child nodes as the plan says.
 fn (mut e Emitter) node_from_parts(i u32) ! {
 	d := e.d
