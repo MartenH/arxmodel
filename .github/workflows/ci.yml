@@ -98,5 +98,7 @@ jobs:
           [ "$(dist/arxmodel.exe --version | tr -d '\r')" = "arxmodel $ver" ]
           dist/arxmodel.exe check --schema-dir testdata/schemas testdata/export
           dist/arxmodel.exe merge --schema-dir testdata/schemas -o "$RUNNER_TEMP/model.arxml" testdata/export
+          # the only merge3 a -prod binary runs: a fault of the optimizer shows nowhere else
+          scripts/merge3_cli_test.sh dist/arxmodel.exe
           dist/arxmodel.exe check --schema-dir testdata/schemas "$RUNNER_TEMP/model.arxml"
           dist/arxmodel.exe check --format json --schema-dir testdata/schemas testdata/merge > "$RUNNER_TEMP/merge.json" || [ $? -eq 1 ]
