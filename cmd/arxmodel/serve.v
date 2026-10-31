@@ -356,12 +356,12 @@ fn worker_args(o Opts, socket string) []string {
 	} else if o.rules_file != '' {
 		out << ['--rules', os.real_path(o.rules_file)]
 	} else if o.schema_dir != '' {
-		out << ['--schema-dir', os.real_path(o.schema_dir)]
+		out << [schema_flag(o), os.real_path(o.schema_dir)]
 	}
 	mut k := 2
 	for k < os.args.len {
 		a := os.args[k]
-		if a in ['--socket', '--idle', '--schema-dir', '--rules'] {
+		if a in ['--socket', '--idle', '--schema-dir', '--schema', '--rules'] {
 			k += 2
 			continue
 		}

@@ -233,6 +233,11 @@ declare is ranked and the others are reported. A name with no release cannot be 
 said; it governs only when it is the one schema that compiled. One release under two spellings
 is one release: one that compiled stands for it.
 
+`--schema FILE` names one schema instead of a directory: it governs every file of its target
+namespace, whatever they declare, or if they declare nothing, so a model whose declared release you
+do not have is read by the one you say. Nothing is inferred, and a file of another namespace stays
+ungoverned.
+
 When the newest declared schema is not in the schema directory, or does not compile, the newest
 one that does governs, and `rules` says so. Against the governing schema it reports, per older
 schema at hand, the roles that have no rule in it (`--problems` lists them), and the element names
@@ -536,11 +541,11 @@ opens it by name:
 ```toml
 paths      = ["system/", "extracts/*.arxml", "@more.txt"] # the input set
 exclude    = ["system/old/*.arxml"]
-schema_dir = "/opt/autosar/schemas" # or rules = "autosar.rules.txt"
+schema_dir = "/opt/autosar/schemas" # or schema = "AUTOSAR_00054.xsd", or rules = "autosar.rules.txt"
 policy     = "spec"                 # spec (the default), automat, or a policy file
 ```
 
-Relative paths are read from the file's directory. With neither `schema_dir` nor `rules`, this
+Relative paths are read from the file's directory. With none of `schema_dir`, `schema` and `rules`, this
 machine's schema directory is used (`ARXMODEL_SCHEMA_DIR`, else the user's configuration), else
 the built-in rules. `arxmodel.load_model_file(path)!.open()!` opens it.
 
@@ -553,7 +558,7 @@ beside `flatxml/`.
 Every command that merges says on one line which rules it read by (`rules: built-in identity
 rules (...)`, `rules: schema AUTOSAR_xxxxx from DIR (...)`, `rules: rules file ...`), so a CI log
 and a local run can be compared. The rules are, in order: `--no-schema` forces the built-in ones;
-`--rules FILE`; `--schema-dir DIR`; the schema directory of the environment
+`--rules FILE`; `--schema FILE`; `--schema-dir DIR`; the schema directory of the environment
 (`ARXMODEL_SCHEMA_DIR`) or of the user's configuration (`schema_dir = "DIR"` in
 `~/.config/arxmodel/config.toml`, `$XDG_CONFIG_HOME` respected); else the **built-in identity
 rules** ([identity.toml](arxmodel/identity.toml), committed and built in), which need no schema, so CI and

@@ -105,6 +105,52 @@ fn test_newest_declared_governs_or_the_newest_at_hand() {
 	assert use_names(sc, g.ranked) == ['lib_1-9-9.xsd', 'LIB_1.xsd', 'LIB_2.xsd', 'LIB_3.xsd']
 }
 
+fn test_one_schema_file_governs_whatever_the_files_declare() {
+	mut m := load([tdata('releases', 'newest.arxml')])!
+	defer {
+		m.free()
+	}
+	file := tdata('schemas', 'LIB_2', 'LIB_2.xsd')
+	sc := compile_schemas(m, file, policy: automat_policy())
+	assert sc.uses.len == 1 && sc.uses[0].docs == [0]
+	assert sc.uses[sc.governing[0].use].name == 'LIB_2.xsd'
+	assert sc.governing[0].note == ''
+	// a schema of another namespace governs nothing
+	other := compile_schemas(m, tdata('schemas', 'ALT_1', 'ALT_1.xsd'), policy: automat_policy())
+	assert other.governing.len == 1 && other.governing[0].use < 0
+	assert other.uses[0].error.contains('ALT_1.xsd is of namespace')
+}
+
+fn test_one_schema_file_governs_a_file_that_declares_none() {
+	dir := os.join_path(os.vtmp_dir(), 'arxmodel_one_schema_${os.getpid()}')
+	os.mkdir_all(dir)!
+	defer {
+		os.rmdir_all(dir) or {}
+	}
+	f := os.join_path(dir, 'bare.arxml')
+	os.write_file(f, '<LIBRARY xmlns="urn:arxmodel:test:lib"><SHELVES/></LIBRARY>')!
+	mut m := load([f])!
+	defer {
+		m.free()
+	}
+	sc := compile_schemas(m, tdata('schemas', 'LIB_2', 'LIB_2.xsd'), policy: automat_policy())
+	assert sc.undeclared.len == 0 && sc.uses[0].docs == [0]
+}
+
+fn test_a_model_file_names_one_schema() {
+	base := tdata('releases')
+	mf := parse_model_file('paths = ["newest.arxml"]\nschema = "../schemas/LIB_2/LIB_2.xsd"\n',
+		os.join_path(base, 'm.arxmodel.toml'))!
+	assert mf.schema.ends_with('LIB_2.xsd')
+	mut o := mf.open()!
+	assert o.rules.contains('LIB_2.xsd')
+	parse_model_file('paths = ["a"]\nschema = "a.xsd"\nschema_dir = "d"\n', 'x') or {
+		assert err.msg().contains('merged by one')
+		return
+	}
+	assert false
+}
+
 fn test_older_roles_and_documents_against_the_governing_schema() {
 	mut m := load([tdata('releases')])!
 	defer {

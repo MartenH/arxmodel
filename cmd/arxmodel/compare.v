@@ -215,9 +215,13 @@ fn cmd_git_setup(o Opts) {
 
 // setup_rules_file makes the rules of the schema the repository's models declare into a rules
 // file in its git directory, and is the option naming it; a repository with no model yet keeps
-// the schema directory.
+// the schema directory, and --schema is kept as it is.
 fn setup_rules_file(o Opts, repo string, top string) string {
-	dir := '--schema-dir ${os.quoted_path(os.real_path(o.schema_dir))}'
+	dir := '${schema_flag(o)} ${os.quoted_path(os.real_path(o.schema_dir))}'
+	// a rules file is held to what the files declare, which --schema overrides
+	if o.one_schema {
+		return dir
+	}
 	listed := git_out(repo, ['ls-files', '--', '*.arxml', '*.ARXML']) or { return dir }
 	files := listed.split_into_lines().filter(it != '').map(os.join_path(top, it))
 	if files.len == 0 {

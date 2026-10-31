@@ -11,12 +11,13 @@ import toml
 //   paths      = ["system/", "extracts/*.arxml", "@more.txt"] # the input set (see `load`)
 //   exclude    = ["system/old/*.arxml"]                       # file globs left out
 //   schema_dir = "/opt/autosar/schemas" # where the schemas the files declare are
+//   schema     = "AUTOSAR_00054.xsd"    # or one schema, whatever the files declare
 //   rules      = "autosar.rules.txt"    # or a rules file made from one (`rules --emit`)
 //   policy     = "spec"                 # `spec` (the default), `automat`, or a policy file
 //
 // Paths, globs, `@FILE` lists, excludes and files named in it are read from the file's own
-// directory when relative. `paths` is required; with neither `schema_dir` nor `rules`, the schema
-// directory is this machine's (`configured_schema_dir`), else the built-in identity rules.
+// directory when relative. `paths` is required; with none of `schema_dir`, `schema` and `rules`, the
+// schema directory is this machine's (`configured_schema_dir`), else the built-in identity rules.
 // An unknown key, or a value of the wrong type, is refused by name.
 
 // model_file_suffix is how a model file is named, so a program can tell it from an ARXML file.
@@ -29,6 +30,7 @@ pub:
 	paths      []string
 	exclude    []string
 	schema_dir string
+	schema     string
 	rules      string
 	policy     string
 }
@@ -51,12 +53,13 @@ pub fn parse_model_file(text string, path string) !ModelFile {
 	base := os.dir(path)
 	mut paths := []string{}
 	mut exclude := []string{}
-	mut schema_dir, mut rules, mut policy := '', '', ''
+	mut schema_dir, mut schema, mut rules, mut policy := '', '', '', ''
 	for k, v in doc.to_any().as_map() {
 		match k {
 			'paths' { paths = model_strings(v, k, path)!.map(from_dir(base, it)) }
 			'exclude' { exclude = model_strings(v, k, path)!.map(from_dir(base, it)) }
 			'schema_dir' { schema_dir = from_dir(base, model_string(v, k, path)!) }
+			'schema' { schema = from_dir(base, model_string(v, k, path)!) }
 			'rules' { rules = from_dir(base, model_string(v, k, path)!) }
 			'policy' {
 				policy = model_string(v, k, path)!
@@ -70,14 +73,15 @@ pub fn parse_model_file(text string, path string) !ModelFile {
 	if paths.len == 0 {
 		return error('${path}: `paths` names no file')
 	}
-	if schema_dir != '' && rules != '' {
-		return error('${path}: `schema_dir` and `rules` both given; the model is merged by one')
+	if [schema_dir, schema, rules].filter(it != '').len > 1 {
+		return error('${path}: `schema_dir`, `schema` and `rules`: more than one given; the model is merged by one')
 	}
 	return ModelFile{
 		path:       path
 		paths:      paths
 		exclude:    exclude
 		schema_dir: schema_dir
+		schema:     schema
 		rules:      rules
 		policy:     policy
 	}
@@ -88,7 +92,7 @@ pub fn parse_model_file(text string, path string) !ModelFile {
 pub fn (mf ModelFile) options() !OpenOptions {
 	mut dir := mf.schema_dir
 	mut config := ''
-	if dir == '' && mf.rules == '' {
+	if dir == '' && mf.schema == '' && mf.rules == '' {
 		mut from := ''
 		dir, from = configured_schema_dir()!
 		if dir != '' && from != schema_dir_env {
@@ -98,6 +102,7 @@ pub fn (mf ModelFile) options() !OpenOptions {
 	return OpenOptions{
 		exclude:    mf.exclude
 		schema_dir: dir
+		schema:     mf.schema
 		rules_file: mf.rules
 		policy:     mf.policy
 		config:     config

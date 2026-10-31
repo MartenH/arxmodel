@@ -7,7 +7,7 @@
 //   arxmodel rules --schema-dir DIR --emit FILE <file|dir>...
 //                                              write the merge rules of the governing schema
 //                                              as flatxml rule text
-//   arxmodel check (--schema-dir DIR | --rules FILE) [--all] [--case-sensitive]
+//   arxmodel check (--schema-dir DIR | --schema FILE | --rules FILE) [--all] [--case-sensitive]
 //                  [--ignore-attr NAME]... [--check-attr NAME]... [--skip-xml]
 //                  [--skip-multiplicity] [--skip-references] [--refs-from <file|dir>]...
 //                  [--jobs N] <file|dir>...
@@ -16,24 +16,24 @@
 //                                              layers: the merge, each file against its XML
 //                                              schema, the merged model's multiplicities, its
 //                                              references
-//   arxmodel get (--schema-dir DIR | --rules FILE) <path> <file|dir>...
-//   arxmodel list (--schema-dir DIR | --rules FILE) <ELEMENT> <file|dir>...
+//   arxmodel get (--schema-dir DIR | --schema FILE | --rules FILE) <path> <file|dir>...
+//   arxmodel list (--schema-dir DIR | --schema FILE | --rules FILE) <ELEMENT> <file|dir>...
 //                                              the merged element at an AUTOSAR path; the paths
 //                                              of every referrable element of a name
-//   arxmodel values (--schema-dir DIR | --rules FILE) <pattern> <file|dir>...
+//   arxmodel values (--schema-dir DIR | --schema FILE | --rules FILE) <pattern> <file|dir>...
 //                                              every value a path pattern wants, one a line:
 //                                              `path = "text"`
-//   arxmodel serve (--schema-dir DIR | --rules FILE) --socket PATH <file|dir>...
+//   arxmodel serve (--schema-dir DIR | --schema FILE | --rules FILE) --socket PATH <file|dir>...
 //                                              the files read once, get, list and values
 //                                              answered at a socket (--socket PATH on those)
-//   arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
+//   arxmodel merge (--schema-dir DIR | --schema FILE | --rules FILE) [the options of check] [--force]
 //                  -o OUT|- <file|dir>...      merge and check them as check does (the summary
 //                                              on standard error), and write the merged model
 //                                              as one document: not where check finds errors,
 //                                              unless --force
 //
-//   arxmodel diff (--schema-dir DIR | --rules FILE) A B
-//   arxmodel merge3 (--schema-dir DIR | --rules FILE) BASE OURS THEIRS [-o OUT]
+//   arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) A B
+//   arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) BASE OURS THEIRS [-o OUT]
 //                                              a semantic diff, and a three-way merge, by
 //                                              AUTOSAR path
 //   arxmodel git-setup, git-diff                git's merge and diff drivers
@@ -93,19 +93,19 @@ const usage = 'usage:
       the report as text (the default), JSON (docs/report.md) or JUnit XML on
       standard output, what was read on standard error; exit 0 clean, 1 errors (or files not
       read, declaring no schema, or no schema governing them), 2 when it cannot run
-  arxmodel get (--schema-dir DIR | --rules FILE) [--jobs N] <path> <file|dir>...
+  arxmodel get (--schema-dir DIR | --schema FILE | --rules FILE) [--jobs N] <path> <file|dir>...
       the merged element at an AUTOSAR path (/Pkg/Name): its element and every file and line;
       every element holding it, where the merge keeps two apart
-  arxmodel list (--schema-dir DIR | --rules FILE) [--jobs N] <ELEMENT-NAME> <file|dir>...
+  arxmodel list (--schema-dir DIR | --schema FILE | --rules FILE) [--jobs N] <ELEMENT-NAME> <file|dir>...
       the AUTOSAR path of every referrable element of that name
-  arxmodel values (--schema-dir DIR | --rules FILE) [--jobs N] <pattern> <file|dir>...
+  arxmodel values (--schema-dir DIR | --schema FILE | --rules FILE) [--jobs N] <pattern> <file|dir>...
       every value whose path a path pattern matches, or lies below a path it matches (`*` one
       segment or part of one, `**` any: /Pkg/**/Name), one a line: `path = "text"`. A value the
       merge names by its definition (an ECUC parameter or reference value) is the path of its
       container and the last name of the definition (/Pkg/Cfg/Param = "3"); any other value is
       the path of its referrable element, `#` and the elements below it (/Pkg/Elem#LENGTH = "8").
       Exit 1 when no value matches
-  arxmodel serve (--schema-dir DIR | --rules FILE) [--idle MIN]
+  arxmodel serve (--schema-dir DIR | --schema FILE | --rules FILE) [--idle MIN]
                  --socket PATH <file|dir>...
       read and merge the files once and answer get, list and values at a Unix domain socket:
       `arxmodel values --socket PATH PATTERN` (get, list likewise) prints what the command prints
@@ -116,7 +116,7 @@ const usage = 'usage:
       request (60; 0 never)
   arxmodel serve --socket PATH --reload | --stop
       have the server read its files again; stop it
-  arxmodel merge (--schema-dir DIR | --rules FILE) [the options of check] [--force]
+  arxmodel merge (--schema-dir DIR | --schema FILE | --rules FILE) [the options of check] [--force]
                  -o OUT|- <file|dir>...
       merge and check the files as check does, the summary going to standard error, and write
       the merged model as one ARXML to OUT (- for standard output): what came from one file and
@@ -124,22 +124,22 @@ const usage = 'usage:
       file, and the root carries the schema location of the first file that declares the
       governing release. Nothing is written where check would exit 1 (errors, files not read or
       declaring no schema), unless --force
-  arxmodel diff (--schema-dir DIR | --rules FILE) A B
+  arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) A B
       what changed from version A to version B (each a file or a directory), by AUTOSAR path:
       both merged by the same rules (the newest release either declares), so where an element
       is written, the order of items whose order means nothing, and the attributes the merge lets
       differ are not changes. One line a change: - removed, + added, > moved, ~ text, @ attribute.
       Exit 0 when they are the same model, 1 when they differ
-  arxmodel merge3 (--schema-dir DIR | --rules FILE) BASE OURS THEIRS [-o OUT]
+  arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) BASE OURS THEIRS [-o OUT]
       merge OURS and THEIRS, two changed versions of BASE (files, or directories), on BASE: every
       byte no change touched kept as BASE has it; written to OUT (a file, or a directory for
       directories; standard output by default for files). Where the sides change one node
       differently, ours is taken and the conflict printed by AUTOSAR path on standard error.
       Exit 0 when clean, 1 on conflicts
-  arxmodel git-setup (--schema-dir DIR | --rules FILE) [REPO]
+  arxmodel git-setup (--schema-dir DIR | --schema FILE | --rules FILE) [REPO]
       set up the git merge and diff drivers for *.arxml in a repository (.gitattributes, and the
       configuration of the repository, calling this binary as merge3 and git-diff)
-  arxmodel git-diff (--schema-dir DIR | --rules FILE) path old-file old-hex old-mode new-file new-hex new-mode
+  arxmodel git-diff (--schema-dir DIR | --schema FILE | --rules FILE) path old-file old-hex old-mode new-file new-hex new-mode
       the external diff driver of git
   Exit 2, for any command, when something kept it from answering (an option, a file not read)
   arxmodel policy [--policy NAME|FILE] [--diff NAME|FILE] [--schema [-o FILE]]
@@ -161,6 +161,7 @@ struct Opts {
 mut:
 	jobs       int
 	schema_dir string
+	one_schema bool // schema_dir is the one schema file --schema names
 	problems   bool
 	dump       string
 	all        bool     // check: every problem, not the first of each kind
@@ -195,7 +196,7 @@ mut:
 }
 
 // resolve_rules decides what the files are read by: --no-schema forces the built-in identity
-// rules; else --rules or --schema-dir; else the schema directory of the environment
+// rules; else --rules, --schema-dir or --schema; else the schema directory of the environment
 // (ARXMODEL_SCHEMA_DIR) or the configuration file; else the built-in rules, which need no schema.
 fn resolve_rules(mut o Opts) ! {
 	check_rule_options(o)!
@@ -208,7 +209,7 @@ fn resolve_rules(mut o Opts) ! {
 		return
 	}
 	if o.schema_dir != '' {
-		o.origin = '--schema-dir'
+		o.origin = if o.one_schema { '--schema' } else { '--schema-dir' }
 		return
 	}
 	dir, origin := arxmodel.configured_schema_dir()!
@@ -221,12 +222,23 @@ fn resolve_rules(mut o Opts) ! {
 
 // check_rule_options refuses rules options that contradict each other.
 fn check_rule_options(o Opts) ! {
+	if o.one_schema && '--schema-dir' in o.given {
+		return error('--schema-dir and --schema: one or the other')
+	}
 	if o.schema_dir != '' && o.rules_file != '' {
-		return error('--schema-dir and --rules: one or the other')
+		return error('${schema_flag(o)} and --rules: one or the other')
 	}
 	if o.no_schema && (o.schema_dir != '' || o.rules_file != '') {
-		return error('--no-schema takes neither --schema-dir nor --rules')
+		return error('--no-schema takes neither --schema-dir, --schema nor --rules')
 	}
+	if o.one_schema && !os.is_file(o.schema_dir) {
+		return error('--schema ${o.schema_dir}: no such file')
+	}
+}
+
+// schema_flag is the option that names o.schema_dir.
+fn schema_flag(o Opts) string {
+	return if o.one_schema { '--schema' } else { '--schema-dir' }
 }
 
 // rules_line says which rules a command reads by, so a CI log and a local run can be compared.
@@ -236,6 +248,9 @@ fn rules_line(o Opts, name string) string {
 	}
 	if o.rules_file != '' {
 		return 'rules: rules file ${o.rules_file}, made from ${name}'
+	}
+	if o.one_schema {
+		return 'rules: schema ${name} (--schema)'
 	}
 	return 'rules: schema ${name} from ${o.schema_dir} (${o.origin})'
 }
@@ -250,36 +265,36 @@ fn main() {
 		println('arxmodel ${arxmodel.version}')
 		return
 	}
-	mut opts := parse_opts(args[1..]) or {
+	mut opts := parse_opts(args[0], args[1..]) or {
 		eprintln(err.msg())
 		eprintln(usage)
 		exit(2)
 	}
 	mut allowed := match args[0] {
 		'load' { ['--jobs'] }
-		'rules' { ['--jobs', '--schema-dir', '--problems', '--dump', '--emit', '--policy'] }
+		'rules' { ['--jobs', '--schema-dir', '--schema', '--problems', '--dump', '--emit', '--policy'] }
 		'check' {
-			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--all', '--problems',
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
 				'--skip-multiplicity', '--skip-references', '--refs-from', '--format']
 		}
 		'get', 'list', 'values' {
-			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--socket']
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--socket']
 		}
 		'serve' {
-			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--socket', '--idle',
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--socket', '--idle',
 				'--stop', '--reload', '--worker']
 		}
 		'merge' {
-			['--jobs', '--schema-dir', '--rules', '--no-schema', '--all', '--problems',
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--all', '--problems',
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
 				'--skip-multiplicity', '--skip-references', '--refs-from', '--out', '--force']
 		}
 		'diff', 'merge3', 'git-diff' {
-			['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy', '--case-sensitive',
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--case-sensitive',
 				'--ignore-attr', '--check-attr', '--out']
 		}
-		'git-setup' { ['--jobs', '--schema-dir', '--rules', '--no-schema', '--policy'] }
+		'git-setup' { ['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy'] }
 		'policy' { ['--policy', '--schema', '--diff', '--out'] }
 		else { []string{} }
 	}
@@ -309,7 +324,7 @@ fn main() {
 	}
 	if args[0] in ['check', 'merge', 'get', 'list', 'values', 'serve', 'diff', 'merge3', 'git-diff',
 		'git-setup'] && opts.schema_dir != '' && opts.rules_file != '' {
-		eprintln('${args[0]} takes --schema-dir or --rules, not both')
+		eprintln('${args[0]} takes --schema-dir, --schema or --rules, not both')
 		exit(2)
 	}
 	// git-setup records only what it is given: the drivers resolve the rest when they run
@@ -389,7 +404,7 @@ fn main() {
 		}
 		'rules' {
 			if opts.schema_dir == '' {
-				eprintln('rules needs a schema directory (--schema-dir, ${arxmodel.schema_dir_env} or schema_dir in ${arxmodel.config_path()})')
+				eprintln('rules needs a schema (--schema-dir, --schema, ${arxmodel.schema_dir_env} or schema_dir in ${arxmodel.config_path()})')
 				exit(2)
 			}
 			cmd_rules(opts)
@@ -401,7 +416,7 @@ fn main() {
 	}
 }
 
-fn parse_opts(args []string) !Opts {
+fn parse_opts(cmd string, args []string) !Opts {
 	mut o := Opts{}
 	mut k := 0
 	for k < args.len {
@@ -456,7 +471,16 @@ fn parse_opts(args []string) !Opts {
 				o.worker = true
 			}
 			'--schema' {
-				o.schema = true
+				if cmd == 'policy' {
+					o.schema = true
+				} else {
+					if k + 1 >= args.len {
+						return error('--schema needs a schema file')
+					}
+					o.schema_dir, o.one_schema = args[k + 1], true
+					k += 2
+					continue
+				}
 			}
 			'-o', '--out' {
 				if k + 1 >= args.len {
@@ -887,7 +911,8 @@ fn cmd_list(o Opts) {
 // or, with --socket, the answer of the server there, printed (and exit).
 fn read_for(o Opts, cmd string, what string) (string, arxmodel.Checked) {
 	if o.socket != '' {
-		for a in ['--schema-dir', '--rules', '--no-schema', '--policy', '--jobs', '--exclude',
+		for a in ['--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--jobs',
+			'--exclude',
 			'--verbose'] {
 			if a in o.given {
 				eprintln('${cmd} --socket takes no ${a}: the server reads by the options it was started with')
