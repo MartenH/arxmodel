@@ -210,6 +210,71 @@ fn test_merge3_a_removal_has_no_side_where_it_is_gone() {
 	assert back.m3.edit.doc_edit(0).xml().contains('<WATTS>7</WATTS>')
 }
 
+// lamp_head is the base's Head, to take out of its package and put back elsewhere.
+const lamp_head = '<LAMP UUID="u1">
+          <SHORT-NAME>Head</SHORT-NAME>
+          <WATTS>55</WATTS>
+          <NOTES><NOTE>first</NOTE><NOTE>second</NOTE></NOTES>
+        </LAMP>'
+
+fn test_a_decision_on_a_removal_does_not_cover_a_later_change_below() {
+	base := version_of('base')
+	gone := version_of('gone', lamp_head, '')
+	one := version_of('one', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>')
+	two := version_of('two', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<NOTE>first</NOTE>',
+		'<NOTE>new</NOTE>')
+	r, v := builtin_versions(base, gone, one, two)
+	// ours removes it: ours decided on one change of theirs
+	id := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0].id
+	kept := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		id: Take.ours
+	})!
+	assert kept.conflicts.len == 1 && kept.unused == [id]
+	// theirs removes it: theirs decided on one change of ours
+	back := r.merge3(&v[0], &v[2], &v[1])!.conflicts[0].id
+	dropped := r.merge3(&v[0], &v[3], &v[1], decisions: {
+		back: Take.theirs
+	})!
+	assert dropped.conflicts.len == 1 && dropped.unused == [back]
+}
+
+fn test_a_decision_on_a_move_is_tied_to_where_it_goes() {
+	// three packages, Head moved into the one named
+	packages := fn (to string) string {
+		mut out := ''
+		for name in ['Q', 'R', 'S'] {
+			inside := if name == to { lamp_head } else { '' }
+			out += '<PACKAGE><SHORT-NAME>${name}</SHORT-NAME><ELEMENTS>${inside}</ELEMENTS></PACKAGE>\n'
+		}
+		return out + '</PACKAGES>'
+	}
+	base := version_of('base', '</PACKAGES>', packages(''))
+	q := version_of('q', lamp_head, '', '</PACKAGES>', packages('Q'))
+	r_ := version_of('r', lamp_head, '', '</PACKAGES>', packages('R'))
+	s_ := version_of('s', lamp_head, '', '</PACKAGES>', packages('S'))
+	r, v := builtin_versions(base, q, r_, s_)
+	c := r.merge3(&v[0], &v[1], &v[2])!.conflicts[0]
+	assert c.kind == .moved
+	later := r.merge3(&v[0], &v[1], &v[3], decisions: {
+		c.id: Take.theirs
+	})!
+	assert later.conflicts.len == 1 && later.unused == [c.id]
+}
+
+fn test_items_of_a_list_are_decided_apart() {
+	base := version_of('base')
+	ours := version_of('ours', '<NOTE>first</NOTE><NOTE>second</NOTE>', '<NOTE>x</NOTE><NOTE>x</NOTE>')
+	theirs := version_of('theirs', '<NOTE>first</NOTE><NOTE>second</NOTE>', '<NOTE>y</NOTE><NOTE>y</NOTE>')
+	r, v := builtin_versions(base, ours, theirs)
+	cs := r.merge3(&v[0], &v[1], &v[2])!.conflicts
+	assert cs.len == 2 && cs[0].id != cs[1].id
+	mut one := r.merge3(&v[0], &v[1], &v[2], decisions: {
+		cs[1].id: Take.theirs
+	})!
+	assert one.conflicts.map(it.id) == [cs[0].id] && one.resolved == 1
+	assert one.m3.edit.doc_edit(0).xml().contains('<NOTE>x</NOTE><NOTE>y</NOTE>')
+}
+
 fn test_a_context_past_the_limit_is_the_node_then_its_start() {
 	long := '<NOTE>' + 'x'.repeat(context_limit) + '</NOTE>'
 	base := version_of('base')

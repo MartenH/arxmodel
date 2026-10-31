@@ -2,6 +2,7 @@ module arxmodel
 
 import crypto.sha256
 import flatxml
+import hash
 import strings
 
 // Comparing versions of a model: a semantic diff, and a three-way merge, by AUTOSAR path.
@@ -331,6 +332,13 @@ pub:
 	decisions map[string]Take // by `PathConflict.id`
 }
 
+// Scopes is, for each side, what it changes at or below each base node, as one hash of its changes.
+struct Scopes {
+mut:
+	ours   map[u32]u64
+	theirs map[u32]u64
+}
+
 // Decided is the decisions a merge used: a heap object, so that a callback can add to it.
 @[heap]
 struct Decided {
@@ -344,12 +352,24 @@ mut:
 pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Merge3Options) !Merged3 {
 	decisions := opts.decisions
 	mut decided := &Decided{}
+	mut first := flatxml.merge3(base.view, ours.view, theirs.view)!
+	if first.conflicts.len == 0 {
+		return Merged3{
+			m3:     first
+			unused: sorted_keys(decisions)
+		}
+	}
+	// from every change of a side: a merge that takes theirs leaves some of ours out
+	scopes := &Scopes{
+		ours:   r.scope_of(&first.ours, base, ours)
+		theirs: r.scope_of(&first.theirs, base, theirs)
+	}
 	mut m3 := if decisions.len == 0 {
-		flatxml.merge3(base.view, ours.view, theirs.view)!
+		first
 	} else {
 		flatxml.merge3(base.view, ours.view, theirs.view,
-			take_theirs: fn [r, base, ours, theirs, decisions, mut decided] (c flatxml.Conflict) bool {
-				p := r.path_conflict(c, base, ours, theirs) or { return false }
+			take_theirs: fn [r, base, ours, theirs, decisions, scopes, mut decided] (c flatxml.Conflict) bool {
+				p := r.path_conflict(c, base, ours, theirs, scopes) or { return false }
 				take := decisions[p.id] or { return false }
 				decided.used[p.id] = true
 				return take == .theirs
@@ -358,7 +378,7 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Me
 	}
 	mut out := []PathConflict{}
 	for c in m3.conflicts {
-		p := r.path_conflict(c, base, ours, theirs) or { continue }
+		p := r.path_conflict(c, base, ours, theirs, scopes) or { continue }
 		if take := decisions[p.id] {
 			if take == .ours {
 				decided.used[p.id] = true
@@ -367,8 +387,7 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Me
 		}
 		out << p
 	}
-	mut unused := decisions.keys().filter(it !in decided.used)
-	unused.sort()
+	unused := sorted_keys(decisions).filter(it !in decided.used)
 	return Merged3{
 		m3:        m3
 		conflicts: out
@@ -377,8 +396,15 @@ pub fn (r &Ruling) merge3(base &Version, ours &Version, theirs &Version, opts Me
 	}
 }
 
+// sorted_keys is the ids decided, sorted.
+fn sorted_keys(decisions map[string]Take) []string {
+	mut ids := decisions.keys()
+	ids.sort()
+	return ids
+}
+
 // path_conflict is a conflict by AUTOSAR path; none where it is no conflict to the ruling.
-fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, theirs &Version) ?PathConflict {
+fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, theirs &Version, scopes &Scopes) ?PathConflict {
 	if c.kind == .attr && c.name in r.ignore {
 		return none
 	}
@@ -408,7 +434,7 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	}
 	path := merged_path(c.node, base.ix)
 	return PathConflict{
-		id:        conflict_id(c, path)
+		id:        conflict_id(c, path, base, ours, theirs, scopes)
 		kind:      c.kind
 		path:      path
 		name:      c.name
@@ -422,17 +448,68 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	}
 }
 
-// conflict_id is a hash of what a conflict is: where, and what each side made of it. Where a
-// node lies in a file is left out, and so are the files' names, which are git's temporary ones
-// in a merge driver.
-fn conflict_id(c flatxml.Conflict, path string) string {
-	mut parts := ['${c.kind}', path, c.name]
-	for side in [c.ours, c.theirs] {
-		parts << '${side.kind}'
-		parts << side.after or { '' }
-		parts << if side.new.ok() { own_xml(side.new) } else { '' }
+// conflict_id is a hash of what a conflict is: where, what the base has there, and what each side
+// made of it. A removal or a move takes along all that a side changed in the node, so those count
+// too. Where a node lies in a file is left out, and so are the files' names, which are git's
+// temporary ones in a merge driver.
+fn conflict_id(c flatxml.Conflict, path string, base &Version, ours &Version, theirs &Version, scopes &Scopes) string {
+	mut parts := ['${c.kind}', path, c.name, places_of(c.node, base.ix)]
+	parts << if c.node.ok() { own_xml(c.node) } else { '' }
+	parts << change_print(c.ours, ours)
+	parts << change_print(c.theirs, theirs)
+	if c.kind in [.removed, .moved] {
+		parts << '${scopes.ours[c.node.i]}'
+		parts << '${scopes.theirs[c.node.i]}'
 	}
 	return sha256.sum(parts.join('\0').bytes()).hex()[..16]
+}
+
+// change_print is what a change does: to what, and for a move, where to.
+fn change_print(c flatxml.Change, v &Version) string {
+	mut parts := ['${c.kind}', c.after or { '' }]
+	parts << if c.new.ok() { own_xml(c.new) } else { '' }
+	parts << if c.kind == .moved { side_path(c, v) } else { '' }
+	return parts.join('\0')
+}
+
+// places_of is a node's place among its like, and each ancestor's up to the nearest referrable one:
+// what tells apart the items of a list, which share a path.
+fn places_of(n flatxml.MNode, ix &PathIndex) string {
+	mut out := []string{}
+	mut cur := n
+	for cur.ok() && !(int(cur.i) < ix.at.len && ix.at[cur.i] != 0) {
+		out << place_of(cur).str()
+		cur = cur.parent()
+	}
+	return out.join('/')
+}
+
+// scope_of adds up each change of a diff at the base nodes it lies at or below, and for a move at
+// or below where it goes too; the order of the changes does not count. An attribute the ruling
+// lets differ is no change.
+fn (r &Ruling) scope_of(d &flatxml.Diff, base &Version, v &Version) map[u32]u64 {
+	mut at := map[u32]u64{}
+	for c in d.changes {
+		if r.ignored(c) {
+			continue
+		}
+		anchors := match c.kind {
+			.added { [c.parent] }
+			.moved { [c.old, c.parent] }
+			else { [c.old] }
+		}
+		made := '${merged_path(anchors[0], base.ix)}\0${places_of(anchors[0], base.ix)}\0${c.name}\0${change_print(c,
+			v)}'
+		h := hash.sum64_string(made, 0)
+		for a in anchors {
+			mut n := a
+			for n.ok() {
+				at[n.i] += h
+				n = n.parent()
+			}
+		}
+	}
+	return at
 }
 
 // own_xml is a node as the file has it.

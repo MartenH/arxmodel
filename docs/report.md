@@ -118,10 +118,11 @@ above, and is counted apart from the check report's.
   decisions that met no conflict; `ours_changes` and `theirs_taken` are the changes merged.
 - `conflicts`: those no decision settled. `kind` is `text`, `attr`, `removed`, `moved` or `added`;
   `name` the attribute's, for `attr`; `what` the conflict as one line says it.
-- `id`: 16 hexadecimal digits, a hash of the conflict's kind, path and what each side has there.
-  Neither a file's name nor a line goes into it, so a merge of the same versions gives the same ids
-  wherever it runs; a side changing gives a new id, so a decision kept cannot land on another
-  conflict.
+- `id`: 16 hexadecimal digits, a hash of the conflict's kind, path, place among like items, what
+  the base has there and what each side made of it: where a move goes and, for a removal or a move,
+  all that a side changed in the node. Neither a file's name nor a line goes into it, so a merge of
+  the same versions gives the same ids wherever it runs; any of those changing gives a new id, so a
+  decision kept cannot land on another conflict, and the old one is reported as unused.
 - `base`, `ours`, `theirs`: the node in each version; `null` where that version has none, as when
   it removed it. `value` is the text or attribute value, `null` where the conflict is about no
   value. `xml` is the element around the node as the file has it, white space and comments too: its
