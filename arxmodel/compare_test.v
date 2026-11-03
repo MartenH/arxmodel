@@ -465,3 +465,101 @@ fn test_an_emptied_list_is_the_list() {
 	r, v := builtin_versions(base, empty)
 	assert change_lines(r.diff(&v[0], &v[1])) == ['- /Body/Head', '- /Body/LampCfg', '- /Body/Tail']
 }
+
+const side_lamp = '        <LAMP UUID="u3">
+          <SHORT-NAME>Side</SHORT-NAME>
+          <WATTS>3</WATTS>
+          <BULBS><BULB><SHORT-NAME>B1</SHORT-NAME><WATTS>1</WATTS></BULB></BULBS>
+        </LAMP>
+        <MODULE-VALUES>'
+
+fn test_a_diff_by_element() {
+	text := os.read_file(cdata('compare', 'base.arxml'))!
+	count := text[text.index('            <NUMBER-PARAM-VALUE>')?..text.index('            <NUMBER-PARAM-VALUE>\n              <DEFINITION-REF DEST="NUMBER-DEF">/Defs/Lamp/Dim')?]
+	refs := text[text.index('          <REFERENCES>')?..text.index('        </MODULE-VALUES>')?]
+	base := version_of('base')
+	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<VALUE>10</VALUE>',
+		'<VALUE>12</VALUE>', count, '', refs, '', '        <MODULE-VALUES>', side_lamp)
+	attr := version_of('attr', 'DEST="LAMP"', 'DEST="BULB"', '<NOTE>first</NOTE><NOTE>second</NOTE>',
+		'<NOTE>second</NOTE><NOTE>first</NOTE>')
+	r, v := builtin_versions(base, ours, attr)
+	d := r.diff_elements(&v[0], &v[1])
+	// a value named as values names it; a list removed whole a row for each value in it; an
+	// element added whole one change, holding what it has
+	assert d.text(false).split_into_lines() == [
+		'~ /Body/Head  LAMP',
+		'    WATTS: 55 -> 60',
+		'~ /Body/LampCfg  MODULE-VALUES',
+		'    - Count = 2',
+		'    Dim: 10 -> 12',
+		'    - Signal = /Sig/A',
+		'+ /Body/Side  LAMP, 1 inside',
+	]
+	assert d.changes == 5 && d.summary() == '3 elements: 1 added, 0 removed, 2 changed, 0 moved'
+	side := d.elements[2]
+	assert side.rows.map('${it.sign} ${it.name} ${it.after or { '' }}') == ['+ WATTS 3']
+	assert side.inside.map(it.path) == ['/Body/Side/B1'] && side.inside[0].rows.len == 1
+	assert side.new_at.ends_with('ours.arxml:18:9') && side.old_at == ''
+	cfg := d.elements[1]
+	assert cfg.rows.map(it.tag) == ['NUMBER-PARAM-VALUE', 'NUMBER-PARAM-VALUE', 'SIGNAL-REFERENCE-VALUE']
+	assert cfg.rows[0].after == none && cfg.rows[0].before or { '' } == '2'
+	assert d.text(true).split_into_lines()[0].ends_with('ours.arxml:8:9')
+	// an attribute after `/@`; an unnamed item moved among its namesakes
+	assert r.diff_elements(&v[0], &v[2]).text(false).split_into_lines() == [
+		'~ /Body/Head  LAMP',
+		'    > NOTES/NOTE -> NOTES/NOTE',
+		'~ /Body/Tail  LAMP',
+		'    TARGET-REF/@DEST: LAMP -> BULB',
+	]
+	assert r.diff_elements(&v[0], &v[0]).elements.len == 0
+	// what a list removed whole held stays together and in its order, among the rows by name
+	notes := version_of('nonotes', '<NOTES><NOTE>first</NOTE><NOTE>second</NOTE></NOTES>', '',
+		'<WATTS>55</WATTS>', '<WATTS>60</WATTS>')
+	rn, vn := builtin_versions(base, notes)
+	assert rn.diff_elements(&vn[0], &vn[1]).text(false).split_into_lines() == [
+		'~ /Body/Head  LAMP',
+		'    - NOTES/NOTE = first',
+		'    - NOTES/NOTE = second',
+		'    WATTS: 55 -> 60',
+	]
+}
+
+// two_versions writes two documents and loads each.
+fn two_versions(name string, a string, b string) []&Model {
+	dir := os.join_path(os.temp_dir(), 'arxmodel_compare_${os.getpid()}')
+	os.mkdir_all(dir) or { panic(err) }
+	mut out := []&Model{}
+	for k, text in [a, b] {
+		path := os.join_path(dir, '${name}_${k}.arxml')
+		os.write_file(path, text) or { panic(err) }
+		out << load([path]) or { panic(err) }
+	}
+	return out
+}
+
+fn test_a_diff_by_element_of_containers() {
+	ch := '<ECUC-CONTAINER-VALUE><SHORT-NAME>Ch1</SHORT-NAME><DEFINITION-REF>/Defs/Mod/Channel</DEFINITION-REF><PARAMETERS><NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Mod/Channel/Id</DEFINITION-REF><VALUE>8</VALUE></NUMBER-PARAM-VALUE></PARAMETERS></ECUC-CONTAINER-VALUE>'
+	added := '<ECUC-CONTAINER-VALUE><SHORT-NAME>Ch9</SHORT-NAME><ANNOTATIONS><ANNOTATION><ANNOTATION-ORIGIN>Tool:Made</ANNOTATION-ORIGIN></ANNOTATION></ANNOTATIONS><DEFINITION-REF>/Defs/Mod/Channel</DEFINITION-REF><PARAMETERS><NUMBER-PARAM-VALUE><DEFINITION-REF>/Defs/Mod/Channel/Id</DEFINITION-REF><VALUE>9</VALUE></NUMBER-PARAM-VALUE></PARAMETERS><SUB-CONTAINERS><ECUC-CONTAINER-VALUE><SHORT-NAME>In</SHORT-NAME><DEFINITION-REF>/Defs/Mod/Channel/Inner</DEFINITION-REF></ECUC-CONTAINER-VALUE></SUB-CONTAINERS></ECUC-CONTAINER-VALUE>'
+	doc := fn (containers string) string {
+		return '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>Cfg</SHORT-NAME><ELEMENTS><MODULE-VALUES><SHORT-NAME>Mod</SHORT-NAME><CONTAINERS>${containers}</CONTAINERS></MODULE-VALUES></ELEMENTS></PACKAGE><PACKAGE><SHORT-NAME>Old</SHORT-NAME><ELEMENTS><LAMP><SHORT-NAME>Moved</SHORT-NAME><WATTS>1</WATTS></LAMP></ELEMENTS></PACKAGE><PACKAGE><SHORT-NAME>New</SHORT-NAME></PACKAGE></PACKAGES></MODEL>'
+	}
+	old := doc(ch)
+	new := doc(ch.replace('<VALUE>8</VALUE>', '<VALUE>10</VALUE>') + added).replace('<ELEMENTS><LAMP><SHORT-NAME>Moved</SHORT-NAME><WATTS>1</WATTS></LAMP></ELEMENTS></PACKAGE><PACKAGE><SHORT-NAME>New</SHORT-NAME>',
+		'</PACKAGE><PACKAGE><SHORT-NAME>New</SHORT-NAME><ELEMENTS><LAMP><SHORT-NAME>Moved</SHORT-NAME><WATTS>1</WATTS></LAMP></ELEMENTS>')
+	models := two_versions('ecuc', old, new)
+	r, v := builtin_versions(...models)
+	d := r.diff_elements(&v[0], &v[1], xml: true)
+	// a container by its definition's last name; an element moved to another package
+	assert d.text(false).split_into_lines() == [
+		'~ /Cfg/Mod/Ch1  Channel',
+		'    Id: 8 -> 10',
+		'+ /Cfg/Mod/Ch9  Channel, 1 inside',
+		'> /Old/Moved -> /New/Moved  LAMP',
+	]
+	ch9 := d.elements[1]
+	assert ch9.definition == '/Defs/Mod/Channel' && ch9.origins == ['Tool:Made']
+	assert ch9.inside.map(it.kind()) == ['Inner'] && ch9.inside[0].xml == ''
+	assert ch9.xml.starts_with('<ECUC-CONTAINER-VALUE><SHORT-NAME>Ch9<') && ch9.xml.ends_with('</ECUC-CONTAINER-VALUE>')
+	assert d.json().contains('"origins":["Tool:Made"]')
+	assert d.json().contains('"rows":[{"sign":"~","name":"Id","from":"","tag":"NUMBER-PARAM-VALUE","before":"8","after":"10",')
+}

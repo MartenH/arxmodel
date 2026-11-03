@@ -29,6 +29,8 @@ pub:
 	path string
 	text string
 	node u32 // the merged node whose text it is
+	// the item named by its definition the value is of (an ECUC parameter value), or no_mnode
+	item u32 = flatxml.no_mnode
 }
 
 // line is the value as one line: `path = "text"`, the text a TOML basic string.
@@ -117,6 +119,9 @@ mut:
 	out    []Value
 	each   ?fn (Value) // each value as found, where the caller asks so (each_value)
 	count  int
+	item   u32 = flatxml.no_mnode // the named item being visited, or none
+	// referrable elements below the one a walk starts at are left out (walk_element)
+	own_only bool
 	// terminal's scratch, kept between items: an item's parts, where a fragment writes each, and
 	// whether a fragment writes another part after it
 	parts    []u32
@@ -148,25 +153,67 @@ fn (mut w ValueWalk) walk() {
 	}
 }
 
+// walk_element collects the values of element n, whose path is path ('' for a node above every
+// referrable element), and not those of the referrable elements below it: they have their own.
+fn (mut w ValueWalk) walk_element(n flatxml.MNode, path string) {
+	if w.view == unsafe { nil } || !n.ok() {
+		return
+	}
+	w.own_only = true
+	w.sb.go_back_to(0)
+	w.bounds.clear()
+	w.start, w.seg0 = 0, 0
+	w.as_ref()
+	if path == '' {
+		w.visit(n, false, true)
+		return
+	}
+	for name in path[1..].split('/') {
+		w.write_name(name)
+	}
+	w.as_ref()
+	for c in n.children() {
+		if c.tag() != w.ix.sn {
+			w.visit(c, false, true)
+		}
+	}
+}
+
+// definition_of is what element n gives as its definition, at any identity's definition path;
+// '' where it gives none.
+fn (w &ValueWalk) definition_of(n flatxml.MNode) string {
+	for id in w.idents {
+		def := path_text(n, id.def)
+		if def != '' {
+			return def
+		}
+	}
+	return ''
+}
+
 // value_walk is a walk for a pattern over the merged view, its tables made.
 fn (c &Checked) value_walk(pattern string) ValueWalk {
-	v := c.view
+	return value_walk_of(c.view, c.index, &c.flat, pattern)
+}
+
+// value_walk_of is a walk for a pattern over a merged view read by flat, whose paths ix has.
+fn value_walk_of(v &flatxml.Merged, ix &PathIndex, flat &Flat, pattern string) ValueWalk {
 	if v == unsafe { nil } || !v.root().ok() {
 		return ValueWalk{
-			ix: c.index
+			ix: ix
 		}
 	}
 	tab := v.set.tab
 	n := tab.len()
 	mut skip := []bool{len: n}
-	for name in c.flat.ignored_content {
+	for name in flat.ignored_content {
 		if id := tab.id(name) {
 			skip[id] = true
 		}
 	}
 	mut item_of := [][]int{len: n}
 	mut idents := []ItemIdentity{}
-	for r in c.flat.identity_roles {
+	for r in flat.identity_roles {
 		parent := tab.id(r.parent) or { continue }
 		idents << ItemIdentity{
 			parent: parent
@@ -179,7 +226,7 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 			}
 		}
 	}
-	for r in c.flat.direct_identities {
+	for r in flat.direct_identities {
 		idents << ItemIdentity{
 			parent: any_parent
 			def:    id_path(tab, r.definition)
@@ -192,8 +239,8 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 			}
 		}
 	}
-	if c.flat.identified != unsafe { nil } {
-		id := c.flat.identified.id
+	if flat.identified != unsafe { nil } {
+		id := flat.identified.id
 		role := id.value_role()
 		idents << ItemIdentity{
 			parent: any_parent
@@ -214,7 +261,7 @@ fn (c &Checked) value_walk(pattern string) ValueWalk {
 	}
 	return ValueWalk{
 		view:    v
-		ix:      c.index
+		ix:      ix
 		pat:     pat
 		item_of: item_of
 		idents:  idents
@@ -266,18 +313,26 @@ fn (mut w ValueWalk) visit(n flatxml.MNode, inner bool, below bool) {
 	if tag == flatxml.text_tag || (int(tag) < w.skip.len && w.skip[tag]) {
 		return
 	}
+	entry := if int(n.i) < w.ix.at.len { w.ix.at[n.i] } else { u32(0) }
+	if entry != 0 && w.own_only {
+		return
+	}
 	mark, nb := w.sb.len, w.bounds.len
 	start, seg0 := w.start, w.seg0
 	ref_lo, ref_hi, ref_s0, ref_s1 := w.ref_lo, w.ref_hi, w.ref_s0, w.ref_s1
+	item := w.item
 	defer {
 		w.sb.go_back_to(mark)
 		w.bounds.trim(nb)
 		w.start, w.seg0 = start, seg0
 		w.ref_lo, w.ref_hi, w.ref_s0, w.ref_s1 = ref_lo, ref_hi, ref_s0, ref_s1
+		w.item = item
 	}
-	entry := if int(n.i) < w.ix.at.len { w.ix.at[n.i] } else { u32(0) }
 	// an element with a path of its own (a container named by its short name too) is no item
 	ident := if entry != 0 { -1 } else { w.identity_of(n) }
+	if ident >= 0 {
+		w.item = n.i
+	}
 	mut now_inner := inner
 	if entry != 0 {
 		w.from_ref()
@@ -587,6 +642,7 @@ fn (mut w ValueWalk) emit(n flatxml.MNode) {
 			path: unsafe { tos(&w.sb[w.start], w.sb.len - w.start) }
 			text: trimmed(n.text())
 			node: n.i
+			item: w.item
 		})
 		return
 	}
@@ -594,6 +650,7 @@ fn (mut w ValueWalk) emit(n flatxml.MNode) {
 		path: w.sb[w.start..].bytestr()
 		text: trimmed(n.text()).clone()
 		node: n.i
+		item: w.item
 	}
 }
 

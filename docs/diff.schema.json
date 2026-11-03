@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "arxmodel diff report",
+  "type": "object",
+  "required": ["version", "tool", "command", "summary", "elements"],
+  "properties": {
+    "version": {"const": 1},
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {"name": {"const": "arxmodel"}, "version": {"type": "string"}}
+    },
+    "command": {"const": "diff"},
+    "summary": {
+      "type": "object",
+      "required": ["elements", "added", "removed", "changed", "moved", "changes"],
+      "properties": {
+        "elements": {"type": "integer", "minimum": 0},
+        "added": {"type": "integer", "minimum": 0},
+        "removed": {"type": "integer", "minimum": 0},
+        "changed": {"type": "integer", "minimum": 0},
+        "moved": {"type": "integer", "minimum": 0},
+        "changes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "elements": {"type": "array", "items": {"$ref": "#/definitions/element"}}
+  },
+  "definitions": {
+    "element": {
+      "type": "object",
+      "required": ["sign", "path", "from", "tag", "definition", "origins", "old", "new", "rows", "inside"],
+      "properties": {
+        "sign": {"enum": ["+", "-", "~", ">"]},
+        "path": {"type": "string"},
+        "from": {"type": "string"},
+        "tag": {"type": "string"},
+        "definition": {"type": "string"},
+        "origins": {"type": "array", "items": {"type": "string"}},
+        "old": {"$ref": "#/definitions/location"},
+        "new": {"$ref": "#/definitions/location"},
+        "rows": {"type": "array", "items": {"$ref": "#/definitions/row"}},
+        "inside": {"type": "array", "items": {"$ref": "#/definitions/element"}},
+        "xml": {"type": "string"}
+      }
+    },
+    "row": {
+      "type": "object",
+      "required": ["sign", "name", "from", "tag", "before", "after", "old", "new"],
+      "properties": {
+        "sign": {"enum": ["+", "-", "~", "@", ">"]},
+        "name": {"type": "string"},
+        "from": {"type": "string"},
+        "tag": {"type": "string"},
+        "before": {"type": ["string", "null"]},
+        "after": {"type": ["string", "null"]},
+        "old": {"$ref": "#/definitions/location"},
+        "new": {"$ref": "#/definitions/location"}
+      }
+    },
+    "location": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["file", "line", "column"],
+          "properties": {
+            "file": {"type": "string"},
+            "line": {"type": "integer", "minimum": 0},
+            "column": {"type": "integer", "minimum": 0}
+          }
+        }
+      ]
+    }
+  }
+}

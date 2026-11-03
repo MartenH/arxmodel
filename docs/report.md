@@ -6,7 +6,7 @@ people read; the others are for machines:
 
 | format  | what |
 |---------|------|
-| `json`  | arxmodel's own report, below; every finding, every severity (and see [merge3](#merge3)) |
+| `json`  | arxmodel's own report, below; every finding, every severity (and see [merge3](#merge3) and [diff](#diff)) |
 | `junit` | JUnit XML, for CI test reports |
 
 Both are written from one `Report` (`arxmodel/report.v`), so a command that finds things fills
@@ -138,6 +138,65 @@ exits 2 on a line that is neither, or on an id decided both ways.
 theirs 6f1d2a90c4b7e853   # /Body/Head#WATTS
 ours   0b7c41de92aa3f16
 ```
+
+## diff
+
+`arxmodel diff --format json A B` writes this report to standard output; what was read goes to
+standard error. Schema: [diff.schema.json](diff.schema.json). `version` works as above, and is
+counted apart from the other reports'.
+
+A diff by element gathers the changes under the referrable element each lies in. An element added
+or removed whole is one element, whatever it holds: its values are its `rows`, and the referrable
+elements in it are `inside` it, each likewise. Any other change is a row of the element it lies in.
+
+```json
+{
+  "version": 1,
+  "tool": {"name": "arxmodel", "version": "0.1.0"},
+  "command": "diff",
+  "summary": {"elements": 2, "added": 1, "removed": 0, "changed": 1, "moved": 0, "changes": 2},
+  "elements": [
+    {
+      "sign": "~", "path": "/Cfg/Mod/Ch1", "from": "", "tag": "ECUC-CONTAINER-VALUE",
+      "definition": "/Defs/Mod/Channel", "origins": [],
+      "old": {"file": "a.arxml", "line": 5, "column": 9}, "new": {"file": "b.arxml", "line": 5, "column": 9},
+      "rows": [
+        {"sign": "~", "name": "Id", "from": "", "tag": "NUMBER-PARAM-VALUE", "before": "8", "after": "10",
+         "old": {"file": "a.arxml", "line": 7, "column": 11}, "new": {"file": "b.arxml", "line": 7, "column": 11}}
+      ],
+      "inside": []
+    },
+    {
+      "sign": "+", "path": "/Cfg/Mod/Ch9", "from": "", "tag": "ECUC-CONTAINER-VALUE",
+      "definition": "/Defs/Mod/Channel", "origins": ["Tool:Made"],
+      "old": null, "new": {"file": "b.arxml", "line": 12, "column": 9},
+      "rows": [{"sign": "+", "name": "Id", "from": "", "tag": "NUMBER-PARAM-VALUE", "before": null, "after": "9", "old": null, "new": {"file": "b.arxml", "line": 15, "column": 11}}],
+      "inside": [{"sign": "+", "path": "/Cfg/Mod/Ch9/In", "...": "..."}]
+    }
+  ]
+}
+```
+
+- `summary`: the elements by `sign`, and `changes`, the changes of the diff they gather.
+- `elements`: by path. `sign` is `+` added whole, `-` removed whole, `~` changed in, `>` moved
+  (from the path `from`). `path` is its path in the new version, in the old for a removal; a
+  change above every referrable element is in an element of path `/`. `tag` is its element,
+  `definition` the definition it gives ('' where none: an ECUC container gives one), `origins`
+  what its annotations name as their origin. `old` and `new` are where it is in each version,
+  `null` where it is not there. `xml`, with `--xml`, is an element added or removed whole as the
+  file has it (not given again for those inside it).
+- `rows`: for `~` and `>`, the changes in the element, by `name`; for `+` and `-`, its values, in
+  the order of its file. `name` is below the element, as `arxmodel values` names a value: an ECUC
+  parameter or reference value by the last name of its definition (`Id`), anything else by the
+  elements down to it (`ADMIN-DATA/SDGS/SDG/SD`); an attribute after `/@` (`@T` for the
+  element's own). `sign` is `+` added, `-` removed, `~` its text changed, `@` an attribute
+  changed, `>` moved (from the name `from`). `tag` is its element, the item's for a value named
+  by its definition. `before` and `after` are the values, `null` where there is none; the text
+  is whole, never cut.
+
+Without `--format json`, `diff` writes the same as text: a line for each element (its sign, path,
+the last name of its definition or else its element, how many elements it holds, and where it is),
+and below an element changed or moved a line for each change in it, values cut at 120 characters.
 
 ## JUnit
 
