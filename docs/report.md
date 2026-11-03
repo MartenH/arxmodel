@@ -190,9 +190,10 @@ elements in it are `inside` it, each likewise. Any other change is a row of the 
   parameter or reference value by the last name of its definition (`Id`), anything else by the
   elements down to it (`ADMIN-DATA/SDGS/SDG/SD`); an attribute after `/@` (`@T` for the
   element's own). `sign` is `+` added, `-` removed, `~` its text changed, `@` an attribute
-  changed, `>` moved (from the name `from`). `tag` is its element, the item's for a value named
-  by its definition. `before` and `after` are the values, `null` where there is none; the text
-  is whole, never cut.
+  changed, `>` moved (from the name `from`; from another element, its path before the name).
+  `tag` is its element, the item's for a value named by its definition. `before` and `after` are
+  the values, `null` where there is none; the text is whole, never cut, and a changed text is as
+  the files have it, spaces and all.
 
 Without `--format json`, `diff` writes the same as text: a line for each element (its sign, path,
 the last name of its definition or else its element, how many elements it holds, and where it is),

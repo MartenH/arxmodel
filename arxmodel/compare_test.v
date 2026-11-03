@@ -563,3 +563,45 @@ fn test_a_diff_by_element_of_containers() {
 	assert d.json().contains('"origins":["Tool:Made"]')
 	assert d.json().contains('"rows":[{"sign":"~","name":"Id","from":"","tag":"NUMBER-PARAM-VALUE","before":"8","after":"10",')
 }
+
+fn test_a_diff_by_element_at_its_edges() {
+	pkg := fn (inner string) string {
+		return '<MODEL><PACKAGES><PACKAGE><SHORT-NAME>Pkg</SHORT-NAME>${inner}</PACKAGE></PACKAGES></MODEL>'
+	}
+	lamp := fn (name string, inner string) string {
+		return '<LAMP><SHORT-NAME>${name}</SHORT-NAME>${inner}</LAMP>'
+	}
+	// a list holding only referrable elements added: the element added, no empty change of the
+	// package it went into
+	m1 := two_versions('wrap', pkg(''), pkg('<ELEMENTS>${lamp('A', '')}</ELEMENTS>'))
+	r1, v1 := builtin_versions(...m1)
+	d1 := r1.diff_elements(&v1[0], &v1[1])
+	assert d1.text(false).split_into_lines() == ['+ /Pkg/A  LAMP']
+	assert d1.summary() == '1 element: 1 added, 0 removed, 0 changed, 0 moved'
+	// a document whose root is replaced: the values the new root holds outside any referrable
+	// element are its rows
+	m2 := two_versions('root', '<OTHER><X>1</X></OTHER>', '<MODEL><META>v</META><PACKAGES><PACKAGE><SHORT-NAME>Pkg</SHORT-NAME></PACKAGE></PACKAGES></MODEL>')
+	r2, v2 := builtin_versions(...m2)
+	assert r2.diff_elements(&v2[0], &v2[1]).text(false).split_into_lines() == [
+		'~ /  MODEL',
+		'    + MODEL/META = v',
+		'    - OTHER/X = 1',
+		'+ /Pkg  PACKAGE',
+	]
+	// what moves from one element to another is named where it was, from its element's path
+	notes := '<NOTES><NOTE>n</NOTE></NOTES>'
+	m3 := two_versions('across', pkg('<ELEMENTS>${lamp('A', notes + '<WATTS>1</WATTS>')}${lamp('B', '<WATTS>2</WATTS>')}</ELEMENTS>'),
+		pkg('<ELEMENTS>${lamp('A', '<WATTS>1</WATTS>')}${lamp('B', notes + '<WATTS>2</WATTS>')}</ELEMENTS>'))
+	r3, v3 := builtin_versions(...m3)
+	assert r3.diff_elements(&v3[0], &v3[1]).text(false).split_into_lines() == [
+		'~ /Pkg/B  LAMP',
+		'    > /Pkg/A/NOTES -> NOTES',
+	]
+	// a text changed only in its spaces: before and after as the files have them
+	m4 := two_versions('spaces', pkg('<ELEMENTS>${lamp('A', '<WATTS>1</WATTS>')}</ELEMENTS>'),
+		pkg('<ELEMENTS>${lamp('A', '<WATTS> 1 </WATTS>')}</ELEMENTS>'))
+	r4, v4 := builtin_versions(...m4)
+	d4 := r4.diff_elements(&v4[0], &v4[1])
+	assert d4.text(false).split_into_lines() == ['~ /Pkg/A  LAMP', '    WATTS: 1 -> " 1 "']
+	assert d4.elements[0].rows[0].after or { '' } == ' 1 '
+}

@@ -22,7 +22,7 @@ pub struct DiffRow {
 pub:
 	sign   string  // `+` added, `-` removed, `~` text, `@` attribute, `>` moved
 	name   string  // below the element, '' for the element itself
-	from   string  // `>`: its name where it was
+	from   string  // `>`: its name where it was, after its element's path if that was another
 	tag    string  // its element: the item's, for a value named by its definition
 	before ?string // the old value; none where there was none
 	after  ?string // the new value; none where there is none
@@ -266,29 +266,34 @@ fn (mut eb ElementBuild) added(s int, n flatxml.MNode) {
 		eb.put(eb.whole(s, n, sign))
 		return
 	}
-	el := eb.sides[s].element_of(n.parent())
-	k := if s == 1 { eb.changed(flatxml.MNode{}, n) } else { eb.changed(n, flatxml.MNode{}) }
+	// a root added or removed holds its own values
+	up := n.parent()
+	el := eb.sides[s].element_of(if up.ok() { up } else { n })
 	at := eb.sides[s].path(el)
-	mut any := false
+	mut rows := []DiffRow{}
 	for v in eb.sides[s].values_of(el) {
 		if lies_in(n.m.node(v.node), n) {
-			eb.els[k].rows << eb.value_row(s, v, at, sign)
-			any = true
+			rows << eb.value_row(s, v, at, sign)
 		}
 	}
-	for inner in eb.sides[s].referrable_below(n) {
-		eb.put(eb.whole(s, inner, sign))
-		any = true
+	inner := eb.sides[s].referrable_below(n)
+	for i in inner {
+		eb.put(eb.whole(s, i, sign))
 	}
-	if !any {
+	if rows.len == 0 && inner.len == 0 {
 		// an element holding no value
-		eb.els[k].rows << DiffRow{
+		rows << DiffRow{
 			sign:   sign
 			name:   part_below(merged_path(n, eb.sides[s].v.ix), at)
 			tag:    n.name()
 			old_at: if s == 0 { n.pos() } else { '' }
 			new_at: if s == 1 { n.pos() } else { '' }
 		}
+	}
+	// the element it lies in changed only where it holds something of that element
+	if rows.len > 0 {
+		k := if s == 1 { eb.changed(flatxml.MNode{}, n) } else { eb.changed(n, flatxml.MNode{}) }
+		eb.els[k].rows << rows
 	}
 }
 
@@ -381,11 +386,17 @@ fn (mut eb ElementBuild) moved(c flatxml.Change) {
 	if news.len > 0 && !eb.sides[1].values_of(ne).any(lies_in(c.new.m.node(it.node), c.new)) {
 		return
 	}
+	// moved from another element: where it was, from that element's path
+	mut from := eb.sides[0].name_in(oe, c.old)
+	op := eb.sides[0].path(oe)
+	if op != eb.sides[1].path(ne) {
+		from = if from == '' { op } else { '${op}/${from}' }
+	}
 	k := eb.changed(c.old, c.new)
 	eb.els[k].rows << DiffRow{
 		sign:   '>'
 		name:   eb.sides[1].name_in(ne, c.new)
-		from:   eb.sides[0].name_in(oe, c.old)
+		from:   from
 		tag:    c.new.name()
 		old_at: c.old.pos()
 		new_at: c.new.pos()
@@ -402,7 +413,6 @@ fn (mut eb ElementBuild) move_element(o flatxml.MNode, n flatxml.MNode) {
 // changed_in files a change of text or of an attribute as a row of the element it lies in.
 fn (mut eb ElementBuild) changed_in(c flatxml.Change) {
 	k := eb.changed(c.old, c.new)
-	oe := eb.sides[0].element_of(c.old)
 	ne := eb.sides[1].element_of(c.new)
 	name := eb.sides[1].name_in(ne, c.new)
 	if c.kind == .attr {
@@ -417,14 +427,14 @@ fn (mut eb ElementBuild) changed_in(c flatxml.Change) {
 		}
 		return
 	}
-	ov := eb.sides[0].value_at(oe, c.old)
+	// the texts as the files have them, which the value walk trims
 	nv := eb.sides[1].value_at(ne, c.new)
 	eb.els[k].rows << DiffRow{
 		sign:   '~'
 		name:   name
 		tag:    if v := nv { tag_of(eb.sides[1].v.view, v) } else { c.new.name() }
-		before: if v := ov { v.text } else { c.before }
-		after:  if v := nv { v.text } else { c.after }
+		before: c.before
+		after:  c.after
 		old_at: c.old.pos()
 		new_at: c.new.pos()
 	}
@@ -537,11 +547,12 @@ pub fn (e &DiffElement) inner_count() int {
 	return n
 }
 
-// shown_value is a value as the text shows it: on one line, cut, `""` where empty, `(none)` where absent.
+// shown_value is a value as the text shows it: on one line, cut, quoted where empty or where it
+// begins or ends in a space, `(none)` where absent.
 fn shown_value(s ?string) string {
 	v := s or { return '(none)' }
-	if v == '' {
-		return '""'
+	if v == '' || v.trim_space() != v {
+		return shown_value('"' + v + '"')
 	}
 	one := v.replace('\r', '\\r').replace('\n', '\\n')
 	return if one.len > shown_cut { one[..shown_cut - 3] + '...' } else { one }
