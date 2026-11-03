@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs real git merges through arxmodel's merge driver, with no schema anywhere: two branches
 # editing one synthetic .arxml. Disjoint edits merge cleanly; overlapping edits leave a conflict
-# and a non-zero exit. The diff driver names the change by AUTOSAR path.
+# and a non-zero exit. The diff driver names the change by element.
 #
 #   scripts/git_driver_test.sh [path to the arxmodel binary]
 set -euo pipefail
@@ -40,9 +40,10 @@ git merge -q --no-edit head > "$work/clean.log" 2>&1 || { cat "$work/clean.log";
 [ "$(watts Head)" = 60 ] && [ "$(watts Tail)" = 7 ] || fail "merged: Head $(watts Head), Tail $(watts Tail)"
 grep -q '<VALUE>12</VALUE>' model.arxml || fail 'the parameter value was lost'
 
-# the diff driver: the change by AUTOSAR path
+# the diff driver: the change by element, without positions
 git diff HEAD~1 HEAD -- model.arxml > "$work/diff.txt"
-grep -q '^~ /Body/Head#WATTS: "55" -> "60"' "$work/diff.txt" || { cat "$work/diff.txt"; fail 'diff driver'; }
+grep -qx '~ /Body/Head  LAMP' "$work/diff.txt" && grep -qx '    WATTS: 55 -> 60' "$work/diff.txt" \
+	|| { cat "$work/diff.txt"; fail 'diff driver'; }
 
 # overlapping: both branches edit Head
 git checkout -qb other
@@ -66,7 +67,8 @@ sed -i 's|<WATTS>7</WATTS>|<WATTS>8</WATTS>|' renamed.arxml
 git commit -qam 'rename and edit'
 git diff -M HEAD~1 HEAD > "$work/rename.txt" 2>&1 || fail 'diff of a rename'
 grep -q '^arxmodel diff a/model.arxml b/renamed.arxml' "$work/rename.txt" || { cat "$work/rename.txt"; fail 'rename not shown'; }
-grep -q '^~ /Body/Tail#WATTS: "7" -> "8"' "$work/rename.txt" || { cat "$work/rename.txt"; fail 'rename diff'; }
+grep -qx '~ /Body/Tail  LAMP' "$work/rename.txt" && grep -qx '    WATTS: 7 -> 8' "$work/rename.txt" \
+	|| { cat "$work/rename.txt"; fail 'rename diff'; }
 ! grep -q '^rules:' "$work/rename.txt" || fail 'a rules line in the diff output'
 printf '<broken>' > renamed.arxml
 git diff > "$work/broken.txt" 2>&1 || fail 'the diff driver failed on a broken file'

@@ -57,21 +57,23 @@ fn trouble(msg string) {
 	exit(exit_trouble)
 }
 
-// cmd_diff prints what changed from version A to version B, by AUTOSAR path.
+// cmd_diff prints what changed from version A to version B, by element: as text, or with
+// --format json as a report (--xml: each element added or removed whole as the file has it).
 fn cmd_diff(o Opts) {
 	if o.paths.len != 2 {
 		trouble('diff takes two versions, A and B (files or directories)')
+	}
+	if o.format !in ['text', 'json'] {
+		trouble('diff --format takes text or json, not ${o.format}')
 	}
 	r, v := versions(o, o.paths, false) or {
 		trouble(err.msg())
 		return
 	}
-	changes := r.diff(&v[0], &v[1])
-	for c in changes {
-		println(c.line())
-	}
-	eprintln(plural(changes.len, 'change'))
-	exit(if changes.len > 0 { 1 } else { 0 })
+	d := r.diff_elements(&v[0], &v[1], xml: o.xml)
+	print(if o.format == 'json' { d.json() } else { d.text(true) })
+	eprintln(d.summary())
+	exit(if d.changes > 0 { 1 } else { 0 })
 }
 
 // cmd_merge3 merges OURS and THEIRS, two changed versions of BASE, and writes the result: to OUT
@@ -186,12 +188,10 @@ fn cmd_git_diff(o Opts) {
 		print(res.output)
 		exit(0)
 	}
-	changes := r.diff(&v[0], &v[1])
-	for c in changes {
-		// the positions name git's temporary files: the path says which file it is
-		println(c.line().all_before('  '))
-	}
-	if changes.len == 0 {
+	// without positions: they name git's temporary files, and the path says which file it is
+	d := r.diff_elements(&v[0], &v[1])
+	print(d.text(false))
+	if d.changes == 0 {
 		println('(the same model)')
 	}
 }

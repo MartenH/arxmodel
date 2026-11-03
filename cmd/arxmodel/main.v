@@ -32,7 +32,7 @@
 //                                              as one document: not where check finds errors,
 //                                              unless --force
 //
-//   arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) A B
+//   arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json] [--xml] A B
 //   arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json]
 //                   [--resolve FILE] BASE OURS THEIRS [-o OUT]
 //                                              a semantic diff, and a three-way merge, by
@@ -125,12 +125,15 @@ const usage = 'usage:
       file, and the root carries the schema location of the first file that declares the
       governing release. Nothing is written where check would exit 1 (errors, files not read or
       declaring no schema), unless --force
-  arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) A B
-      what changed from version A to version B (each a file or a directory), by AUTOSAR path:
-      both merged by the same rules (the newest release either declares), so where an element
-      is written, the order of items whose order means nothing, and the attributes the merge lets
-      differ are not changes. One line a change: - removed, + added, > moved, ~ text, @ attribute.
-      Exit 0 when they are the same model, 1 when they differ
+  arxmodel diff (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json] [--xml] A B
+      what changed from version A to version B (each a file or a directory), by element: both
+      merged by the same rules (the newest release either declares), so where an element is
+      written, the order of items whose order means nothing, and the attributes the merge lets
+      differ are not changes. A line for each element: + added whole, - removed whole, ~ changed,
+      > moved; below one changed or moved, a line for each change in it, a value named as values
+      names it (an ECUC value by the last name of its definition). --format json writes the report
+      (docs/report.md) instead, --xml with each element added or removed whole as the file has
+      it. Exit 0 when they are the same model, 1 when they differ
   arxmodel merge3 (--schema-dir DIR | --schema FILE | --rules FILE) [--format text|json]
                  [--resolve FILE] BASE OURS THEIRS [-o OUT]
       merge OURS and THEIRS, two changed versions of BASE (files, or directories), on BASE: every
@@ -195,8 +198,9 @@ mut:
 	builtin    bool     // resolved: no schema and no rules file, so the built-in identity rules
 	origin     string   // resolved: where the rules come from, for the `rules:` line
 	rules_err  string   // git-diff: why the rules could not be resolved, so it falls back to a text diff
-	format     string = 'text' // check, merge3: how the report is written
+	format     string = 'text' // check, merge3, diff: how the report is written
 	resolve    string   // merge3: the file of decisions on conflicts
+	xml        bool     // diff: each element added or removed whole as the file has it
 	given      []string // the options given, to refuse those the command does not take
 	paths      []string
 }
@@ -296,7 +300,11 @@ fn main() {
 				'--case-sensitive', '--ignore-attr', '--check-attr', '--policy', '--skip-xml',
 				'--skip-multiplicity', '--skip-references', '--refs-from', '--out', '--force']
 		}
-		'diff', 'git-diff' {
+		'diff' {
+			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--case-sensitive',
+				'--ignore-attr', '--check-attr', '--out', '--format', '--xml']
+		}
+		'git-diff' {
 			['--jobs', '--schema-dir', '--schema', '--rules', '--no-schema', '--policy', '--case-sensitive',
 				'--ignore-attr', '--check-attr', '--out']
 		}
@@ -470,6 +478,9 @@ fn parse_opts(cmd string, args []string) !Opts {
 			}
 			'--no-schema' {
 				o.no_schema = true
+			}
+			'--xml' {
+				o.xml = true
 			}
 			'--stop' {
 				o.stop = true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Writes check's JSON and JUnit reports of the synthetic models and merge3's report, and validates
-# each against its schema: arxmodel's own (docs/report.schema.json, docs/merge3.schema.json) and the
-# Jenkins xunit plugin's JUnit XSD. The
+# Writes check's JSON and JUnit reports of the synthetic models and merge3's and diff's reports, and
+# validates each against its schema: arxmodel's own (docs/report.schema.json,
+# docs/merge3.schema.json, docs/diff.schema.json) and the Jenkins xunit plugin's JUnit XSD. The
 # outside schema is fetched at a pinned commit, checked by SHA-256, into DIR (a temporary
 # directory by default), never committed. Needs Python with jsonschema
 # and lxml ($PYTHON, python by default).
@@ -43,5 +43,14 @@ rc=0
 "$bin" merge3 --no-schema --format json "$base" "$dir/ours.arxml" "$dir/theirs.arxml" -o "$dir/merged.arxml" > "$dir/merge3.json" 2>/dev/null || rc=$?
 [ "$rc" -eq 1 ] || { echo "merge3 --format json exited $rc"; exit 1; }
 args+=(--merge3 "$dir/merge3.json")
+# diff's report: a value changed, and an element added whole
+sed -e 's|<WATTS>55</WATTS>|<WATTS>60</WATTS>|' \
+  -e 's|^        <MODULE-VALUES>|        <LAMP><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP><MODULE-VALUES>|' \
+  "$base" > "$dir/changed.arxml"
+rc=0
+"$bin" diff --no-schema --format json --xml "$base" "$dir/changed.arxml" > "$dir/diff.json" 2>/dev/null || rc=$?
+[ "$rc" -eq 1 ] || { echo "diff --format json exited $rc"; exit 1; }
+grep -q '"added":1,"removed":0,"changed":1' "$dir/diff.json" || { cat "$dir/diff.json"; echo 'diff: not one added, one changed'; exit 1; }
+args+=(--diff "$dir/diff.json")
 ${PYTHON:-python} scripts/validate_reports.py "${args[@]}"
 scripts/merge3_cli_test.sh "$bin"

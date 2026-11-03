@@ -67,7 +67,7 @@ arxmodel values --schema-dir DIR '/Pkg/**/Name' <file|dir>...  # every value the
 arxmodel serve --schema-dir DIR --socket m.sock <file|dir>...   # read once; then, in milliseconds:
 arxmodel values --socket m.sock '/Pkg/**/Name'                  # ... (get and list likewise)
 arxmodel merge --schema-dir DIR [--force] -o model.arxml <file|dir>...          # the merged model, as one ARXML
-arxmodel diff A B                                   # what changed, by AUTOSAR path (no schema needed)
+arxmodel diff A B                                   # what changed, by element (no schema needed)
 arxmodel merge3 BASE OURS THEIRS -o OUT             # a three-way merge (no schema needed)
 arxmodel git-setup [REPO]                           # git's merge and diff drivers for *.arxml
 ```
@@ -587,9 +587,23 @@ and multiplicity layers need the schema.
 the same rules (the built-in ones, or the schema of the newest release either declares), and
 flatxml's diff is read by AUTOSAR path. Where an element is written, the order of items whose
 order means nothing, and the attributes the merge lets differ (UUID, namespace declarations, xsi:
-attributes) are not changes. One line a change: `- removed`, `+ added`, `> moved`, `~ text`,
-`@ attribute`, each with its positions. Exit 0 when the versions are the same model, 1 when they
-differ.
+attributes) are not changes. The changes are shown by element, as a configuration editor shows a
+model: a line for each referrable element, `+` added whole, `-` removed whole, `~` changed, `>`
+moved, with what it is (the last name of its definition, else its element) and where; below one
+changed or moved, a line for each change in it. A value is named as `values` names it, an ECUC
+parameter or reference value by the last name of its definition:
+
+```
+~ /Cfg/Mod/Ch1  Channel  b.arxml:5:9
+    Id: 8 -> 10
+    + PartitionRef = /Cfg/Partition_1
++ /Cfg/Mod/Ch9  Channel, 1 inside  b.arxml:12:9
+```
+
+An element added or removed whole is one change, however much it holds. `--format json` writes the
+same as a report ([docs/report.md](docs/report.md#diff)): each element with its values, and the
+elements inside one added or removed whole; `--xml` adds such an element as the file has it.
+Exit 0 when the versions are the same model, 1 when they differ.
 
 `merge3 BASE OURS THEIRS [-o OUT]` merges two changed versions on their base with flatxml's
 three-way merge: every byte no change touched stays as the base has it. Where the sides change one
