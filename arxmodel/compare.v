@@ -456,6 +456,11 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {
 		return none
 	}
+	// two of one identity added alike but for what the merge lets differ are one addition, and
+	// ours is kept, as for an attribute it ignores
+	if c.kind == .added && r.alike(c.ours.new, c.theirs.new) {
+		return none
+	}
 	what := match c.kind {
 		.text {
 			'text ${show(c.ours.after)} / ${show(c.theirs.after)}'
@@ -489,13 +494,71 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	}
 }
 
+// alike reports whether a and b, nodes of two versions, are one node but for what the merge lets
+// differ: the attributes it ignores, layout, and content it does not compare. Compared node by
+// node, it stops at the first difference.
+fn (r &Ruling) alike(a flatxml.MNode, b flatxml.MNode) bool {
+	if a.name() != b.name() || own_text(a) != own_text(b) || r.kept_attrs(a) != r.kept_attrs(b) {
+		return false
+	}
+	xs, ys := r.compared(a), r.compared(b)
+	if xs.len != ys.len {
+		return false
+	}
+	for k, x in xs {
+		if !r.alike(x, ys[k]) {
+			return false
+		}
+	}
+	return true
+}
+
+// own_text is a node's own text, run by run, without layout: a run of blanks alone is none.
+fn own_text(n flatxml.MNode) string {
+	mut runs := []string{}
+	for run in n.text_runs() {
+		text := run.text.trim_space()
+		if text != '' {
+			runs << '${run.slot}\0${text}'
+		}
+	}
+	return runs.join('\0')
+}
+
+// kept_attrs is a node's attributes but those the merge ignores, each as name=value, sorted.
+fn (r &Ruling) kept_attrs(n flatxml.MNode) string {
+	tab := n.fragment(0).doc.tab
+	mut out := []string{}
+	for a in n.attrs() {
+		name := tab.name(a.tag)
+		if name !in r.ignore {
+			out << '${name}=${a.value}'
+		}
+	}
+	out.sort()
+	return out.join('\0')
+}
+
+// compared is a node's children but the content the merge does not compare.
+fn (r &Ruling) compared(n flatxml.MNode) []flatxml.MNode {
+	mut out := []flatxml.MNode{}
+	for c in n.children() {
+		if c.name() !in r.flat.ignored_content {
+			out << c
+		}
+	}
+	return out
+}
+
 // conflict_id is a hash of what a conflict is: where, what the base has there, and what each side
 // made of it. A removal or a move takes along all that a side changed in the node, so those count
 // too. Where a node lies in a file is left out, and so are the files' names, which are git's
-// temporary ones in a merge driver.
+// temporary ones in a merge driver. For two additions the node is the parent they were added to:
+// what the base has there is not the conflict, and in a long list it was most of the time a
+// merge took, hashed again for each such conflict.
 fn conflict_id(c flatxml.Conflict, path string, base &Version, ours &Version, theirs &Version, scopes &Scopes) string {
 	mut parts := ['${c.kind}', path, c.name, places_of(c.node, base.ix)]
-	parts << if c.node.ok() { own_xml(c.node) } else { '' }
+	parts << if c.node.ok() && c.kind != .added { own_xml(c.node) } else { '' }
 	parts << change_print(c.ours, ours)
 	parts << change_print(c.theirs, theirs)
 	if c.kind in [.removed, .moved] {
