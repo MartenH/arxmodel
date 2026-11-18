@@ -498,7 +498,7 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 // differ: the attributes it ignores, layout, and content it does not compare. Compared node by
 // node, it stops at the first difference.
 fn (r &Ruling) alike(a flatxml.MNode, b flatxml.MNode) bool {
-	if a.name() != b.name() || own_text(a) != own_text(b) || r.kept_attrs(a) != r.kept_attrs(b) {
+	if element_name(a) != element_name(b) || own_text(a) != own_text(b) || r.kept_attrs(a) != r.kept_attrs(b) {
 		return false
 	}
 	xs, ys := r.compared(a), r.compared(b)
@@ -511,6 +511,18 @@ fn (r &Ruling) alike(a flatxml.MNode, b flatxml.MNode) bool {
 		}
 	}
 	return true
+}
+
+// element_name is what names a node, as the diff compares it: its namespace and local name where
+// its document's names are resolved, its name as written where they are not. A ruling's names
+// can be as written, so one prefix bound to two namespaces would name two elements alike.
+fn element_name(n flatxml.MNode) string {
+	f := n.fragment(0)
+	d := f.doc
+	if d.ns.len != d.tag.len {
+		return n.name()
+	}
+	return '${d.ns_uri(d.ns[f.i])}\0${d.local_name(f.i)}'
 }
 
 // own_text is a node's own text, run by run, as the diff compares it: the parser has dropped the

@@ -174,18 +174,21 @@ fn test_merge3_two_additions_differ_in_what_the_diff_compares() {
 	// text is compared as the file has it, but for runs of layout alone, which are no text
 	side := added('<LAMP UUID="s1"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP>')
 	spaced := added('<LAMP UUID="s2"><SHORT-NAME>Side</SHORT-NAME><WATTS> 3</WATTS></LAMP>')
-	// an attribute is its expanded name: one prefix bound to two namespaces names two attributes
+	// an attribute or an element is its expanded name: one prefix bound to two namespaces names two
 	pkg := '<PACKAGE>'
 	ours_ns, theirs_ns := '<PACKAGE xmlns:ext="urn:one">', '<PACKAGE xmlns:ext="urn:two">'
 	mode := added('<LAMP UUID="s3" ext:mode="x"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP>')
+	data := added('<LAMP UUID="s4"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS><ext:data>x</ext:data></LAMP>')
 	r, v := builtin_versions(version_of('base'), version_of('ours', at, side), version_of('theirs', at,
 		spaced), version_of('ours_ns', pkg, ours_ns, at, mode), version_of('theirs_ns', pkg, theirs_ns,
-		at, mode))
+		at, mode), version_of('ours_el', pkg, ours_ns, at, data), version_of('theirs_el', pkg, theirs_ns,
+		at, data))
 	added_twice := fn (m Merged3) bool {
 		return m.conflicts.any(it.what.starts_with('two of one identity added'))
 	}
 	assert added_twice(r.merge3(&v[0], &v[1], &v[2])!)
 	assert added_twice(r.merge3(&v[0], &v[3], &v[4])!)
+	assert added_twice(r.merge3(&v[0], &v[5], &v[6])!)
 }
 
 fn test_merge3_decisions_take_a_side_and_are_tied_to_the_conflict() {
