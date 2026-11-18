@@ -456,6 +456,11 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	if c.kind == .moved && r.reordered(c.ours) && r.reordered(c.theirs) {
 		return none
 	}
+	// two of one identity added alike but for what the merge lets differ are one addition, and
+	// ours is kept, as for an attribute it ignores
+	if c.kind == .added && r.alike(c.ours.new, c.theirs.new) {
+		return none
+	}
 	what := match c.kind {
 		.text {
 			'text ${show(c.ours.after)} / ${show(c.theirs.after)}'
@@ -489,13 +494,89 @@ fn (r &Ruling) path_conflict(c flatxml.Conflict, base &Version, ours &Version, t
 	}
 }
 
+// alike reports whether a and b, nodes of two versions, are one node but for what the merge lets
+// differ: the attributes it ignores, layout, and content it does not compare. Compared node by
+// node, it stops at the first difference.
+fn (r &Ruling) alike(a flatxml.MNode, b flatxml.MNode) bool {
+	if element_name(a) != element_name(b) || own_text(a) != own_text(b) || r.kept_attrs(a) != r.kept_attrs(b) {
+		return false
+	}
+	xs, ys := r.compared(a), r.compared(b)
+	if xs.len != ys.len {
+		return false
+	}
+	for k, x in xs {
+		if !r.alike(x, ys[k]) {
+			return false
+		}
+	}
+	return true
+}
+
+// element_name is what names a node, as the diff compares it: its namespace and local name where
+// its document's names are resolved, its name as written where they are not. A ruling's names
+// can be as written, so one prefix bound to two namespaces would name two elements alike.
+fn element_name(n flatxml.MNode) string {
+	f := n.fragment(0)
+	d := f.doc
+	if d.ns.len != d.tag.len {
+		return n.name()
+	}
+	return '${d.ns_uri(d.ns[f.i])}\0${d.local_name(f.i)}'
+}
+
+// own_text is a node's own text, run by run, as the diff compares it: the parser has dropped the
+// runs that are layout alone, and what is left is the text.
+fn own_text(n flatxml.MNode) string {
+	return n.text_runs().map('${it.slot}\0${it.text}').join('\0')
+}
+
+// kept_attrs is a node's attributes but those the merge ignores, each by what identifies it (its
+// expanded name when it is in a namespace, as the diff compares it) with its value, sorted: from
+// the first contribution that has it, as the merge takes it.
+fn (r &Ruling) kept_attrs(n flatxml.MNode) string {
+	mut out := []string{}
+	mut seen := map[string]bool{}
+	for k in 0 .. n.fragment_count() {
+		f := n.fragment(k)
+		d := f.doc
+		lo, hi := d.attr_range(f.i)
+		for a := lo; a < hi; a++ {
+			if d.is_ns_decl(a) {
+				continue
+			}
+			id := d.tab.name(d.attr_id(a))
+			if id in seen || id in r.ignore || d.attr_name(a) in r.ignore {
+				continue
+			}
+			seen[id] = true
+			out << '${id}=${d.attr_value(a)}'
+		}
+	}
+	out.sort()
+	return out.join('\0')
+}
+
+// compared is a node's children but the content the merge does not compare.
+fn (r &Ruling) compared(n flatxml.MNode) []flatxml.MNode {
+	mut out := []flatxml.MNode{}
+	for c in n.children() {
+		if c.name() !in r.flat.ignored_content {
+			out << c
+		}
+	}
+	return out
+}
+
 // conflict_id is a hash of what a conflict is: where, what the base has there, and what each side
 // made of it. A removal or a move takes along all that a side changed in the node, so those count
 // too. Where a node lies in a file is left out, and so are the files' names, which are git's
-// temporary ones in a merge driver.
+// temporary ones in a merge driver. For two additions the node is the parent they were added to:
+// what the base has there is not the conflict, and in a long list it was most of the time a
+// merge took, hashed again for each such conflict.
 fn conflict_id(c flatxml.Conflict, path string, base &Version, ours &Version, theirs &Version, scopes &Scopes) string {
 	mut parts := ['${c.kind}', path, c.name, places_of(c.node, base.ix)]
-	parts << if c.node.ok() { own_xml(c.node) } else { '' }
+	parts << if c.node.ok() && c.kind != .added { own_xml(c.node) } else { '' }
 	parts << change_print(c.ours, ours)
 	parts << change_print(c.theirs, theirs)
 	if c.kind in [.removed, .moved] {

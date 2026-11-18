@@ -146,6 +146,51 @@ fn test_merge3_a_removal_takes_a_node_only_its_uuid_changed_on() {
 	assert r.merge3(&v[0], &v[3], &v[2])!.conflicts.len == 1
 }
 
+fn test_merge3_two_additions_alike_but_for_what_it_ignores_are_one() {
+	at := '<MODULE-VALUES>'
+	side := '<LAMP UUID="s1"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP>\n        ${at}'
+	// another UUID and another layout: the same lamp to the merge
+	alike := '<LAMP UUID="s2">\n          <SHORT-NAME>Side</SHORT-NAME>\n          <WATTS>3</WATTS>\n        </LAMP>\n        ${at}'
+	other := '<LAMP UUID="s3"><SHORT-NAME>Side</SHORT-NAME><WATTS>4</WATTS></LAMP>\n        ${at}'
+	// the same, with another list around the lamps: none of it is the conflict
+	tail, longer := '<WATTS>5</WATTS>', '<WATTS>6</WATTS>'
+	r, v := builtin_versions(version_of('base'), version_of('ours', at, side), version_of('theirs', at,
+		alike), version_of('other', at, other), version_of('base2', tail, longer), version_of('ours2',
+		at, side, tail, longer), version_of('other2', at, other, tail, longer))
+	mut one := r.merge3(&v[0], &v[1], &v[2])!
+	assert one.conflicts.len == 0
+	text := one.m3.edit.doc_edit(0).xml()
+	assert text.count('<SHORT-NAME>Side</SHORT-NAME>') == 1 && text.contains('UUID="s1"')
+	two := r.merge3(&v[0], &v[1], &v[3])!
+	assert two.conflicts.map(it.what) == ['two of one identity added (/Body/Side / /Body/Side)']
+	assert r.merge3(&v[4], &v[5], &v[6])!.conflicts.map(it.id) == two.conflicts.map(it.id)
+}
+
+fn test_merge3_two_additions_differ_in_what_the_diff_compares() {
+	at := '<MODULE-VALUES>'
+	added := fn [at] (lamp string) string {
+		return '${lamp}\n        ${at}'
+	}
+	// text is compared as the file has it, but for runs of layout alone, which are no text
+	side := added('<LAMP UUID="s1"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP>')
+	spaced := added('<LAMP UUID="s2"><SHORT-NAME>Side</SHORT-NAME><WATTS> 3</WATTS></LAMP>')
+	// an attribute or an element is its expanded name: one prefix bound to two namespaces names two
+	pkg := '<PACKAGE>'
+	ours_ns, theirs_ns := '<PACKAGE xmlns:ext="urn:one">', '<PACKAGE xmlns:ext="urn:two">'
+	mode := added('<LAMP UUID="s3" ext:mode="x"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS></LAMP>')
+	data := added('<LAMP UUID="s4"><SHORT-NAME>Side</SHORT-NAME><WATTS>3</WATTS><ext:data>x</ext:data></LAMP>')
+	r, v := builtin_versions(version_of('base'), version_of('ours', at, side), version_of('theirs', at,
+		spaced), version_of('ours_ns', pkg, ours_ns, at, mode), version_of('theirs_ns', pkg, theirs_ns,
+		at, mode), version_of('ours_el', pkg, ours_ns, at, data), version_of('theirs_el', pkg, theirs_ns,
+		at, data))
+	added_twice := fn (m Merged3) bool {
+		return m.conflicts.any(it.what.starts_with('two of one identity added'))
+	}
+	assert added_twice(r.merge3(&v[0], &v[1], &v[2])!)
+	assert added_twice(r.merge3(&v[0], &v[3], &v[4])!)
+	assert added_twice(r.merge3(&v[0], &v[5], &v[6])!)
+}
+
 fn test_merge3_decisions_take_a_side_and_are_tied_to_the_conflict() {
 	base := version_of('base')
 	ours := version_of('ours', '<WATTS>55</WATTS>', '<WATTS>60</WATTS>', '<WATTS>5</WATTS>',
