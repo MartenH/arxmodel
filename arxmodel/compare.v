@@ -513,26 +513,32 @@ fn (r &Ruling) alike(a flatxml.MNode, b flatxml.MNode) bool {
 	return true
 }
 
-// own_text is a node's own text, run by run, without layout: a run of blanks alone is none.
+// own_text is a node's own text, run by run, as the diff compares it: the parser has dropped the
+// runs that are layout alone, and what is left is the text.
 fn own_text(n flatxml.MNode) string {
-	mut runs := []string{}
-	for run in n.text_runs() {
-		text := run.text.trim_space()
-		if text != '' {
-			runs << '${run.slot}\0${text}'
-		}
-	}
-	return runs.join('\0')
+	return n.text_runs().map('${it.slot}\0${it.text}').join('\0')
 }
 
-// kept_attrs is a node's attributes but those the merge ignores, each as name=value, sorted.
+// kept_attrs is a node's attributes but those the merge ignores, each by what identifies it (its
+// expanded name when it is in a namespace, as the diff compares it) with its value, sorted: from
+// the first contribution that has it, as the merge takes it.
 fn (r &Ruling) kept_attrs(n flatxml.MNode) string {
-	tab := n.fragment(0).doc.tab
 	mut out := []string{}
-	for a in n.attrs() {
-		name := tab.name(a.tag)
-		if name !in r.ignore {
-			out << '${name}=${a.value}'
+	mut seen := map[string]bool{}
+	for k in 0 .. n.fragment_count() {
+		f := n.fragment(k)
+		d := f.doc
+		lo, hi := d.attr_range(f.i)
+		for a := lo; a < hi; a++ {
+			if d.is_ns_decl(a) {
+				continue
+			}
+			id := d.tab.name(d.attr_id(a))
+			if id in seen || id in r.ignore || d.attr_name(a) in r.ignore {
+				continue
+			}
+			seen[id] = true
+			out << '${id}=${d.attr_value(a)}'
 		}
 	}
 	out.sort()
